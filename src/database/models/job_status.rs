@@ -30,6 +30,7 @@ use strum::{Display, EnumIter, EnumString};
     Display,
 )]
 #[sea_orm(rs_type = "String", db_type = "Enum", enum_name = "job_status")]
+#[derive(Default)]
 pub enum JobStatus {
     /// Job is waiting to be picked up by a worker for the first time.
     ///
@@ -37,6 +38,7 @@ pub enum JobStatus {
     /// timestamp has been reached. This is the default state for newly created jobs.
     /// After a transient failure, jobs move to `PendingRetry` instead of back to this state.
     #[sea_orm(string_value = "pending")]
+    #[default]
     Pending,
 
     /// Job is waiting to be retried after a previous execution failed.
@@ -71,12 +73,6 @@ pub enum JobStatus {
     /// permanent failure, timeout, or after exceeding the maximum retry count.
     #[sea_orm(string_value = "failed")]
     Failed,
-}
-
-impl Default for JobStatus {
-    fn default() -> Self {
-        Self::Pending
-    }
 }
 
 #[allow(dead_code)]

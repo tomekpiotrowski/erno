@@ -7,7 +7,7 @@ use lettre::{transport::smtp::authentication::Credentials, AsyncSmtpTransport, T
 use sea_orm::{ConnectOptions, ConnectionTrait, DatabaseConnection, DbBackend, Statement};
 use sea_orm_migration::MigratorTrait;
 use tokio::sync::OnceCell;
-use tracing::{debug, trace};
+use tracing::debug;
 
 static DB_SCHEMA_INITIALIZED: OnceCell<()> = OnceCell::const_new();
 static TRACING_INITIALIZED: std::sync::Once = std::sync::Once::new();
