@@ -72,10 +72,7 @@ where
 {
     type Rejection = AuthError;
 
-    async fn from_request_parts<'life0, 'life1>(
-        parts: &'life0 mut Parts,
-        state: &'life1 S,
-    ) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         // Extract Authorization header
         let auth_header = parts
             .headers

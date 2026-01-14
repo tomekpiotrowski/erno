@@ -360,7 +360,7 @@ impl RateLimitState {
                 }
             }
 
-            !client.requests.is_empty() && client.requests.last().map_or(false, |&t| t > cutoff)
+            !client.requests.is_empty() && client.requests.last().is_some_and(|&t| t > cutoff)
         });
     }
 }

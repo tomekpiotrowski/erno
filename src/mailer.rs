@@ -14,6 +14,12 @@ pub struct MockTransport {
     messages: Arc<Mutex<Vec<Message>>>,
 }
 
+impl Default for MockTransport {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockTransport {
     /// Create a new mock transport
     pub fn new() -> Self {

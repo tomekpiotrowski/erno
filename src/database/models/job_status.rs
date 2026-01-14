@@ -79,6 +79,7 @@ impl Default for JobStatus {
     }
 }
 
+#[allow(dead_code)]
 impl JobStatus {
     /// Checks if this status represents a terminal state.
     ///

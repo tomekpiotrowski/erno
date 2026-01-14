@@ -35,6 +35,7 @@ impl Related<super::job::Entity> for Entity {
 
 impl ActiveModelBehavior for ActiveModel {}
 
+#[allow(dead_code)]
 impl Model {
     /// Calculate execution duration in milliseconds
     pub const fn execution_duration(&self) -> chrono::Duration {

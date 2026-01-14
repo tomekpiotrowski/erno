@@ -1,6 +1,6 @@
 pub mod macros;
 
-use sea_orm::{QueryFilter, Select};
+use sea_orm::Select;
 
 /// Policy trait for authorization logic.
 ///

@@ -25,6 +25,7 @@ pub enum JobResult {
     TimedOut,
 }
 
+#[allow(dead_code)]
 impl JobResult {
     pub const fn is_successful(&self) -> bool {
         matches!(self, Self::Completed)

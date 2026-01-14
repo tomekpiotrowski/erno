@@ -32,6 +32,7 @@ impl Related<super::job_execution::Entity> for Entity {
 
 impl ActiveModelBehavior for ActiveModel {}
 
+#[allow(dead_code)]
 impl Model {
     /// Mark the job as running
     pub const fn start(&mut self) {
