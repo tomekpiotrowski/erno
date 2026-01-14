@@ -93,8 +93,7 @@ where
         let claims = jwt::verify_token(&config, token).map_err(|_| AuthError::Unauthorized)?;
 
         // Parse user ID from claims
-        let user_id =
-            Uuid::parse_str(&claims.sub).map_err(|_| AuthError::Unauthorized)?;
+        let user_id = Uuid::parse_str(&claims.sub).map_err(|_| AuthError::Unauthorized)?;
 
         // Load user from database
         let db = DatabaseConnection::from_ref(state);
