@@ -1,0 +1,23 @@
+# Clippy configuration
+
+# Set minimum supported Rust version
+msrv = "1.88.0"
+
+# Disallow certain dangerous functions (but allow process::exit for CLI error handling)
+disallowed-methods = [
+    "std::panic::panic_any",
+]
+
+# Increase some thresholds for larger projects
+too-many-arguments-threshold = 8
+too-many-lines-threshold = 150
+
+# Allow some common patterns
+allow-expect-in-tests = true
+allow-unwrap-in-tests = true
+allow-panic-in-tests = true
+allow-print-in-tests = true
+# Lint configuration
+# Ignore missing documentation warnings
+# They will be addressed as part of documentation efforts
+missing-docs-in-crate-items = false
