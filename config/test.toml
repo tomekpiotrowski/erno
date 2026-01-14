@@ -1,0 +1,41 @@
+base_url = "http://localhost:3000"
+
+[tracing]
+log_level = "info"
+
+[database]
+url = "sqlite::memory:"
+pool_size = 5
+
+[server]
+port = 3000
+
+[email]
+type = "mock"
+
+[jwt]
+secret = "test_jwt_secret_for_testing_only_1234567890"
+expiration_days = 30
+
+[password_reset]
+token_expiration_hours = 24
+
+[jobs.cleanup]
+interval_seconds = 3600
+completed_retention_seconds = 7200
+failed_retention_seconds = 172800
+batch_size = 1000
+
+[jobs.workers.default]
+jobs = []
+count = 1
+job_timeout = 300
+max_retries = 4
+base_retry_delay_seconds = 60
+retry_backoff_multiplier = 5
+
+[rate_limiting]
+enabled = false
+default_window_secs = 60
+default_max_requests = 1000
+backoff_multiplier = 2.0

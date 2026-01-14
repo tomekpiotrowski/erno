@@ -10,7 +10,7 @@ use crate::{
     app::App,
     app_info::AppInfo,
     cli::{Cli, Commands},
-    commands::{console, db, db_reset, migrate, serve, version},
+    commands::{console, db, db_reset, migrate, routes, serve, version},
     config::Config,
     environment::Environment,
     jobs::{job_registry::JobRegistry, scheduled_job::ScheduledJob},
@@ -128,6 +128,9 @@ pub async fn handle_command<AppMigrator: MigratorTrait>(
         }
         Some(Commands::Version) => {
             version::print_version_info(app_info);
+        }
+        Some(Commands::Routes) => {
+            routes::handle_routes_command(app_router).await;
         }
         Some(Commands::Serve) | None => {
             serve::handle_serve_command::<AppMigrator>(

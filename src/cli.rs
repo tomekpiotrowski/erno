@@ -28,6 +28,8 @@ pub enum Commands {
     GenerateJwtSecret,
     /// Show version information
     Version,
+    /// List all application routes
+    Routes,
 }
 
 #[derive(Subcommand)]
