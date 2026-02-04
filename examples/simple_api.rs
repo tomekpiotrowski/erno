@@ -1,8 +1,4 @@
-use axum::{
-    extract::Path,
-    routing::get,
-    Json, Router,
-};
+use axum::{extract::Path, routing::get, Json, Router};
 use erno::{
     app::App,
     app_info::AppInfo,
@@ -122,7 +118,10 @@ fn app_router(_app: App) -> Router {
     Router::new()
         .route("/health", get(health_check))
         .route("/users", get(list_users).post(create_user))
-        .route("/users/{id}", get(get_user).put(update_user).delete(delete_user))
+        .route(
+            "/users/{id}",
+            get(get_user).put(update_user).delete(delete_user),
+        )
         .route("/posts", get(list_posts))
         .route("/posts/{id}", get(get_post))
 }

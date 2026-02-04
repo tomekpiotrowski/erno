@@ -133,22 +133,21 @@ impl Connections {
             while let Some(msg) = receiver.next().await {
                 match msg {
                     Ok(Message::Text(text)) => {
-                        if let Ok(ws_message) = serde_json::from_str::<WsMessage>(&text) {
-                            if let WsMessage::Request { request, id } = ws_message {
-                                let response = handle_request(request, &app_handler);
-                                let response_msg = WsMessage::Response { response, id };
+                        if let Ok(WsMessage::Request { request, id }) =
+                            serde_json::from_str::<WsMessage>(&text)
+                        {
+                            let response = handle_request(request, &app_handler);
+                            let response_msg = WsMessage::Response { response, id };
 
-                                if let Ok(serialized) = serde_json::to_string(&response_msg) {
-                                    // Send back through the user's connections
-                                    let connections_guard = connections.lock().await;
-                                    if let Some(user_connections) = connections_guard.get(&user_id)
+                            if let Ok(serialized) = serde_json::to_string(&response_msg) {
+                                // Send back through the user's connections
+                                let connections_guard = connections.lock().await;
+                                if let Some(user_connections) = connections_guard.get(&user_id) {
+                                    if let Some((_cid, tx)) = user_connections
+                                        .iter()
+                                        .find(|(cid, _)| *cid == connection_id)
                                     {
-                                        if let Some((_cid, tx)) = user_connections
-                                            .iter()
-                                            .find(|(cid, _)| *cid == connection_id)
-                                        {
-                                            let _ = tx.send(serialized);
-                                        }
+                                        let _ = tx.send(serialized);
                                     }
                                 }
                             }
