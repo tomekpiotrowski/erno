@@ -2,6 +2,7 @@ pub use sea_orm_migration::prelude::*;
 
 mod m20250805_180000_create_update_at_trigger;
 mod m20250805_192936_create_job;
+mod m20260203_190033_create_websocket_message;
 
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
@@ -9,6 +10,7 @@ impl MigratorTrait for Migrator {
         vec![
             Box::new(m20250805_180000_create_update_at_trigger::Migration),
             Box::new(m20250805_192936_create_job::Migration),
+            Box::new(m20260203_190033_create_websocket_message::Migration),
         ]
     }
 }

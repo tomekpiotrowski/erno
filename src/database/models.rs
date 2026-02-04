@@ -6,3 +6,4 @@ pub mod job;
 pub mod job_execution;
 pub mod job_result;
 pub mod job_status;
+pub mod websocket_message;

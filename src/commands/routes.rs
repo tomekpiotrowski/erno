@@ -1,7 +1,14 @@
 use axum::Router;
 use std::collections::BTreeMap;
 
-use crate::app::App;
+use crate::{
+    app::App,
+    environment::Environment,
+    job_queue::JobQueue,
+    mailer::Mailer,
+    rate_limiting::{rate_limit_state::RateLimitConfig, RateLimitState},
+    websocket::connections::Connections,
+};
 
 /// Handle the `routes` command - displays all registered application routes.
 ///
@@ -29,13 +36,12 @@ async fn create_dummy_app(config: crate::config::Config) -> App {
 
     App {
         config,
-        environment: crate::environment::Environment::Development,
+        environment: Environment::Development,
         db,
-        mailer: crate::mailer::Mailer::mock(),
-        job_queue: crate::job_queue::JobQueue::mock(),
-        rate_limit_state: crate::rate_limiting::RateLimitState::new(
-            crate::rate_limiting::rate_limit_state::RateLimitConfig::default(),
-        ),
+        mailer: Mailer::mock(),
+        job_queue: JobQueue::mock(),
+        rate_limit_state: RateLimitState::new(RateLimitConfig::default()),
+        websocket_connections: Connections::new(),
     }
 }
 
@@ -81,7 +87,7 @@ fn create_dummy_config() -> crate::config::Config {
                 workers: HashMap::new(),
             },
         },
-        rate_limiting: crate::rate_limiting::rate_limit_state::RateLimitConfig::default(),
+        rate_limiting: RateLimitConfig::default(),
     }
 }
 

@@ -7,10 +7,10 @@ use thiserror::Error;
 
 use crate::{
     config::Config, database::DatabaseSetupStatus, environment::Environment, job_queue::JobQueue,
-    jobs::Job, mailer::Mailer, rate_limiting::RateLimitState,
+    jobs::Job, mailer::Mailer, rate_limiting::RateLimitState, websocket::connections::Connections,
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct App {
     pub config: Config,
     pub environment: Environment,
@@ -18,6 +18,7 @@ pub struct App {
     pub mailer: Mailer,
     pub job_queue: JobQueue,
     pub rate_limit_state: RateLimitState,
+    pub websocket_connections: Connections,
 }
 
 impl App {

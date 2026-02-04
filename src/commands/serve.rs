@@ -17,6 +17,7 @@ use crate::{
         job_registry::JobRegistry, job_supervisor::job_supervisor, scheduled_job::ScheduledJob,
     },
     router::router,
+    websocket::connections::Connections,
 };
 
 pub async fn handle_serve_command<AppMigrator: MigratorTrait>(
@@ -82,6 +83,9 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait>(
     // Initialize rate limiting state
     let rate_limit_state = crate::rate_limiting::RateLimitState::new(config.rate_limiting.clone());
 
+    // Initialize WebSocket connections manager
+    let websocket_connections = Connections::new();
+
     let app = App {
         config: config.clone(),
         environment,
@@ -89,6 +93,7 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait>(
         mailer,
         job_queue,
         rate_limit_state,
+        websocket_connections: websocket_connections.clone(),
     };
 
     // Spawn workers in the background
@@ -98,6 +103,13 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait>(
         job_registry,
         job_schedule,
     ));
+
+    // Spawn WebSocket listener in the background
+    let listener_db = db.clone();
+    let listener_connections = websocket_connections.clone();
+    tokio::spawn(async move {
+        crate::websocket::listener::start_listener(listener_db, listener_connections).await;
+    });
 
     // Stop the temporary liveness server
     liveness_server_task.abort();
