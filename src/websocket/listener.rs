@@ -1,9 +1,8 @@
-use sea_orm::{ConnectionTrait, DatabaseBackend, DatabaseConnection, EntityTrait};
+use sea_orm::{ConnectionTrait, DatabaseBackend, DatabaseConnection, EntityTrait, QueryOrder};
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgListener;
 use tokio::time::{sleep, Duration};
-use tracing::{error, info, warn};
-use uuid::Uuid;
+use tracing::{debug, error, info, warn};
 
 use crate::database::models::websocket_message::Entity as WebsocketMessage;
 use crate::websocket::connections::{Connections, UserId};
@@ -48,72 +47,86 @@ async fn listen_loop(
     info!("WebSocket listener started, listening on channel 'websocket_new_message'");
 
     loop {
-        let notification = listener.recv().await?;
-        let message_id = notification.payload();
+        // Wait for notification (payload is ignored - just a wake-up signal)
+        listener.recv().await?;
 
-        info!("Received notification for message_id: {}", message_id);
+        info!("Received WebSocket message notification, draining queue...");
 
-        // Parse the message ID
-        let message_id = match Uuid::parse_str(message_id) {
-            Ok(id) => id,
-            Err(e) => {
-                error!("Failed to parse message_id '{}': {:?}", message_id, e);
-                continue;
-            }
-        };
+        // Process ALL pending messages until queue is empty
+        let mut processed_count = 0;
+        loop {
+            // Fetch oldest unprocessed message
+            let message = match WebsocketMessage::find()
+                .order_by_asc(crate::database::models::websocket_message::Column::CreatedAt)
+                .one(db)
+                .await
+            {
+                Ok(Some(msg)) => msg,
+                Ok(None) => {
+                    // No more messages, wait for next notification
+                    if processed_count > 0 {
+                        info!(
+                            "WebSocket message queue drained ({} messages processed)",
+                            processed_count
+                        );
+                    }
+                    break;
+                }
+                Err(e) => {
+                    error!("Failed to fetch pending messages: {:?}", e);
+                    break;
+                }
+            };
 
-        // Fetch the message from the database
-        let message = match WebsocketMessage::find_by_id(message_id).one(db).await {
-            Ok(Some(msg)) => msg,
-            Ok(None) => {
-                warn!("Message {} not found in database", message_id);
-                continue;
-            }
-            Err(e) => {
-                error!("Failed to fetch message {}: {:?}", message_id, e);
-                continue;
-            }
-        };
+            let message_id = message.id;
 
-        // Parse recipient criteria
-        let criteria: RecipientCriteria = match serde_json::from_value(message.recipient_criteria) {
-            Ok(c) => c,
-            Err(e) => {
-                error!(
-                    "Failed to parse recipient_criteria for message {}: {:?}",
-                    message_id, e
-                );
-                continue;
-            }
-        };
+            // Parse recipient criteria
+            let criteria: RecipientCriteria =
+                match serde_json::from_value(message.recipient_criteria) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        error!(
+                            "Failed to parse recipient_criteria for message {}: {:?}",
+                            message_id, e
+                        );
+                        // Delete invalid message to prevent infinite loop
+                        let _ = WebsocketMessage::delete_by_id(message_id).exec(db).await;
+                        continue;
+                    }
+                };
 
-        // Convert payload to string for sending
-        let payload = match serde_json::to_string(&message.payload) {
-            Ok(p) => p,
-            Err(e) => {
-                error!(
-                    "Failed to serialize payload for message {}: {:?}",
-                    message_id, e
-                );
-                continue;
-            }
-        };
+            // Convert payload to string for sending
+            let payload = match serde_json::to_string(&message.payload) {
+                Ok(p) => p,
+                Err(e) => {
+                    error!(
+                        "Failed to serialize payload for message {}: {:?}",
+                        message_id, e
+                    );
+                    // Delete invalid message to prevent infinite loop
+                    let _ = WebsocketMessage::delete_by_id(message_id).exec(db).await;
+                    continue;
+                }
+            };
 
-        // Broadcast based on criteria
-        match criteria {
-            RecipientCriteria::User { user_id } => {
-                info!("Sending message to user {}", user_id);
-                connections.send_to_user(user_id, payload).await;
+            // Broadcast based on criteria
+            match criteria {
+                RecipientCriteria::User { user_id } => {
+                    debug!("Sending message {} to user {}", message_id, user_id);
+                    connections.send_to_user(user_id, payload).await;
+                }
+                RecipientCriteria::All => {
+                    debug!("Broadcasting message {} to all users", message_id);
+                    connections.send_to_all(payload).await;
+                }
             }
-            RecipientCriteria::All => {
-                info!("Broadcasting message to all users");
-                connections.send_to_all(payload).await;
-            }
-        }
 
-        // Delete the message after processing
-        if let Err(e) = WebsocketMessage::delete_by_id(message_id).exec(db).await {
-            error!("Failed to delete message {}: {:?}", message_id, e);
+            // Delete the message after processing
+            if let Err(e) = WebsocketMessage::delete_by_id(message_id).exec(db).await {
+                error!("Failed to delete message {}: {:?}", message_id, e);
+            }
+
+            processed_count += 1;
         }
     }
 }

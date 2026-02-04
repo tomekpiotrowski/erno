@@ -142,14 +142,41 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
+        // Create NOTIFY trigger for instant job pickup
+        manager
+            .get_connection()
+            .execute_unprepared(
+                r"
+                CREATE OR REPLACE FUNCTION notify_job_insert()
+                RETURNS trigger AS $$
+                BEGIN
+                    PERFORM pg_notify('job_new', NEW.id::text);
+                    RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql;
+
+                CREATE TRIGGER job_insert_notify
+                    AFTER INSERT ON job
+                    FOR EACH ROW
+                    EXECUTE FUNCTION notify_job_insert();
+                ",
+            )
+            .await?;
+
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Drop the trigger first
+        // Drop the triggers first
         manager
             .get_connection()
-            .execute_unprepared("DROP TRIGGER IF EXISTS update_job_updated_at ON job;")
+            .execute_unprepared(
+                r"
+                DROP TRIGGER IF EXISTS job_insert_notify ON job;
+                DROP FUNCTION IF EXISTS notify_job_insert();
+                DROP TRIGGER IF EXISTS update_job_updated_at ON job;
+                ",
+            )
             .await?;
 
         // Drop tables

@@ -3,6 +3,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter, QueryOrder,
     QuerySelect, TransactionTrait,
 };
+use sqlx::postgres::PgListener;
 use std::time::{Duration, Instant};
 use tokio::time::{sleep, timeout};
 use tracing::{debug, error, info, warn};
@@ -23,37 +24,112 @@ use crate::{
 
 use super::job_registry::JobRegistry;
 
+const FALLBACK_POLL_INTERVAL_SECS: u64 = 30;
+
 pub async fn worker(
     worker_instance_name: &str,
     worker_config: &WorkerQueueConfig,
     app: App,
     job_registry: &JobRegistry,
 ) -> Result<(), DbErr> {
+    // Try to set up LISTEN for instant job notifications
+    let sqlx_pool = app.db.get_postgres_connection_pool();
+    let mut listener = match PgListener::connect_with(sqlx_pool).await {
+        Ok(mut l) => {
+            if let Err(e) = l.listen("job_new").await {
+                warn!(
+                    "Worker '{}' failed to LISTEN on 'job_new': {}. Using polling fallback.",
+                    worker_instance_name, e
+                );
+                None
+            } else {
+                info!(
+                    "Worker '{}' listening for instant job notifications",
+                    worker_instance_name
+                );
+                Some(l)
+            }
+        }
+        Err(e) => {
+            warn!(
+                "Worker '{}' failed to create PgListener: {}. Using polling fallback.",
+                worker_instance_name, e
+            );
+            None
+        }
+    };
+
     loop {
-        // Try to claim the oldest viable job (pending, failed, or timed out)
-        let job_option = claim_oldest_viable_job(worker_config, &app.db).await?;
+        // Try to claim and execute all available jobs (drain the queue)
+        let mut jobs_processed = 0;
+        loop {
+            let job_option = claim_oldest_viable_job(worker_config, &app.db).await?;
 
-        let Some(job) = job_option else {
+            let Some(job) = job_option else {
+                // No more jobs available
+                if jobs_processed > 0 {
+                    debug!(
+                        "Worker '{}' processed {} job(s), queue drained",
+                        worker_instance_name, jobs_processed
+                    );
+                }
+                break;
+            };
+
+            debug!(
+                "🔧 Worker '{worker_instance_name}' claimed {status} {1}({0})",
+                job.id,
+                job.r#type,
+                status = job.status,
+            );
+
+            // Execute the job
+            execute_and_update_job(
+                &job,
+                worker_config,
+                &app,
+                job_registry,
+                worker_instance_name,
+            )
+            .await?;
+
+            jobs_processed += 1;
+        }
+
+        // No jobs available, wait for notification or timeout
+        if let Some(ref mut l) = listener {
+            // Wait for NOTIFY or timeout after fallback interval
+            match timeout(Duration::from_secs(FALLBACK_POLL_INTERVAL_SECS), l.recv()).await {
+                Ok(Ok(_notification)) => {
+                    // Received notification, loop to drain queue
+                    debug!(
+                        "Worker '{}' received job notification",
+                        worker_instance_name
+                    );
+                    continue;
+                }
+                Ok(Err(e)) => {
+                    // PgListener error, fall back to polling
+                    error!(
+                        "Worker '{}' PgListener error: {}. Switching to polling.",
+                        worker_instance_name, e
+                    );
+                    listener = None;
+                    sleep(Duration::from_secs(1)).await;
+                }
+                Err(_) => {
+                    // Timeout - fallback poll interval elapsed
+                    debug!(
+                        "Worker '{}' polling (no notifications for {}s)",
+                        worker_instance_name, FALLBACK_POLL_INTERVAL_SECS
+                    );
+                    continue;
+                }
+            }
+        } else {
+            // No listener, use simple polling
             sleep(Duration::from_secs(1)).await;
-            continue;
-        };
-
-        debug!(
-            "🔧 Worker '{worker_instance_name}' claimed {status} {1}({0})",
-            job.id,
-            job.r#type,
-            status = job.status,
-        );
-
-        // Execute the job
-        execute_and_update_job(
-            &job,
-            worker_config,
-            &app,
-            job_registry,
-            worker_instance_name,
-        )
-        .await?;
+        }
     }
 }
 
