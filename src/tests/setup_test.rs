@@ -1,11 +1,6 @@
 use crate::{
-    app::App,
-    boot::read_config,
-    environment::Environment,
-    mailer::Mailer,
-    rate_limiting::{rate_limit_state::RateLimitConfig, RateLimitState},
-    router::router,
-    websocket::connections::Connections,
+    app::App, boot::read_config, environment::Environment, mailer::Mailer,
+    rate_limiting::RateLimitState, router::router, websocket::connections::Connections,
 };
 use axum::Router;
 use lettre::{transport::smtp::authentication::Credentials, AsyncSmtpTransport, Tokio1Executor};
@@ -83,7 +78,7 @@ async fn initialize_database_schema<AppMigrator: MigratorTrait>(fixture_loader: 
 
     let environment = Environment::Test;
     trace!("Reading test configuration");
-    let app_config = read_config(&environment);
+    let app_config = read_config::<()>(&environment);
 
     // Connect to database for schema initialization
     debug!("Connecting to test database for schema setup");
@@ -201,10 +196,9 @@ pub async fn setup_test<AppMigrator: MigratorTrait>(
     let job_queue = crate::job_queue::JobQueue::mock();
 
     // Initialize rate limiting with default config for tests
-    let rate_limit_state = RateLimitState::new(RateLimitConfig::default());
-
-    // Initialize WebSocket connections for tests
-    let websocket_connections = Connections::new();
+    let rate_limit_state = crate::rate_limiting::RateLimitState::new(
+        crate::rate_limiting::rate_limit_state::RateLimitConfig::default(),
+    );
 
     let app = App {
         config: app_config.clone(),
@@ -213,7 +207,7 @@ pub async fn setup_test<AppMigrator: MigratorTrait>(
         mailer: mailer.clone(),
         job_queue: job_queue.clone(),
         rate_limit_state,
-        websocket_connections,
+        websocket_connections: Connections::new(),
     };
 
     let test_router = router(app, app_router);

@@ -35,8 +35,8 @@ pub struct Claims {
 ///
 /// # Errors
 /// Returns `jsonwebtoken::errors::Error` if token encoding fails
-pub fn generate_token(
-    config: &Config,
+pub fn generate_token<ExtraConfig>(
+    config: &Config<ExtraConfig>,
     user_id: Uuid,
 ) -> Result<String, jsonwebtoken::errors::Error> {
     let now = Utc::now().timestamp() as usize;
@@ -68,7 +68,10 @@ pub fn generate_token(
 ///
 /// # Errors
 /// Returns `jsonwebtoken::errors::Error` if token is invalid, expired, or malformed
-pub fn verify_token(config: &Config, token: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
+pub fn verify_token<ExtraConfig>(
+    config: &Config<ExtraConfig>,
+    token: &str,
+) -> Result<Claims, jsonwebtoken::errors::Error> {
     let token_data = decode::<Claims>(
         token,
         &DecodingKey::from_secret(config.jwt.secret.as_bytes()),

@@ -19,11 +19,11 @@ pub enum JobError {
     TryAgainLater(String),
 }
 
-pub trait Job: Send + Sync {
+pub trait Job<ExtraConfig = ()>: Send + Sync {
     type Arguments: DeserializeOwned + Send + Sync;
 
     fn execute(
-        app: &App,
+        app: &App<ExtraConfig>,
         arguments: Self::Arguments,
     ) -> impl Future<Output = Result<(), JobError>> + Send;
 

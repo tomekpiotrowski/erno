@@ -26,12 +26,15 @@ use super::job_registry::JobRegistry;
 
 const FALLBACK_POLL_INTERVAL_SECS: u64 = 30;
 
-pub async fn worker(
+pub async fn worker<ExtraConfig>(
     worker_instance_name: &str,
     worker_config: &WorkerQueueConfig,
-    app: App,
-    job_registry: &JobRegistry,
-) -> Result<(), DbErr> {
+    app: App<ExtraConfig>,
+    job_registry: &JobRegistry<ExtraConfig>,
+) -> Result<(), DbErr>
+where
+    ExtraConfig: Clone + Send + Sync + 'static,
+{
     // Try to set up LISTEN for instant job notifications
     let sqlx_pool = app.db.get_postgres_connection_pool();
     let mut listener = match PgListener::connect_with(sqlx_pool).await {
@@ -133,13 +136,16 @@ pub async fn worker(
     }
 }
 
-async fn execute_and_update_job(
+async fn execute_and_update_job<ExtraConfig>(
     job_model: &job::Model,
     worker_config: &WorkerQueueConfig,
-    app: &App,
-    job_registry: &JobRegistry,
+    app: &App<ExtraConfig>,
+    job_registry: &JobRegistry<ExtraConfig>,
     worker_instance_name: &str,
-) -> Result<(), DbErr> {
+) -> Result<(), DbErr>
+where
+    ExtraConfig: Clone + Send + Sync + 'static,
+{
     // Execute the job and measure execution time
     let start_time = Instant::now();
     let timeout_duration = Duration::from_secs(u64::from(worker_config.job_timeout));

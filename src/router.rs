@@ -6,7 +6,10 @@ use crate::{
     websocket::auth::authenticated_ws_handler,
 };
 
-pub fn router(app: App, app_router: fn(App) -> Router) -> Router {
+pub fn router<ExtraConfig>(app: App<ExtraConfig>, app_router: fn(App<ExtraConfig>) -> Router) -> Router
+where
+    ExtraConfig: Clone + Send + Sync + 'static,
+{
     let rate_limit_state = app.rate_limit_state.clone();
     let rate_limiting_enabled = app.config.rate_limiting.enabled;
 

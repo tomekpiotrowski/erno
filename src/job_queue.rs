@@ -30,12 +30,13 @@ impl JobQueue {
     }
 
     /// Schedule a job
-    pub async fn add<J: Job>(
+    pub async fn add<J, ExtraConfig>(
         &self,
         db: &sea_orm::DatabaseConnection,
         arguments: J::Arguments,
     ) -> Result<(), sea_orm::DbErr>
     where
+        J: Job<ExtraConfig>,
         J::Arguments: serde::Serialize,
     {
         match self {

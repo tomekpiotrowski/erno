@@ -38,8 +38,8 @@ impl From<Box<dyn std::error::Error + Send + Sync>> for EmailError {
     }
 }
 
-pub async fn send_html_email(
-    app: &App,
+pub async fn send_html_email<ExtraConfig>(
+    app: &App<ExtraConfig>,
     recipient: &str,
     subject: &str,
     body: String,
@@ -72,8 +72,8 @@ pub async fn send_html_email(
 /// This is the preferred method for sending emails as it provides better
 /// accessibility and compatibility. Email clients will automatically choose
 /// the best format for the user.
-pub async fn send_multipart_email(
-    app: &App,
+pub async fn send_multipart_email<ExtraConfig>(
+    app: &App<ExtraConfig>,
     recipient: &str,
     subject: &str,
     text_body: String,

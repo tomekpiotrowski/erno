@@ -3,6 +3,7 @@ use std::{env, str::FromStr as _};
 use axum::Router;
 use clap::Parser as _;
 use config_rs::Config as ConfigRs;
+use serde::de::DeserializeOwned;
 use sea_orm_migration::MigratorTrait;
 use tracing::{debug, trace};
 
@@ -23,19 +24,19 @@ const ENVIRONMENT_VARIABLE: &str = "APP_ENVIRONMENT";
 ///
 /// Contains all the necessary components to start the application,
 /// including metadata, routing, job processing, and scheduling.
-pub struct BootConfig {
+pub struct BootConfig<ExtraConfig = ()> {
     pub app_info: AppInfo,
-    pub app_router: fn(App) -> Router,
-    pub job_registry: JobRegistry,
+    pub app_router: fn(App<ExtraConfig>) -> Router,
+    pub job_registry: JobRegistry<ExtraConfig>,
     pub job_schedule: Vec<ScheduledJob>,
 }
 
-impl BootConfig {
+impl<ExtraConfig> BootConfig<ExtraConfig> {
     #[must_use]
     pub const fn new(
         app_info: AppInfo,
-        app_router: fn(App) -> Router,
-        job_registry: JobRegistry,
+        app_router: fn(App<ExtraConfig>) -> Router,
+        job_registry: JobRegistry<ExtraConfig>,
         job_schedule: Vec<ScheduledJob>,
     ) -> Self {
         Self {
@@ -47,7 +48,10 @@ impl BootConfig {
     }
 }
 
-pub async fn boot<AppMigrator: MigratorTrait>(config: BootConfig) {
+pub async fn boot<AppMigrator: MigratorTrait, ExtraConfig>(config: BootConfig<ExtraConfig>)
+where
+    ExtraConfig: Clone + Default + DeserializeOwned + Send + Sync + 'static,
+{
     let cli = Cli::parse();
 
     if matches!(cli.command, Some(Commands::Version)) {
@@ -57,15 +61,15 @@ pub async fn boot<AppMigrator: MigratorTrait>(config: BootConfig) {
 
     let environment = set_environment();
 
-    let app_config = read_config(&environment);
+    let app_config = read_config::<ExtraConfig>(&environment);
 
     // Set up tracing with appropriate level based on command
     setup_tracing_for_command(&cli.command, &app_config.tracing.log_level);
 
     debug!("Environment set to: {:?}", environment);
-    trace!("Configuration loaded: {:?}", app_config);
+    trace!("Configuration loaded");
 
-    handle_command::<AppMigrator>(
+    handle_command::<AppMigrator, ExtraConfig>(
         environment,
         app_config,
         cli,
@@ -85,7 +89,10 @@ pub fn set_environment() -> Environment {
         .unwrap_or_default()
 }
 
-pub fn read_config(environment: &Environment) -> Config {
+pub fn read_config<ExtraConfig>(environment: &Environment) -> Config<ExtraConfig>
+where
+    ExtraConfig: Default + DeserializeOwned,
+{
     let config_file_name = format!("config/{environment}");
 
     trace!("Reading configuration from: {}", config_file_name);
@@ -99,25 +106,27 @@ pub fn read_config(environment: &Environment) -> Config {
         .expect("Failed to deserialize configuration")
 }
 
-pub async fn handle_command<AppMigrator: MigratorTrait>(
+pub async fn handle_command<AppMigrator: MigratorTrait, ExtraConfig>(
     environment: Environment,
-    config: Config,
+    config: Config<ExtraConfig>,
     cli: Cli,
-    app_router: fn(App) -> Router,
-    job_registry: JobRegistry,
+    app_router: fn(App<ExtraConfig>) -> Router,
+    job_registry: JobRegistry<ExtraConfig>,
     job_schedule: Vec<ScheduledJob>,
     app_info: AppInfo,
-) {
+) where
+    ExtraConfig: Clone + Default + DeserializeOwned + Send + Sync + 'static,
+{
     match cli.command {
         Some(Commands::Migrate { action }) => {
-            migrate::handle_migrate_command::<AppMigrator>(&config, action).await;
+            migrate::handle_migrate_command::<AppMigrator, ExtraConfig>(&config, action).await;
         }
         Some(Commands::Db { action }) => match action {
             Some(crate::cli::DbAction::Console) | None => {
                 db::handle_db_console_command(&config);
             }
             Some(crate::cli::DbAction::Reset) => {
-                db_reset::handle_db_reset_command::<AppMigrator>(&config).await;
+                db_reset::handle_db_reset_command::<AppMigrator, ExtraConfig>(&config).await;
             }
         },
         Some(Commands::Console) => {
@@ -130,10 +139,10 @@ pub async fn handle_command<AppMigrator: MigratorTrait>(
             version::print_version_info(app_info);
         }
         Some(Commands::Routes) => {
-            routes::handle_routes_command(app_router).await;
+            routes::handle_routes_command::<ExtraConfig>(app_router).await;
         }
         Some(Commands::Serve) | None => {
-            serve::handle_serve_command::<AppMigrator>(
+            serve::handle_serve_command::<AppMigrator, ExtraConfig>(
                 environment,
                 config,
                 app_router,

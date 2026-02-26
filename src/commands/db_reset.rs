@@ -10,17 +10,17 @@ use crate::{cli::MigrateAction, config::Config};
 /// Drops and recreates the database, then runs all migrations. This provides
 /// a completely clean database state. This command connects to the postgres
 /// database to drop/create the target database.
-pub async fn handle_db_reset_command<AppMigrator: sea_orm_migration::MigratorTrait>(
-    config: &Config,
+pub async fn handle_db_reset_command<AppMigrator: sea_orm_migration::MigratorTrait, ExtraConfig>(
+    config: &Config<ExtraConfig>,
 ) {
-    if let Err(e) = reset_database::<AppMigrator>(config).await {
+    if let Err(e) = reset_database::<AppMigrator, ExtraConfig>(config).await {
         eprintln!("❌ Database reset failed: {e}");
         process::exit(1);
     }
 }
 
-async fn reset_database<AppMigrator: sea_orm_migration::MigratorTrait>(
-    config: &Config,
+async fn reset_database<AppMigrator: sea_orm_migration::MigratorTrait, ExtraConfig>(
+    config: &Config<ExtraConfig>,
 ) -> Result<(), Box<dyn Error>> {
     info!("🔄 Resetting database (this will drop and recreate the database!)...");
 

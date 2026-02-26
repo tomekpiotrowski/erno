@@ -7,10 +7,12 @@ use crate::{
     {cli::MigrateAction, config::Config},
 };
 
-pub async fn handle_migrate_command<AppMigrator: sea_orm_migration::MigratorTrait>(
-    config: &Config,
+pub async fn handle_migrate_command<AppMigrator: sea_orm_migration::MigratorTrait, ExtraConfig>(
+    config: &Config<ExtraConfig>,
     action: MigrateAction,
-) {
+) where
+    ExtraConfig: Clone,
+{
     // Create a simple connection just for migrations (no background setup)
     let db = setup_database_connection(&config.database).await;
 

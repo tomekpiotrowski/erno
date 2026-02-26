@@ -20,13 +20,15 @@ use crate::{
     websocket::connections::Connections,
 };
 
-pub async fn handle_serve_command<AppMigrator: MigratorTrait>(
+pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
     environment: Environment,
-    config: Config,
-    app_router: fn(App) -> Router,
-    job_registry: JobRegistry,
+    config: Config<ExtraConfig>,
+    app_router: fn(App<ExtraConfig>) -> Router,
+    job_registry: JobRegistry<ExtraConfig>,
     job_schedule: Vec<ScheduledJob>,
-) {
+) where
+    ExtraConfig: Clone + Send + Sync + 'static,
+{
     let port = config.server.port;
 
     // We start a temporary liveness server for Kubernetes to know that the application is alive

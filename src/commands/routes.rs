@@ -15,11 +15,14 @@ use crate::{
 /// This command creates a minimal App instance and builds the router to display
 /// the routes available in your application. It uses the router's debug output
 /// to extract route information.
-pub async fn handle_routes_command(app_router: fn(App) -> Router) {
+pub async fn handle_routes_command<ExtraConfig>(app_router: fn(App<ExtraConfig>) -> Router)
+where
+    ExtraConfig: Clone + Default + Send + Sync + 'static,
+{
     println!("📍 Application Routes\n");
 
     // Create a dummy app with minimal configuration to build the router
-    let dummy_config = create_dummy_config();
+    let dummy_config = create_dummy_config::<ExtraConfig>();
     let dummy_app = create_dummy_app(dummy_config).await;
 
     // Build the full router
@@ -29,7 +32,9 @@ pub async fn handle_routes_command(app_router: fn(App) -> Router) {
     extract_and_print_routes(router);
 }
 
-async fn create_dummy_app(config: crate::config::Config) -> App {
+async fn create_dummy_app<ExtraConfig>(
+    config: crate::config::Config<ExtraConfig>,
+) -> App<ExtraConfig> {
     // For route inspection, we don't actually need a real database connection
     // We use a special mock connection that won't be used
     let db = create_dummy_database_connection().await;
@@ -60,7 +65,10 @@ async fn create_dummy_database_connection() -> sea_orm::DatabaseConnection {
         .expect("Failed to create dummy database connection for route inspection")
 }
 
-fn create_dummy_config() -> crate::config::Config {
+fn create_dummy_config<ExtraConfig>() -> crate::config::Config<ExtraConfig>
+where
+    ExtraConfig: Default,
+{
     use std::collections::HashMap;
 
     crate::config::Config {
@@ -88,6 +96,7 @@ fn create_dummy_config() -> crate::config::Config {
             },
         },
         rate_limiting: RateLimitConfig::default(),
+        extra: ExtraConfig::default(),
     }
 }
 

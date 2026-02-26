@@ -11,8 +11,8 @@ use crate::{
 };
 
 #[derive(Clone)]
-pub struct App {
-    pub config: Config,
+pub struct App<ExtraConfig = ()> {
+    pub config: Config<ExtraConfig>,
     pub environment: Environment,
     pub db: DatabaseConnection,
     pub mailer: Mailer,
@@ -21,12 +21,13 @@ pub struct App {
     pub websocket_connections: Connections,
 }
 
-impl App {
-    pub async fn run_job<J: Job>(&self, arguments: J::Arguments) -> Result<(), sea_orm::DbErr>
+impl<ExtraConfig> App<ExtraConfig> {
+    pub async fn run_job<J>(&self, arguments: J::Arguments) -> Result<(), sea_orm::DbErr>
     where
+        J: Job<ExtraConfig>,
         J::Arguments: serde::Serialize,
     {
-        self.job_queue.add::<J>(&self.db, arguments).await
+        self.job_queue.add::<J, ExtraConfig>(&self.db, arguments).await
     }
 }
 

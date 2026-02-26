@@ -8,25 +8,31 @@ use super::{job_result::JobResult, Job, JobError};
 
 /// Type alias for job executor function to reduce type complexity
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
-type JobExecutor =
-    Arc<dyn Fn(&App, serde_json::Value) -> BoxFuture<'static, Result<(), JobError>> + Send + Sync>;
+type JobExecutor<ExtraConfig> = Arc<
+    dyn Fn(&App<ExtraConfig>, serde_json::Value) -> BoxFuture<'static, Result<(), JobError>>
+        + Send
+        + Sync,
+>;
 
 #[derive(Clone)]
-pub struct JobRegistry {
-    jobs: HashMap<&'static str, JobExecutor>,
+pub struct JobRegistry<ExtraConfig = ()> {
+    jobs: HashMap<&'static str, JobExecutor<ExtraConfig>>,
 }
 
-impl JobRegistry {
+impl<ExtraConfig> JobRegistry<ExtraConfig>
+where
+    ExtraConfig: Clone + Send + Sync + 'static,
+{
     pub fn new() -> Self {
         Self {
             jobs: HashMap::new(),
         }
     }
 
-    pub fn register_job<J: Job + 'static>(&mut self) {
+    pub fn register_job<J: Job<ExtraConfig> + 'static>(&mut self) {
         self.jobs.insert(
             J::name(),
-            Arc::new(|app: &App, args_json: serde_json::Value| {
+            Arc::new(|app: &App<ExtraConfig>, args_json: serde_json::Value| {
                 let app = app.clone();
                 Box::pin(async move {
                     let arguments: J::Arguments =
@@ -45,7 +51,7 @@ impl JobRegistry {
 
     pub(crate) async fn execute(
         &self,
-        app: &App,
+        app: &App<ExtraConfig>,
         r#type: &str,
         arguments: &serde_json::Value,
     ) -> super::job_result::JobResult {
@@ -62,7 +68,10 @@ impl JobRegistry {
     }
 }
 
-impl Default for JobRegistry {
+impl<ExtraConfig> Default for JobRegistry<ExtraConfig>
+where
+    ExtraConfig: Clone + Send + Sync + 'static,
+{
     fn default() -> Self {
         Self::new()
     }

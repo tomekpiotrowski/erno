@@ -146,5 +146,5 @@ fn boot_config() -> BootConfig {
 
 #[tokio::main]
 async fn main() {
-    boot::<Migrator>(boot_config()).await;
+    boot::<Migrator, ()>(boot_config()).await;
 }

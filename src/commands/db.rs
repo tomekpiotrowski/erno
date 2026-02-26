@@ -5,7 +5,7 @@ use std::{
 
 use crate::config::{Config, DatabaseConfig};
 
-pub fn handle_db_console_command(config: &Config) {
+pub fn handle_db_console_command<ExtraConfig>(config: &Config<ExtraConfig>) {
     println!("🗄️  Opening database connection with psql...");
 
     if let Err(e) = handle_db_command(&config.database) {

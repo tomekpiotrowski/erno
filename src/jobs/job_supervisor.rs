@@ -36,7 +36,12 @@ use super::{job_registry::JobRegistry, scheduled_job::ScheduledJob};
 /// # Panics
 /// Panics if any job type lacks worker coverage, as this is a critical configuration error
 /// that would prevent the job system from functioning correctly.
-fn verify_job_types_have_workers(workers_config: &WorkersConfig, job_registry: &JobRegistry) {
+fn verify_job_types_have_workers<ExtraConfig>(
+    workers_config: &WorkersConfig,
+    job_registry: &JobRegistry<ExtraConfig>,
+) where
+    ExtraConfig: Clone + Send + Sync + 'static,
+{
     // Collect all job types that have worker pools configured
     let mut covered_job_types: HashSet<&str> = HashSet::new();
 
@@ -54,12 +59,14 @@ fn verify_job_types_have_workers(workers_config: &WorkersConfig, job_registry: &
     }
 }
 
-pub async fn job_supervisor(
+pub async fn job_supervisor<ExtraConfig>(
     jobs_config: JobsConfig,
-    app: App,
-    job_registry: JobRegistry,
+    app: App<ExtraConfig>,
+    job_registry: JobRegistry<ExtraConfig>,
     job_schedule: Vec<ScheduledJob>,
-) {
+) where
+    ExtraConfig: Clone + Send + Sync + 'static,
+{
     // Verify that all JobTypes have corresponding worker pools
     verify_job_types_have_workers(&jobs_config.workers, &job_registry);
     // Start all worker pools
@@ -79,7 +86,13 @@ pub async fn job_supervisor(
 }
 
 /// Start all worker pools based on configuration
-fn start_worker_pools(config: &WorkersConfig, app: &App, job_registry: &JobRegistry) {
+fn start_worker_pools<ExtraConfig>(
+    config: &WorkersConfig,
+    app: &App<ExtraConfig>,
+    job_registry: &JobRegistry<ExtraConfig>,
+) where
+    ExtraConfig: Clone + Send + Sync + 'static,
+{
     info!("🚀 Starting job workers");
 
     for (worker_name, worker_config) in &config.workers {
@@ -93,12 +106,14 @@ fn start_worker_pools(config: &WorkersConfig, app: &App, job_registry: &JobRegis
 }
 
 /// Start a single worker pool with multiple worker instances
-fn start_worker_pool(
+fn start_worker_pool<ExtraConfig>(
     worker_name: &str,
     worker_config: &WorkerQueueConfig,
-    app: &App,
-    job_registry: &JobRegistry,
-) {
+    app: &App<ExtraConfig>,
+    job_registry: &JobRegistry<ExtraConfig>,
+) where
+    ExtraConfig: Clone + Send + Sync + 'static,
+{
     for worker_id in 0..worker_config.count {
         let worker_instance_name = format!("{worker_name}-{worker_id}");
         let worker_config_clone = worker_config.clone();
@@ -118,12 +133,14 @@ fn start_worker_pool(
 }
 
 /// Run a worker with automatic restart on crash
-async fn run_worker_with_restart(
+async fn run_worker_with_restart<ExtraConfig>(
     worker_instance_name: &str,
     worker_config: &WorkerQueueConfig,
-    app: App,
-    job_registry: JobRegistry,
-) {
+    app: App<ExtraConfig>,
+    job_registry: JobRegistry<ExtraConfig>,
+) where
+    ExtraConfig: Clone + Send + Sync + 'static,
+{
     let mut restart_count = 0;
     loop {
         debug!(

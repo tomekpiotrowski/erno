@@ -6,7 +6,7 @@ use lettre::message::Mailbox;
 pub use crate::rate_limiting::rate_limit_state::RateLimitConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Config {
+pub struct Config<ExtraConfig = ()> {
     pub tracing: TracingConfig,
     pub database: DatabaseConfig,
     pub jobs: JobsConfig,
@@ -16,6 +16,8 @@ pub struct Config {
     pub jwt: JwtConfig,
     pub password_reset: PasswordResetConfig,
     pub rate_limiting: RateLimitConfig,
+    #[serde(flatten, default)]
+    pub extra: ExtraConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -39,11 +39,11 @@ fn extract_token(query: &WsAuthQuery, headers: &HeaderMap) -> Option<String> {
 ///
 /// Authenticates the user via JWT token (from query param or header),
 /// then upgrades the connection and passes the user_id to the connection handler.
-pub async fn authenticated_ws_handler(
+pub async fn authenticated_ws_handler<ExtraConfig>(
     ws: WebSocketUpgrade,
     Query(query): Query<WsAuthQuery>,
     headers: HeaderMap,
-    State(app): State<App>,
+    State(app): State<App<ExtraConfig>>,
 ) -> Response {
     // Extract token from query or header
     let Some(token) = extract_token(&query, &headers) else {
