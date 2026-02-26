@@ -28,6 +28,15 @@ pub fn respond_bad_request(response: &TestResponse) -> AssertionResult {
 pub fn respond_not_found(response: &TestResponse) -> AssertionResult {
     assert_status_code(response, 404)
 }
-pub fn be_unauthorized(response: &TestResponse) -> AssertionResult {
+
+pub fn respond_unauthorized(response: &TestResponse) -> AssertionResult {
     assert_status_code(response, 401)
+}
+
+pub fn respond_no_content(response: &TestResponse) -> AssertionResult {
+    assert_status_code(response, 204)
+}
+
+pub fn be_unauthorized(response: &TestResponse) -> AssertionResult {
+    respond_unauthorized(response)
 }
