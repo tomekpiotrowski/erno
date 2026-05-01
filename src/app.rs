@@ -27,7 +27,9 @@ impl<ExtraConfig> App<ExtraConfig> {
         J: Job<ExtraConfig>,
         J::Arguments: serde::Serialize,
     {
-        self.job_queue.add::<J, ExtraConfig>(&self.db, arguments).await
+        self.job_queue
+            .add::<J, ExtraConfig>(&self.db, arguments)
+            .await
     }
 }
 

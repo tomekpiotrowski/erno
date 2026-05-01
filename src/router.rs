@@ -6,7 +6,10 @@ use crate::{
     websocket::auth::authenticated_ws_handler,
 };
 
-pub fn router<ExtraConfig>(app: App<ExtraConfig>, app_router: fn(App<ExtraConfig>) -> Router) -> Router
+pub fn router<ExtraConfig>(
+    app: App<ExtraConfig>,
+    app_router: fn(App<ExtraConfig>) -> Router,
+) -> Router
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {

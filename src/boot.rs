@@ -3,8 +3,8 @@ use std::{env, str::FromStr as _};
 use axum::Router;
 use clap::Parser as _;
 use config_rs::Config as ConfigRs;
-use serde::de::DeserializeOwned;
 use sea_orm_migration::MigratorTrait;
+use serde::de::DeserializeOwned;
 use tracing::{debug, trace};
 
 use crate::{

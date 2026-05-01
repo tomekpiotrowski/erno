@@ -47,9 +47,7 @@ mod tests {
         assert!(verify_password(password, &hash).expect("Failed to verify password"));
 
         // Verify an incorrect password
-        assert!(
-            !verify_password("wrong_password", &hash).expect("Failed to verify password")
-        );
+        assert!(!verify_password("wrong_password", &hash).expect("Failed to verify password"));
     }
 
     #[test]
