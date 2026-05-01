@@ -8,7 +8,7 @@ use argon2::{
 };
 
 /// Generates a cryptographically secure salt and hashes the password using Argon2
-pub fn hash_password(password: &str) -> Result<(String, String), Error> {
+pub fn hash_password(password: &str) -> Result<String, Error> {
     let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
 
@@ -16,14 +16,13 @@ pub fn hash_password(password: &str) -> Result<(String, String), Error> {
         .hash_password(password.as_bytes(), &salt)?
         .to_string();
 
-    Ok((salt.to_string(), password_hash))
+    Ok(password_hash)
 }
 
-/// Verifies a password against a stored hash and salt
-pub fn verify_password(password: &str, _salt: &str, hash: &str) -> Result<bool, Error> {
+/// Verifies a password against a stored PHC hash string
+pub fn verify_password(password: &str, hash: &str) -> Result<bool, Error> {
     let argon2 = Argon2::default();
 
-    // Reconstruct the full hash string that includes the salt
     let parsed_hash = PasswordHash::new(hash)?;
 
     match argon2.verify_password(password.as_bytes(), &parsed_hash) {
@@ -42,14 +41,14 @@ mod tests {
         let password = "test_password_123";
 
         // Hash the password
-        let (salt, hash) = hash_password(password).expect("Failed to hash password");
+        let hash = hash_password(password).expect("Failed to hash password");
 
         // Verify the correct password
-        assert!(verify_password(password, &salt, &hash).expect("Failed to verify password"));
+        assert!(verify_password(password, &hash).expect("Failed to verify password"));
 
         // Verify an incorrect password
         assert!(
-            !verify_password("wrong_password", &salt, &hash).expect("Failed to verify password")
+            !verify_password("wrong_password", &hash).expect("Failed to verify password")
         );
     }
 
@@ -57,15 +56,14 @@ mod tests {
     fn test_different_salts_produce_different_hashes() {
         let password = "same_password";
 
-        let (salt1, hash1) = hash_password(password).expect("Failed to hash password");
-        let (salt2, hash2) = hash_password(password).expect("Failed to hash password");
+        let hash1 = hash_password(password).expect("Failed to hash password");
+        let hash2 = hash_password(password).expect("Failed to hash password");
 
         // Different salts should produce different hashes
-        assert_ne!(salt1, salt2);
         assert_ne!(hash1, hash2);
 
         // But both should verify correctly
-        assert!(verify_password(password, &salt1, &hash1).expect("Failed to verify password"));
-        assert!(verify_password(password, &salt2, &hash2).expect("Failed to verify password"));
+        assert!(verify_password(password, &hash1).expect("Failed to verify password"));
+        assert!(verify_password(password, &hash2).expect("Failed to verify password"));
     }
 }
