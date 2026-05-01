@@ -4,7 +4,7 @@ use crate::{
 };
 use axum::Router;
 use lettre::{transport::smtp::authentication::Credentials, AsyncSmtpTransport, Tokio1Executor};
-use sea_orm::{ConnectOptions, ConnectionTrait, DatabaseConnection, DbBackend, Statement};
+use sea_orm::{ConnectOptions, ConnectionTrait, DbBackend, Statement};
 use sea_orm_migration::MigratorTrait;
 use tokio::sync::OnceCell;
 use tracing::debug;
@@ -33,38 +33,6 @@ pub type FixtureLoader =
         &'a sea_orm::DatabaseConnection,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>>;
 
-/// Drop and recreate the database schema.
-///
-/// This provides a completely clean slate by removing all tables, types,
-/// functions, and other database objects from the public schema.
-async fn reset_database_schema(db: &DatabaseConnection) {
-    use tracing::{debug, trace};
-
-    debug!("Resetting database schema");
-
-    // Drop everything in the public schema and recreate it
-    trace!("Dropping public schema");
-    let drop_schema = "DROP SCHEMA public CASCADE";
-    db.execute(Statement::from_string(DbBackend::Postgres, drop_schema))
-        .await
-        .expect("Failed to drop public schema");
-
-    trace!("Creating public schema");
-    let create_schema = "CREATE SCHEMA public";
-    db.execute(Statement::from_string(DbBackend::Postgres, create_schema))
-        .await
-        .expect("Failed to create public schema");
-
-    trace!("Granting permissions on public schema");
-    // Grant usage on public schema
-    let grant_usage = "GRANT ALL ON SCHEMA public TO PUBLIC";
-    db.execute(Statement::from_string(DbBackend::Postgres, grant_usage))
-        .await
-        .expect("Failed to grant permissions on public schema");
-
-    debug!("Database schema reset complete");
-}
-
 /// Initialize the database schema once for all tests.
 ///
 /// Drops and recreates the schema, runs migrations, and loads fixtures once.
@@ -85,18 +53,15 @@ async fn initialize_database_schema<AppMigrator: MigratorTrait>(fixture_loader: 
     let db = setup_database_connection(&app_config.database).await;
     debug!("Database connection established");
 
-    // Drop and recreate the entire schema for a clean slate
-    reset_database_schema(&db).await;
-
-    // Run migrations
-    debug!("Running database migrations");
-    match AppMigrator::up(&db, None).await {
+    // Reset all migrations to a clean state and re-apply them.
+    debug!("Refreshing database migrations");
+    match AppMigrator::refresh(&db).await {
         Ok(()) => {
-            debug!("Database migrations completed successfully");
+            debug!("Database migrations refreshed successfully");
         }
         Err(e) => {
-            error!("❌ Database migrations failed: {}", e);
-            panic!("Database migrations failed: {e}");
+            error!("❌ Database migration refresh failed: {}", e);
+            panic!("Database migration refresh failed: {e}");
         }
     }
 
