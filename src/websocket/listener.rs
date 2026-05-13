@@ -1,4 +1,4 @@
-use sea_orm::{ConnectionTrait, DatabaseBackend, DatabaseConnection, EntityTrait, QueryOrder};
+use sea_orm::{DatabaseConnection, EntityTrait, QueryOrder};
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgListener;
 use tokio::time::{sleep, Duration};
@@ -18,12 +18,6 @@ pub enum RecipientCriteria {
 
 /// Start listening for PostgreSQL NOTIFY events and broadcast messages to WebSocket connections
 pub async fn start_listener(db: DatabaseConnection, connections: Connections) {
-    // Only start listener for PostgreSQL databases
-    if !matches!(db.get_database_backend(), DatabaseBackend::Postgres) {
-        info!("WebSocket listener not started: database is not PostgreSQL");
-        return;
-    }
-
     loop {
         if let Err(e) = listen_loop(&db, &connections).await {
             error!("WebSocket listener error: {}, restarting in 5s...", e);

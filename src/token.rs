@@ -1,4 +1,5 @@
 use rand::Rng;
+use sha2::{Digest, Sha256};
 
 /// Generate a cryptographically secure random token.
 ///
@@ -22,6 +23,13 @@ pub fn generate_secure_token(length: usize) -> String {
         .collect()
 }
 
+/// Returns the SHA-256 hex digest of a token string.
+/// Store this hash in the database; send the raw token to users.
+pub fn hash_token(token: &str) -> String {
+    let hash = Sha256::digest(token.as_bytes());
+    hash.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -40,9 +48,19 @@ mod tests {
 
     #[test]
     fn test_generate_secure_token_randomness() {
-        // Generate multiple tokens and ensure they're different
         let token1 = generate_secure_token(64);
         let token2 = generate_secure_token(64);
         assert_ne!(token1, token2);
+    }
+
+    #[test]
+    fn test_hash_token_is_deterministic() {
+        let token = "abc123";
+        assert_eq!(hash_token(token), hash_token(token));
+    }
+
+    #[test]
+    fn test_different_tokens_produce_different_hashes() {
+        assert_ne!(hash_token("token_a"), hash_token("token_b"));
     }
 }

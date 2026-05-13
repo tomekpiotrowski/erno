@@ -14,7 +14,7 @@ pub struct Config<ExtraConfig = ()> {
     pub email: EmailConfig,
     pub base_url: String,
     pub jwt: JwtConfig,
-    pub password_reset: PasswordResetConfig,
+    pub auth: AuthConfig,
     pub rate_limiting: RateLimitConfig,
     #[serde(flatten, default)]
     pub extra: ExtraConfig,
@@ -27,7 +27,7 @@ pub struct JwtConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PasswordResetConfig {
+pub struct AuthConfig {
     pub token_expiration_hours: u64,
 }
 

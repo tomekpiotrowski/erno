@@ -139,7 +139,7 @@ pub async fn handle_command<AppMigrator: MigratorTrait, ExtraConfig>(
             version::print_version_info(app_info);
         }
         Some(Commands::Routes) => {
-            routes::handle_routes_command::<ExtraConfig>(app_router).await;
+            routes::handle_routes_command::<ExtraConfig>(config, app_router).await;
         }
         Some(Commands::Serve) | None => {
             serve::handle_serve_command::<AppMigrator, ExtraConfig>(

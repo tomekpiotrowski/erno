@@ -1,52 +1,65 @@
+use async_trait::async_trait;
 use axum::{
-    extract::{FromRef, FromRequestParts},
+    extract::FromRequestParts,
     http::{request::Parts, StatusCode},
     response::{IntoResponse, Response},
 };
-use sea_orm::{DatabaseConnection, EntityTrait, ModelTrait, PrimaryKeyTrait};
+use sea_orm::{DatabaseConnection, EntityTrait};
 use uuid::Uuid;
 
+use crate::app::App;
 use crate::auth::jwt;
-use crate::config::Config;
+use crate::database::models::user;
 
-/// Authenticated user extracted from JWT token.
+/// Trait for loading app-specific profile data alongside the authenticated user.
 ///
-/// This extractor loads the full user model from the database based on the JWT token
-/// in the Authorization header. Use this in handlers that require authentication.
-///
-/// The generic parameter U should be your user model type (must have UUID primary key).
-///
-/// # Example
-/// ```rust,ignore
-/// use api_core::auth::CurrentUser;
-/// use crate::database::models::user;
-///
-/// pub async fn my_handler(current_user: CurrentUser<user::Model>) -> RequestResult {
-///     // Access the authenticated user via Deref
-///     println!("User email: {}", current_user.email);
-///     Ok(RequestSuccess::Ok)
-/// }
-/// ```
-#[derive(Debug, Clone)]
-pub struct CurrentUser<U> {
-    /// The loaded user model from the database
-    pub user: U,
+/// Implement this on your profile entity to enable `CurrentUser<YourProfile>`.
+/// The `()` implementation is a no-op used when profile data is not needed.
+#[async_trait]
+pub trait LoadForUser: Sized + Send + Sync + 'static {
+    async fn load_for_user(user_id: Uuid, db: &DatabaseConnection) -> Result<Self, AuthError>;
 }
 
-impl<U> std::ops::Deref for CurrentUser<U> {
-    type Target = U;
+#[async_trait]
+impl LoadForUser for () {
+    async fn load_for_user(_: Uuid, _: &DatabaseConnection) -> Result<(), AuthError> {
+        Ok(())
+    }
+}
+
+/// Authenticated user extracted from the JWT Bearer token.
+///
+/// `P` is an optional app-defined profile type loaded from the database
+/// alongside the user. Use `CurrentUser` (no type param) when you only
+/// need the base user. Use `CurrentUser<YourProfile>` to load both.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// // Base user only
+/// async fn list_posts(CurrentUser { user, .. }: CurrentUser) { ... }
+///
+/// // With app profile
+/// async fn update_profile(CurrentUser { user, profile }: CurrentUser<Profile>) { ... }
+/// ```
+#[derive(Debug, Clone)]
+pub struct CurrentUser<P: LoadForUser = ()> {
+    pub user: user::Model,
+    pub profile: P,
+}
+
+impl<P: LoadForUser> std::ops::Deref for CurrentUser<P> {
+    type Target = user::Model;
 
     fn deref(&self) -> &Self::Target {
         &self.user
     }
 }
 
-/// Error type for CurrentUser extraction failures.
+/// Error type for authentication failures.
 #[derive(Debug)]
 pub enum AuthError {
-    /// No Authorization header provided or invalid format
     Unauthorized,
-    /// Database error while loading user
     DatabaseError,
 }
 
@@ -61,45 +74,40 @@ impl IntoResponse for AuthError {
     }
 }
 
-impl<S, U, E> FromRequestParts<S> for CurrentUser<U>
+impl<ExtraConfig, P> FromRequestParts<App<ExtraConfig>> for CurrentUser<P>
 where
-    S: Send + Sync,
-    U: ModelTrait<Entity = E> + Send + sea_orm::FromQueryResult,
-    E: EntityTrait<Model = U> + Send,
-    <E::PrimaryKey as PrimaryKeyTrait>::ValueType: From<Uuid>,
-    Config: FromRef<S>,
-    DatabaseConnection: FromRef<S>,
+    ExtraConfig: Clone + Send + Sync + 'static,
+    P: LoadForUser,
 {
     type Rejection = AuthError;
 
-    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        // Extract Authorization header
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &App<ExtraConfig>,
+    ) -> Result<Self, AuthError> {
         let auth_header = parts
             .headers
             .get("Authorization")
             .and_then(|h| h.to_str().ok())
             .ok_or(AuthError::Unauthorized)?;
 
-        // Extract token (format: "Bearer <token>")
         let token = auth_header
             .strip_prefix("Bearer ")
             .ok_or(AuthError::Unauthorized)?;
 
-        // Verify JWT and extract claims
-        let config = Config::from_ref(state);
-        let claims = jwt::verify_token(&config, token).map_err(|_| AuthError::Unauthorized)?;
+        let claims =
+            jwt::verify_token(&state.config, token).map_err(|_| AuthError::Unauthorized)?;
 
-        // Parse user ID from claims
         let user_id = Uuid::parse_str(&claims.sub).map_err(|_| AuthError::Unauthorized)?;
 
-        // Load user from database
-        let db = DatabaseConnection::from_ref(state);
-        let user = E::find_by_id(user_id)
-            .one(&db)
+        let user = user::Entity::find_by_id(user_id)
+            .one(&state.db)
             .await
             .map_err(|_| AuthError::DatabaseError)?
             .ok_or(AuthError::Unauthorized)?;
 
-        Ok(CurrentUser { user })
+        let profile = P::load_for_user(user_id, &state.db).await?;
+
+        Ok(CurrentUser { user, profile })
     }
 }

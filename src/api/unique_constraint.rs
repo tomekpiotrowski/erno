@@ -8,6 +8,12 @@ pub enum UniqueConstraintError {
     Other(sea_orm::DbErr),
 }
 
+/// Returns true if the error is a PostgreSQL unique constraint violation.
+pub fn is_unique_violation(err: &sea_orm::DbErr) -> bool {
+    err.to_string()
+        .contains("duplicate key value violates unique constraint")
+}
+
 /// Maps database unique constraint violations to uniqueness errors
 pub fn handle_unique_constraint_violation(
     field_name: &'static str,

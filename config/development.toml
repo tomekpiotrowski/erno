@@ -4,7 +4,7 @@ base_url = "http://localhost:3000"
 log_level = "info"
 
 [database]
-url = "sqlite::memory:"
+url = "postgres://localhost/erno_dev"
 pool_size = 5
 
 [server]
@@ -17,7 +17,7 @@ type = "mock"
 secret = "example_jwt_secret_change_in_production_1234567890"
 expiration_days = 30
 
-[password_reset]
+[auth]
 token_expiration_hours = 24
 
 [jobs.cleanup]

@@ -1,102 +1,50 @@
 use axum::Router;
+use sea_orm::{ConnectOptions, Database};
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use crate::{
     app::App,
+    config::Config,
     environment::Environment,
     job_queue::JobQueue,
     mailer::Mailer,
-    rate_limiting::{rate_limit_state::RateLimitConfig, RateLimitState},
+    rate_limiting::RateLimitState,
     websocket::connections::Connections,
 };
 
 /// Handle the `routes` command - displays all registered application routes.
-///
-/// This command creates a minimal App instance and builds the router to display
-/// the routes available in your application. It uses the router's debug output
-/// to extract route information.
-pub async fn handle_routes_command<ExtraConfig>(app_router: fn(App<ExtraConfig>) -> Router)
-where
+pub async fn handle_routes_command<ExtraConfig>(
+    config: Config<ExtraConfig>,
+    app_router: fn(App<ExtraConfig>) -> Router,
+) where
     ExtraConfig: Clone + Default + Send + Sync + 'static,
 {
     println!("📍 Application Routes\n");
 
-    // Create a dummy app with minimal configuration to build the router
-    let dummy_config = create_dummy_config::<ExtraConfig>();
-    let dummy_app = create_dummy_app(dummy_config).await;
-
-    // Build the full router
-    let router = crate::router::router(dummy_app, app_router);
-
-    // Extract and display routes
+    let app = create_app_for_routes(config).await;
+    let router = crate::router::router(app, app_router);
     extract_and_print_routes(router);
 }
 
-async fn create_dummy_app<ExtraConfig>(
-    config: crate::config::Config<ExtraConfig>,
-) -> App<ExtraConfig> {
-    // For route inspection, we don't actually need a real database connection
-    // We use a special mock connection that won't be used
-    let db = create_dummy_database_connection().await;
+async fn create_app_for_routes<ExtraConfig>(config: Config<ExtraConfig>) -> App<ExtraConfig> {
+    let mut opt = ConnectOptions::new(config.database.url.clone());
+    opt.max_connections(1)
+        .connect_timeout(Duration::from_secs(5))
+        .acquire_timeout(Duration::from_secs(5));
+
+    let db = Database::connect(opt)
+        .await
+        .expect("Failed to connect to database for route inspection");
 
     App {
+        rate_limit_state: RateLimitState::new(config.rate_limiting.clone()),
         config,
         environment: Environment::Development,
         db,
         mailer: Mailer::mock(),
         job_queue: JobQueue::mock(),
-        rate_limit_state: RateLimitState::new(RateLimitConfig::default()),
         websocket_connections: Connections::new(),
-    }
-}
-
-async fn create_dummy_database_connection() -> sea_orm::DatabaseConnection {
-    use sea_orm::{ConnectOptions, Database};
-    use std::time::Duration;
-
-    // Create an in-memory SQLite connection for route inspection
-    let mut opt = ConnectOptions::new("sqlite::memory:".to_string());
-    opt.max_connections(1)
-        .connect_timeout(Duration::from_secs(1))
-        .acquire_timeout(Duration::from_secs(1));
-
-    Database::connect(opt)
-        .await
-        .expect("Failed to create dummy database connection for route inspection")
-}
-
-fn create_dummy_config<ExtraConfig>() -> crate::config::Config<ExtraConfig>
-where
-    ExtraConfig: Default,
-{
-    use std::collections::HashMap;
-
-    crate::config::Config {
-        server: crate::config::ServerConfig { port: 3000 },
-        database: crate::config::DatabaseConfig {
-            url: "sqlite::memory:".to_string(),
-            pool_size: 1,
-        },
-        base_url: "http://localhost:3000".to_string(),
-        jwt: crate::config::JwtConfig {
-            secret: "dummy_secret_for_route_inspection_only_1234567890".to_string(),
-            expiration_days: 30,
-        },
-        password_reset: crate::config::PasswordResetConfig {
-            token_expiration_hours: 24,
-        },
-        email: crate::config::EmailConfig::Mock,
-        tracing: crate::config::TracingConfig {
-            log_level: "error".to_string(),
-        },
-        jobs: crate::config::JobsConfig {
-            cleanup: crate::config::CleanupConfig::default(),
-            workers: crate::config::WorkersConfig {
-                workers: HashMap::new(),
-            },
-        },
-        rate_limiting: RateLimitConfig::default(),
-        extra: ExtraConfig::default(),
     }
 }
 

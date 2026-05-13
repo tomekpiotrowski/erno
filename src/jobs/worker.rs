@@ -5,7 +5,7 @@ use sea_orm::{
 };
 use sqlx::postgres::PgListener;
 use std::time::{Duration, Instant};
-use tokio::time::{sleep, timeout};
+use tokio::time::{timeout};
 use tracing::{debug, error, info, warn};
 
 use crate::app::App;
@@ -24,7 +24,7 @@ use crate::{
 
 use super::job_registry::JobRegistry;
 
-const FALLBACK_POLL_INTERVAL_SECS: u64 = 30;
+const POLL_INTERVAL_SECS: u64 = 30;
 
 pub async fn worker<ExtraConfig>(
     worker_instance_name: &str,
@@ -35,32 +35,18 @@ pub async fn worker<ExtraConfig>(
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    // Try to set up LISTEN for instant job notifications
     let sqlx_pool = app.db.get_postgres_connection_pool();
-    let mut listener = match PgListener::connect_with(sqlx_pool).await {
-        Ok(mut l) => {
-            if let Err(e) = l.listen("job_new").await {
-                warn!(
-                    "Worker '{}' failed to LISTEN on 'job_new': {}. Using polling fallback.",
-                    worker_instance_name, e
-                );
-                None
-            } else {
-                info!(
-                    "Worker '{}' listening for instant job notifications",
-                    worker_instance_name
-                );
-                Some(l)
-            }
-        }
-        Err(e) => {
-            warn!(
-                "Worker '{}' failed to create PgListener: {}. Using polling fallback.",
-                worker_instance_name, e
-            );
-            None
-        }
-    };
+    let mut listener = PgListener::connect_with(sqlx_pool)
+        .await
+        .map_err(|e| DbErr::Custom(e.to_string()))?;
+    listener
+        .listen("job_new")
+        .await
+        .map_err(|e| DbErr::Custom(e.to_string()))?;
+    info!(
+        "Worker '{}' listening for instant job notifications",
+        worker_instance_name
+    );
 
     loop {
         // Try to claim and execute all available jobs (drain the queue)
@@ -99,39 +85,21 @@ where
             jobs_processed += 1;
         }
 
-        // No jobs available, wait for notification or timeout
-        if let Some(ref mut l) = listener {
-            // Wait for NOTIFY or timeout after fallback interval
-            match timeout(Duration::from_secs(FALLBACK_POLL_INTERVAL_SECS), l.recv()).await {
-                Ok(Ok(_notification)) => {
-                    // Received notification, loop to drain queue
-                    debug!(
-                        "Worker '{}' received job notification",
-                        worker_instance_name
-                    );
-                    continue;
-                }
-                Ok(Err(e)) => {
-                    // PgListener error, fall back to polling
-                    error!(
-                        "Worker '{}' PgListener error: {}. Switching to polling.",
-                        worker_instance_name, e
-                    );
-                    listener = None;
-                    sleep(Duration::from_secs(1)).await;
-                }
-                Err(_) => {
-                    // Timeout - fallback poll interval elapsed
-                    debug!(
-                        "Worker '{}' polling (no notifications for {}s)",
-                        worker_instance_name, FALLBACK_POLL_INTERVAL_SECS
-                    );
-                    continue;
-                }
+        // Wait for NOTIFY or periodic timeout as a safety net
+        match timeout(Duration::from_secs(POLL_INTERVAL_SECS), listener.recv()).await {
+            Ok(Ok(_)) => {
+                debug!("Worker '{}' received job notification", worker_instance_name);
             }
-        } else {
-            // No listener, use simple polling
-            sleep(Duration::from_secs(1)).await;
+            Ok(Err(e)) => {
+                error!("Worker '{}' PgListener error: {}", worker_instance_name, e);
+                return Err(DbErr::Custom(e.to_string()));
+            }
+            Err(_) => {
+                debug!(
+                    "Worker '{}' polling (no notifications for {}s)",
+                    worker_instance_name, POLL_INTERVAL_SECS
+                );
+            }
         }
     }
 }
