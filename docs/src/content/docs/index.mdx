@@ -1,0 +1,38 @@
+---
+title: Erno
+description: Shared infrastructure library for building REST APIs with Axum
+template: splash
+hero:
+  tagline: Shared infrastructure library for building REST APIs with Axum
+  actions:
+    - text: API Guide
+      link: /api/
+      icon: right-arrow
+      variant: primary
+    - text: GitHub
+      link: https://github.com/tomekpiotrowski/erno
+      icon: external
+---
+
+import { CardGrid, Card } from '@astrojs/starlight/components';
+
+<CardGrid stagger>
+  <Card title="Authentication" icon="lock-open">
+    JWT-based authentication with current user extraction and protected route support.
+  </Card>
+  <Card title="Job Processing" icon="rocket">
+    Background job scheduler with workers, cron expressions, and advisory locks.
+  </Card>
+  <Card title="Database" icon="laptop">
+    SeaORM integration with built-in migrations and connection management.
+  </Card>
+  <Card title="Rate Limiting" icon="warning">
+    Per-action rate limiting middleware with configurable windows and limits.
+  </Card>
+  <Card title="WebSocket" icon="random">
+    WebSocket connection management with broadcast and per-user channels.
+  </Card>
+  <Card title="Telemetry" icon="information">
+    Distributed tracing and Prometheus metrics out of the box.
+  </Card>
+</CardGrid>
