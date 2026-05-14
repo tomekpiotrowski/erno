@@ -176,6 +176,10 @@ pub async fn setup_test<AppMigrator: MigratorTrait>(
         rate_limit_state,
         websocket_connections: Connections::new(),
         storage: crate::storage::FileStorage::mock(),
+        prometheus_handle: crate::metrics::setup_metrics(),
+        metrics_collectors: std::sync::Arc::new(
+            crate::metrics::collector::CollectorRegistry::default(),
+        ),
     };
 
     let test_router = router(app, app_router);
@@ -301,6 +305,10 @@ impl TestUtils {
             rate_limit_state: RateLimitState::new(self.config.rate_limiting.clone()),
             websocket_connections: Connections::new(),
             storage: crate::storage::FileStorage::mock(),
+            prometheus_handle: crate::metrics::setup_metrics(),
+            metrics_collectors: std::sync::Arc::new(
+                crate::metrics::collector::CollectorRegistry::default(),
+            ),
         };
 
         J::execute(&app, args).await

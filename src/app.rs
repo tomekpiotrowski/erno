@@ -3,13 +3,12 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use sea_orm::DatabaseConnection;
-use thiserror::Error;
-
 use std::sync::Arc;
 
 use crate::{
     config::Config, database::DatabaseSetupStatus, environment::Environment, job_queue::JobQueue,
-    jobs::Job, mailer::Mailer, rate_limiting::RateLimitState, storage::FileStorage,
+    jobs::Job, mailer::Mailer, metrics::{collector::CollectorRegistry, PrometheusHandle},
+    rate_limiting::RateLimitState, storage::FileStorage,
     sync::queue::SyncQueue, sync::registry::SyncRegistry, websocket::connections::Connections,
 };
 
@@ -25,6 +24,8 @@ pub struct App<ExtraConfig = ()> {
     pub rate_limit_state: RateLimitState,
     pub websocket_connections: Connections,
     pub storage: FileStorage,
+    pub metrics_collectors: Arc<CollectorRegistry>,
+    pub prometheus_handle: PrometheusHandle,
 }
 
 impl<ExtraConfig> App<ExtraConfig> {
@@ -40,7 +41,7 @@ impl<ExtraConfig> App<ExtraConfig> {
 
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum ReadinessError {
     #[error("Database connection error")]
     DatabaseError(#[from] sea_orm::DbErr),

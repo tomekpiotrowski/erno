@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::{routing::get, Router};
@@ -7,8 +8,6 @@ use lettre::{AsyncSmtpTransport, Tokio1Executor};
 use sea_orm_migration::MigratorTrait;
 use tokio::net::TcpListener;
 use tracing::{error, info};
-
-use std::sync::Arc;
 
 use crate::{
     api::health_checks::ok,
@@ -20,6 +19,7 @@ use crate::{
     jobs::{
         job_registry::JobRegistry, job_supervisor::job_supervisor, scheduled_job::ScheduledJob,
     },
+    metrics::{self, collector::CollectorRegistry},
     router::router,
     sync::registry::SyncRegistry,
     websocket::connections::Connections,
@@ -119,6 +119,10 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
 
     let storage = crate::storage::FileStorage::from_config(&config.storage);
 
+    // Set up Prometheus metrics recorder
+    let prometheus_handle = metrics::setup_metrics();
+    let metrics_collectors = Arc::new(CollectorRegistry::default());
+
     let app = App {
         config: config.clone(),
         environment,
@@ -130,6 +134,8 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
         rate_limit_state,
         websocket_connections: websocket_connections.clone(),
         storage,
+        metrics_collectors: metrics_collectors.clone(),
+        prometheus_handle,
     };
 
     // Spawn workers in the background
@@ -159,6 +165,16 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
         )
         .await;
     });
+
+    // Spawn DB stats + custom metrics collector task
+    if config.metrics.enabled {
+        let stats_db = db.clone();
+        let stats_config = config.metrics.clone();
+        let stats_collectors = (*metrics_collectors).clone();
+        tokio::spawn(async move {
+            metrics::db_stats::db_stats_task(stats_db, stats_config, stats_collectors).await;
+        });
+    }
 
     // Stop the temporary liveness server
     liveness_server_task.abort();

@@ -25,6 +25,7 @@ pub mod environment;
 pub mod job_queue;
 pub mod jobs;
 pub mod mailer;
+pub mod metrics;
 pub mod password;
 pub mod policy;
 pub mod rate_limiting;

@@ -3,6 +3,7 @@ use tower_http::trace::TraceLayer;
 
 use crate::{
     api, app::App,
+    metrics::{self, MetricsEndpointState, http::metrics_middleware},
     rate_limiting::middleware::{rate_limit_middleware, RateLimitActionExt},
     rate_limiting::action::RateLimitAction,
     websocket::auth::authenticated_ws_handler,
@@ -36,6 +37,12 @@ where
 {
     let rate_limit_state = app.rate_limit_state.clone();
     let rate_limiting_enabled = app.config.rate_limiting.enabled;
+    let metrics_enabled = app.config.metrics.enabled;
+    let metrics_state = MetricsEndpointState {
+        handle: app.prometheus_handle.clone(),
+        auth_token: app.config.metrics.auth_token.clone(),
+    };
+    let metrics_path = app.config.metrics.path.clone();
 
     // WebSocket route needs App state resolved before merging into the rate-limited group
     let ws_router = Router::new()
@@ -45,6 +52,11 @@ where
     let mut rate_limited = Router::new()
         .nest("/api", app_router(app))
         .merge(ws_router);
+
+    if metrics_enabled {
+        rate_limited = rate_limited
+            .layer(axum::middleware::from_fn(metrics_middleware));
+    }
 
     // Apply rate limiting to all API and WebSocket routes.
     // tag_rate_limit_action is applied last so it runs first (outermost layer),
@@ -58,10 +70,19 @@ where
             .layer(axum::middleware::from_fn(tag_rate_limit_action));
     }
 
-    // Health check endpoints are excluded from rate limiting intentionally
-    Router::new()
+    // Health check and metrics endpoints are excluded from rate limiting intentionally
+    let mut base = Router::new()
         .route("/liveness", get(api::health_checks::ok))
         .route("/readiness", get(api::health_checks::ok))
         .merge(rate_limited)
-        .layer(TraceLayer::new_for_http())
+        .layer(TraceLayer::new_for_http());
+
+    if metrics_enabled {
+        base = base.route(
+            &metrics_path,
+            get(metrics::metrics_handler).with_state(metrics_state),
+        );
+    }
+
+    base
 }

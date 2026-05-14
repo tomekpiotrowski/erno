@@ -48,6 +48,43 @@ pub struct StripeConfig {
 pub use crate::rate_limiting::rate_limit_state::RateLimitConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetricsConfig {
+    #[serde(default = "default_metrics_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_metrics_path")]
+    pub path: String,
+    pub auth_token: Option<String>,
+    #[serde(default = "default_db_stats_interval")]
+    pub db_stats_interval_seconds: u64,
+    #[serde(default)]
+    pub table_counts: Vec<String>,
+}
+
+impl Default for MetricsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_metrics_enabled(),
+            path: default_metrics_path(),
+            auth_token: None,
+            db_stats_interval_seconds: default_db_stats_interval(),
+            table_counts: Vec::new(),
+        }
+    }
+}
+
+const fn default_metrics_enabled() -> bool {
+    true
+}
+
+fn default_metrics_path() -> String {
+    "/metrics".to_string()
+}
+
+const fn default_db_stats_interval() -> u64 {
+    30
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config<ExtraConfig = ()> {
     pub tracing: TracingConfig,
     pub database: DatabaseConfig,
@@ -61,6 +98,8 @@ pub struct Config<ExtraConfig = ()> {
     pub stripe: Option<StripeConfig>,
     #[serde(default)]
     pub storage: StorageConfig,
+    #[serde(default)]
+    pub metrics: MetricsConfig,
     #[serde(flatten, default)]
     pub extra: ExtraConfig,
 }

@@ -128,6 +128,22 @@ where
 
     let execution_duration = start_time.elapsed();
 
+    // Record job execution metrics
+    let result_label = match &result {
+        JobResult::Completed => "completed",
+        JobResult::Failed(_) => "failed",
+        JobResult::TimedOut => "timed_out",
+    };
+    metrics::counter!("jobs_executed_total",
+        "job_type" => job_model.r#type.clone(),
+        "result" => result_label,
+    )
+    .increment(1);
+    metrics::histogram!("jobs_execution_duration_seconds",
+        "job_type" => job_model.r#type.clone(),
+    )
+    .record(execution_duration.as_secs_f64());
+
     // Update job status based on result
     update_job_after_execution(
         job_model,
