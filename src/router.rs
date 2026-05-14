@@ -16,21 +16,27 @@ where
     let rate_limit_state = app.rate_limit_state.clone();
     let rate_limiting_enabled = app.config.rate_limiting.enabled;
 
-    let mut api_router = Router::new().nest("/api", app_router(app.clone()));
+    // WebSocket route needs App state resolved before merging into the rate-limited group
+    let ws_router = Router::new()
+        .route("/ws", get(authenticated_ws_handler))
+        .with_state(app.clone());
 
-    // Apply rate limiting middleware if enabled
+    let mut rate_limited = Router::new()
+        .nest("/api", app_router(app))
+        .merge(ws_router);
+
+    // Apply rate limiting to all API and WebSocket routes
     if rate_limiting_enabled {
-        api_router = api_router.layer(axum::middleware::from_fn_with_state(
+        rate_limited = rate_limited.layer(axum::middleware::from_fn_with_state(
             rate_limit_state,
             rate_limit_middleware,
         ));
     }
 
+    // Health check endpoints are excluded from rate limiting intentionally
     Router::new()
         .route("/liveness", get(api::health_checks::ok))
         .route("/readiness", get(api::health_checks::ok))
-        .route("/ws", get(authenticated_ws_handler))
-        .with_state(app)
-        .merge(api_router)
+        .merge(rate_limited)
         .layer(TraceLayer::new_for_http())
 }

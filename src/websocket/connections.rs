@@ -1,11 +1,12 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use tokio::sync::{mpsc, Mutex};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::websocket::message::{Message as WsMessage, Request, Response};
@@ -82,6 +83,11 @@ impl Connections {
         }
     }
 
+    /// Get the IDs of all currently connected users.
+    pub async fn connected_user_ids(&self) -> Vec<Uuid> {
+        self.connections.lock().await.keys().copied().collect()
+    }
+
     /// Get count of connected users
     pub async fn user_count(&self) -> usize {
         self.connections.lock().await.len()
@@ -130,9 +136,28 @@ impl Connections {
         let connections = self.connections.clone();
         let app_handler = self.app_handler.clone();
         let incoming_task = tokio::spawn(async move {
+            // Sliding-window message rate limiter: max 20 messages per second per connection.
+            // Exceeding this disconnects the client to prevent message-flood DDoS.
+            const MAX_MSGS_PER_WINDOW: usize = 20;
+            const RATE_WINDOW: Duration = Duration::from_secs(1);
+            let mut msg_timestamps: VecDeque<Instant> = VecDeque::new();
+
             while let Some(msg) = receiver.next().await {
                 match msg {
                     Ok(Message::Text(text)) => {
+                        // Enforce per-connection message rate limit
+                        let now = Instant::now();
+                        msg_timestamps.retain(|&t| now - t < RATE_WINDOW);
+                        if msg_timestamps.len() >= MAX_MSGS_PER_WINDOW {
+                            warn!(
+                                user_id = %user_id,
+                                connection_id = %connection_id,
+                                "WebSocket message rate limit exceeded, closing connection"
+                            );
+                            break;
+                        }
+                        msg_timestamps.push_back(now);
+
                         if let Ok(WsMessage::Request { request, id }) =
                             serde_json::from_str::<WsMessage>(&text)
                         {

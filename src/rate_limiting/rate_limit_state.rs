@@ -44,6 +44,12 @@ pub struct RateLimitConfig {
     #[serde(default = "default_enabled")]
     pub enabled: bool,
 
+    /// Trust X-Forwarded-For / X-Real-IP headers for client IP.
+    /// Enable only when running behind a trusted reverse proxy (nginx, Caddy, etc.).
+    /// Without this, all users behind the same proxy share one rate limit quota.
+    #[serde(default)]
+    pub trust_proxy: bool,
+
     /// Default time window in seconds
     #[serde(default = "default_window_secs")]
     pub default_window_secs: u64,
@@ -81,6 +87,7 @@ impl Default for RateLimitConfig {
     fn default() -> Self {
         Self {
             enabled: default_enabled(),
+            trust_proxy: false,
             default_window_secs: default_window_secs(),
             default_max_requests: default_max_requests(),
             backoff_multiplier: default_backoff_multiplier(),
@@ -156,12 +163,14 @@ impl RateLimitConfig {
             .get(action.as_str())
             .cloned()
             .unwrap_or_else(|| {
-                // Generate multi-tier defaults from single-tier config
+                // Generate a two-tier default: a short burst window (1/12 of the main window)
+                // plus the full window. Integer division is safe here — .max(1) prevents a
+                // zero window if default_window_secs < 12.
                 ActionRateLimit {
                     tiers: vec![
                         RateLimitTier {
-                            window_secs: self.default_window_secs / 12,
-                            max_requests: self.default_max_requests / 10,
+                            window_secs: (self.default_window_secs / 12).max(1),
+                            max_requests: (self.default_max_requests / 10).max(1),
                         },
                         RateLimitTier {
                             window_secs: self.default_window_secs,
@@ -230,6 +239,13 @@ impl ClientState {
         backoff_multiplier: f64,
     ) -> Option<Duration> {
         let now = Instant::now();
+
+        // Reset violations once the block has fully expired so past incidents don't
+        // cause unbounded penalty escalation for legitimate users.
+        if self.blocked_until.is_some_and(|t| now >= t) {
+            self.violations = 0;
+            self.blocked_until = None;
+        }
 
         // Find the longest window to know how far back we need to keep timestamps
         let max_window = limit
@@ -304,6 +320,11 @@ impl RateLimitState {
             config: Arc::new(config),
             clients: Arc::new(DashMap::new()),
         }
+    }
+
+    /// Whether proxy headers (X-Forwarded-For, X-Real-IP) should be trusted for IP extraction.
+    pub fn trust_proxy(&self) -> bool {
+        self.config.trust_proxy
     }
 
     /// Check if a request from the given IP should be allowed.
@@ -384,6 +405,7 @@ mod tests {
 
         let config = RateLimitConfig {
             enabled: true,
+            trust_proxy: false,
             default_window_secs: 60,
             default_max_requests: 5,
             backoff_multiplier: 2.0,
@@ -415,6 +437,7 @@ mod tests {
 
         let config = RateLimitConfig {
             enabled: true,
+            trust_proxy: false,
             default_window_secs: 60,
             default_max_requests: 10,
             backoff_multiplier: 2.0,
@@ -455,6 +478,7 @@ mod tests {
 
         let config = RateLimitConfig {
             enabled: true,
+            trust_proxy: false,
             default_window_secs: 60,
             default_max_requests: 100,
             backoff_multiplier: 2.0,
@@ -494,6 +518,7 @@ mod tests {
 
         let config = RateLimitConfig {
             enabled: true,
+            trust_proxy: false,
             default_window_secs: 60,
             default_max_requests: 100,
             backoff_multiplier: 2.0,
@@ -517,6 +542,7 @@ mod tests {
     fn test_disabled_rate_limiting() {
         let config = RateLimitConfig {
             enabled: false,
+            trust_proxy: false,
             default_window_secs: 60,
             default_max_requests: 1,
             backoff_multiplier: 2.0,
@@ -548,6 +574,7 @@ mod tests {
 
         let config = RateLimitConfig {
             enabled: true,
+            trust_proxy: false,
             default_window_secs: 60,
             default_max_requests: 100, // Increased to allow 10 requests
             backoff_multiplier: 2.0,
@@ -571,5 +598,58 @@ mod tests {
         }
         // 11th request should be blocked (exceeds 60s limit of 10 derived from default_max_requests)
         assert!(state.check_rate_limit(ip2, &normal_action).is_err());
+    }
+
+    #[test]
+    fn test_violations_reset_after_block_expires() {
+        use std::thread;
+
+        let mut actions = HashMap::new();
+        actions.insert(
+            "test".to_string(),
+            ActionRateLimit {
+                tiers: vec![RateLimitTier {
+                    window_secs: 1, // 1-second window so we can expire it quickly
+                    max_requests: 2,
+                }],
+            },
+        );
+
+        let config = RateLimitConfig {
+            enabled: true,
+            trust_proxy: false,
+            default_window_secs: 60,
+            default_max_requests: 100,
+            backoff_multiplier: 2.0,
+            actions,
+        };
+
+        let state = RateLimitState::new(config);
+        let ip = "127.0.0.1".parse().unwrap();
+        let action = RateLimitAction::new("test");
+
+        // Hit the limit to produce violations = 1, penalty = 1s
+        assert!(state.check_rate_limit(ip, &action).is_ok());
+        assert!(state.check_rate_limit(ip, &action).is_ok());
+        assert!(state.check_rate_limit(ip, &action).is_err()); // violations = 1
+
+        // Wait for the block to expire
+        thread::sleep(std::time::Duration::from_millis(1100));
+
+        // First request after block expires should succeed and reset violations to 0
+        assert!(
+            state.check_rate_limit(ip, &action).is_ok(),
+            "First request after block should succeed"
+        );
+
+        // Verify violations were reset: hitting the limit again gives penalty = 1s (not 2s)
+        assert!(state.check_rate_limit(ip, &action).is_ok());
+        let err = state.check_rate_limit(ip, &action);
+        assert!(err.is_err());
+        // With violations reset to 0 before the hit, new violations = 1, penalty = 1s (not 2s)
+        assert!(
+            err.unwrap_err().as_secs() <= 1,
+            "Penalty should be reset to base window, not doubled"
+        );
     }
 }

@@ -16,6 +16,7 @@ use crate::{
     environment::Environment,
     jobs::{job_registry::JobRegistry, scheduled_job::ScheduledJob},
     setup_tracing::setup_tracing_for_command,
+    sync::registry::SyncRegistry,
 };
 
 const ENVIRONMENT_VARIABLE: &str = "APP_ENVIRONMENT";
@@ -29,11 +30,12 @@ pub struct BootConfig<ExtraConfig = ()> {
     pub app_router: fn(App<ExtraConfig>) -> Router,
     pub job_registry: JobRegistry<ExtraConfig>,
     pub job_schedule: Vec<ScheduledJob>,
+    pub sync_registry: SyncRegistry,
 }
 
 impl<ExtraConfig> BootConfig<ExtraConfig> {
     #[must_use]
-    pub const fn new(
+    pub fn new(
         app_info: AppInfo,
         app_router: fn(App<ExtraConfig>) -> Router,
         job_registry: JobRegistry<ExtraConfig>,
@@ -44,7 +46,19 @@ impl<ExtraConfig> BootConfig<ExtraConfig> {
             app_router,
             job_registry,
             job_schedule,
+            sync_registry: SyncRegistry::new(),
         }
+    }
+
+    /// Register a syncable entity in the sync registry.
+    #[must_use]
+    pub fn with_sync<E>(mut self) -> Self
+    where
+        E: crate::sync::syncable::Syncable,
+        E::Model: serde::de::DeserializeOwned,
+    {
+        self.sync_registry = self.sync_registry.register::<E>();
+        self
     }
 }
 
@@ -76,6 +90,7 @@ where
         config.app_router,
         config.job_registry,
         config.job_schedule,
+        config.sync_registry,
         config.app_info,
     )
     .await;
@@ -113,6 +128,7 @@ pub async fn handle_command<AppMigrator: MigratorTrait, ExtraConfig>(
     app_router: fn(App<ExtraConfig>) -> Router,
     job_registry: JobRegistry<ExtraConfig>,
     job_schedule: Vec<ScheduledJob>,
+    sync_registry: SyncRegistry,
     app_info: AppInfo,
 ) where
     ExtraConfig: Clone + Default + DeserializeOwned + Send + Sync + 'static,
@@ -148,6 +164,7 @@ pub async fn handle_command<AppMigrator: MigratorTrait, ExtraConfig>(
                 app_router,
                 job_registry,
                 job_schedule,
+                sync_registry,
             )
             .await;
         }

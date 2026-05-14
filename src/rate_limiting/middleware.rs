@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 
 use axum::{
     body::Body,
@@ -18,6 +18,38 @@ use super::{action::RateLimitAction, rate_limit_state::RateLimitState};
 #[derive(Debug, Clone)]
 pub struct RateLimitActionExt(pub RateLimitAction);
 
+/// Extract client IP from proxy headers, falling back to the socket address.
+///
+/// Only reads proxy headers when `trust_proxy` is enabled — otherwise an attacker
+/// could spoof `X-Forwarded-For` to bypass rate limiting entirely.
+fn extract_client_ip(req: &Request, trust_proxy: bool) -> Option<IpAddr> {
+    if trust_proxy {
+        // X-Forwarded-For: client, proxy1, proxy2 — leftmost is the real client
+        if let Some(ip) = req
+            .headers()
+            .get("X-Forwarded-For")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.split(',').next())
+            .and_then(|s| s.trim().parse::<IpAddr>().ok())
+        {
+            return Some(ip);
+        }
+
+        if let Some(ip) = req
+            .headers()
+            .get("X-Real-IP")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.trim().parse::<IpAddr>().ok())
+        {
+            return Some(ip);
+        }
+    }
+
+    req.extensions()
+        .get::<axum::extract::ConnectInfo<SocketAddr>>()
+        .map(|ci| ci.0.ip())
+}
+
 /// Middleware function that enforces rate limits.
 ///
 /// Extracts the client IP address and rate limit action, then checks
@@ -29,16 +61,10 @@ pub async fn rate_limit_middleware(
     req: Request,
     next: Next,
 ) -> Response {
-    // Extract IP from ConnectInfo extension (added by the server)
-    let ip = req
-        .extensions()
-        .get::<axum::extract::ConnectInfo<SocketAddr>>()
-        .map(|connect_info| connect_info.0.ip());
-
-    let ip = match ip {
+    let ip = match extract_client_ip(&req, state.trust_proxy()) {
         Some(ip) => ip,
         None => {
-            warn!("No ConnectInfo found in request, allowing request");
+            warn!("No client IP found in request, allowing request");
             return next.run(req).await;
         }
     };

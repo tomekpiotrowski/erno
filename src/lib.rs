@@ -27,6 +27,7 @@ pub mod password;
 pub mod policy;
 pub mod rate_limiting;
 pub mod router;
+pub mod sync;
 pub mod setup_tracing;
 pub mod token;
 pub mod websocket;

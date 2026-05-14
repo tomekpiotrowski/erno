@@ -3,6 +3,8 @@ use sea_orm::{ConnectOptions, Database};
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+use std::sync::Arc;
+
 use crate::{
     app::App,
     config::Config,
@@ -10,6 +12,8 @@ use crate::{
     job_queue::JobQueue,
     mailer::Mailer,
     rate_limiting::RateLimitState,
+    sync::queue::SyncQueue,
+    sync::registry::SyncRegistry,
     websocket::connections::Connections,
 };
 
@@ -44,6 +48,8 @@ async fn create_app_for_routes<ExtraConfig>(config: Config<ExtraConfig>) -> App<
         db,
         mailer: Mailer::mock(),
         job_queue: JobQueue::mock(),
+        sync_queue: SyncQueue::mock(),
+        sync_registry: Arc::new(SyncRegistry::new()),
         websocket_connections: Connections::new(),
     }
 }

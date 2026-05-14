@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::time::Duration;
 
 use axum::{routing::get, Router};
 use lettre::transport::smtp::authentication::Credentials;
@@ -6,6 +7,8 @@ use lettre::{AsyncSmtpTransport, Tokio1Executor};
 use sea_orm_migration::MigratorTrait;
 use tokio::net::TcpListener;
 use tracing::{error, info};
+
+use std::sync::Arc;
 
 use crate::{
     api::health_checks::ok,
@@ -17,6 +20,7 @@ use crate::{
         job_registry::JobRegistry, job_supervisor::job_supervisor, scheduled_job::ScheduledJob,
     },
     router::router,
+    sync::registry::SyncRegistry,
     websocket::connections::Connections,
 };
 
@@ -26,6 +30,7 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
     app_router: fn(App<ExtraConfig>) -> Router,
     job_registry: JobRegistry<ExtraConfig>,
     job_schedule: Vec<ScheduledJob>,
+    sync_registry: SyncRegistry,
 ) where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
@@ -81,9 +86,23 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
     };
 
     let job_queue = crate::job_queue::JobQueue::database();
+    let sync_queue = crate::sync::queue::SyncQueue::database();
+    let sync_registry = Arc::new(sync_registry);
 
     // Initialize rate limiting state
     let rate_limit_state = crate::rate_limiting::RateLimitState::new(config.rate_limiting.clone());
+
+    // Periodically clean up stale IP entries to prevent unbounded memory growth
+    {
+        let cleanup_state = rate_limit_state.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(300));
+            loop {
+                interval.tick().await;
+                cleanup_state.cleanup_expired_entries();
+            }
+        });
+    }
 
     // Initialize WebSocket connections manager
     let websocket_connections = Connections::new();
@@ -94,6 +113,8 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
         db: db.clone(),
         mailer,
         job_queue,
+        sync_queue,
+        sync_registry: sync_registry.clone(),
         rate_limit_state,
         websocket_connections: websocket_connections.clone(),
     };
@@ -111,6 +132,19 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
     let listener_connections = websocket_connections.clone();
     tokio::spawn(async move {
         crate::websocket::listener::start_listener(listener_db, listener_connections).await;
+    });
+
+    // Spawn sync push listener in the background
+    let sync_listener_db = db.clone();
+    let sync_listener_connections = websocket_connections.clone();
+    let sync_listener_registry = sync_registry.clone();
+    tokio::spawn(async move {
+        crate::sync::listener::start_sync_listener(
+            sync_listener_db,
+            sync_listener_connections,
+            sync_listener_registry,
+        )
+        .await;
     });
 
     // Stop the temporary liveness server

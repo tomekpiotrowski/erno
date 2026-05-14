@@ -1,6 +1,9 @@
+use std::sync::Arc;
+
 use crate::{
     app::App, boot::read_config, environment::Environment, mailer::Mailer,
-    rate_limiting::RateLimitState, router::router, websocket::connections::Connections,
+    rate_limiting::RateLimitState, router::router, sync::queue::SyncQueue,
+    sync::registry::SyncRegistry, websocket::connections::Connections,
 };
 use axum::Router;
 use lettre::{transport::smtp::authentication::Credentials, AsyncSmtpTransport, Tokio1Executor};
@@ -171,6 +174,8 @@ pub async fn setup_test<AppMigrator: MigratorTrait>(
         db: db.clone(),
         mailer: mailer.clone(),
         job_queue: job_queue.clone(),
+        sync_queue: SyncQueue::mock(),
+        sync_registry: Arc::new(SyncRegistry::new()),
         rate_limit_state,
         websocket_connections: Connections::new(),
     };
@@ -293,6 +298,8 @@ impl TestUtils {
             db: self.db.clone(),
             mailer: self.mailer.clone(),
             job_queue: self.job_queue.clone(),
+            sync_queue: SyncQueue::mock(),
+            sync_registry: Arc::new(SyncRegistry::new()),
             rate_limit_state: RateLimitState::new(self.config.rate_limiting.clone()),
             websocket_connections: Connections::new(),
         };
