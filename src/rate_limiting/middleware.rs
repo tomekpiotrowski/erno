@@ -81,7 +81,7 @@ pub async fn rate_limit_middleware(
     tracing::Span::current().record("action", action.as_str());
 
     // Check rate limit
-    match state.check_rate_limit(ip, &action) {
+    match state.check_rate_limit(ip, &action).await {
         Ok(()) => {
             // Request allowed
             next.run(req).await

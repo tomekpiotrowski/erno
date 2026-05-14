@@ -1,9 +1,12 @@
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use chrono::Utc;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::sea_query::Expr;
 use serde::Deserialize;
+use validator::Validate;
 
 use crate::{
+    api::validated_json::ValidatedJson,
     app::App,
     auth::jwt::generate_token,
     database::models::{user, user_token, user_token_type::UserTokenType},
@@ -55,15 +58,16 @@ where
     ok
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
 pub struct PasswordResetConfirmBody {
     pub token: String,
+    #[validate(length(min = 8))]
     pub new_password: String,
 }
 
 pub async fn password_reset_confirm<ExtraConfig>(
     State(app): State<App<ExtraConfig>>,
-    Json(body): Json<PasswordResetConfirmBody>,
+    ValidatedJson(body): ValidatedJson<PasswordResetConfirmBody>,
 ) -> impl IntoResponse
 where
     ExtraConfig: Clone + Send + Sync + 'static,
@@ -92,6 +96,26 @@ where
 
     let user_id = token_row.user_id;
 
+    // Atomically claim all password-reset tokens for this user. If rows_affected == 0
+    // a concurrent request already consumed them — treat as expired/invalid.
+    let delete_result = user_token::Entity::delete_many()
+        .filter(user_token::Column::UserId.eq(user_id))
+        .filter(user_token::Column::TokenType.eq(UserTokenType::PasswordReset))
+        .exec(&app.db)
+        .await;
+
+    match delete_result {
+        Ok(r) if r.rows_affected == 0 => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(serde_json::json!({ "error": "invalid_or_expired_token" })),
+            )
+                .into_response()
+        }
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        Ok(_) => {}
+    }
+
     let new_hash = match hash_password(&body.new_password) {
         Ok(h) => h,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -106,9 +130,13 @@ where
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
-    if user_token::Entity::delete_many()
-        .filter(user_token::Column::UserId.eq(user_id))
-        .filter(user_token::Column::TokenType.eq(UserTokenType::PasswordReset))
+    // Invalidate all outstanding sessions by bumping the token version.
+    if user::Entity::update_many()
+        .col_expr(
+            user::Column::TokenVersion,
+            Expr::col(user::Column::TokenVersion).add(1),
+        )
+        .filter(user::Column::Id.eq(user_id))
         .exec(&app.db)
         .await
         .is_err()
@@ -116,7 +144,13 @@ where
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
-    match generate_token(&app.config, user_id) {
+    // Re-fetch the user to get the updated token_version for the new JWT.
+    let updated_user = match user::Entity::find_by_id(user_id).one(&app.db).await {
+        Ok(Some(u)) => u,
+        _ => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+
+    match generate_token(&app.config, user_id, updated_user.token_version) {
         Ok(token) => (StatusCode::OK, Json(serde_json::json!({ "token": token }))).into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }

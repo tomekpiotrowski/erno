@@ -106,6 +106,12 @@ where
             .map_err(|_| AuthError::DatabaseError)?
             .ok_or(AuthError::Unauthorized)?;
 
+        // Reject tokens whose version no longer matches the stored version.
+        // token_version is incremented on logout and password change.
+        if claims.ver != user.token_version {
+            return Err(AuthError::Unauthorized);
+        }
+
         let profile = P::load_for_user(user_id, &state.db).await?;
 
         Ok(CurrentUser { user, profile })

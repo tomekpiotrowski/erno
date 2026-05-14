@@ -13,6 +13,7 @@ use std::sync::Arc;
 use crate::{
     api::health_checks::ok,
     app::App,
+    auth::jwt::validate_jwt_secret,
     config::Config,
     database::setup_database,
     environment::Environment,
@@ -35,6 +36,15 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
     ExtraConfig: Clone + Send + Sync + 'static,
 {
     let port = config.server.port;
+
+    // Validate JWT secret strength before starting.
+    if let Err(msg) = validate_jwt_secret(&config) {
+        if environment == Environment::Production {
+            panic!("🔐 {msg} Refusing to start in production with a weak JWT secret.");
+        } else {
+            tracing::warn!("🔐 {msg}");
+        }
+    }
 
     // We start a temporary liveness server for Kubernetes to know that the application is alive
     let liveness_server_task = tokio::spawn(start_liveness_server(port));

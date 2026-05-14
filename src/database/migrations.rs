@@ -7,6 +7,7 @@ mod m20260513_000001_create_users;
 mod m20260513_000002_create_user_tokens;
 mod m20260513_100000_create_sync_infrastructure;
 mod m20260514_000001_drop_sync_push_queue_user_id;
+mod m20260514_000002_add_token_version_to_users;
 
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
@@ -19,6 +20,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260513_000002_create_user_tokens::Migration),
             Box::new(m20260513_100000_create_sync_infrastructure::Migration),
             Box::new(m20260514_000001_drop_sync_push_queue_user_id::Migration),
+            Box::new(m20260514_000002_add_token_version_to_users::Migration),
         ]
     }
 }

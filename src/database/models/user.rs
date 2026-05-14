@@ -9,6 +9,7 @@ pub struct Model {
     pub email: String,
     pub password_hash: String,
     pub email_verified_at: Option<NaiveDateTime>,
+    pub token_version: i32,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }

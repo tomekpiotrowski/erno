@@ -67,7 +67,7 @@ where
             .into_response();
     }
 
-    match generate_token(&app.config, user.id) {
+    match generate_token(&app.config, user.id, user.token_version) {
         Ok(token) => (StatusCode::OK, Json(LoginResponse { token })).into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }

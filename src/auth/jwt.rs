@@ -14,6 +14,9 @@ use crate::config::Config;
 pub struct Claims {
     /// Subject - the user ID
     pub sub: String,
+    /// Token version — must match `users.token_version`. Incremented on logout
+    /// and password change to invalidate outstanding tokens.
+    pub ver: i32,
     /// Expiration time (Unix timestamp)
     pub exp: usize,
     /// Issued at (Unix timestamp)
@@ -38,12 +41,14 @@ pub struct Claims {
 pub fn generate_token<ExtraConfig>(
     config: &Config<ExtraConfig>,
     user_id: Uuid,
+    token_version: i32,
 ) -> Result<String, jsonwebtoken::errors::Error> {
     let now = Utc::now().timestamp() as usize;
     let exp = now + (config.jwt.expiration_days * 86400) as usize;
 
     let claims = Claims {
         sub: user_id.to_string(),
+        ver: token_version,
         exp,
         iat: now,
     };
@@ -68,6 +73,24 @@ pub fn generate_token<ExtraConfig>(
 ///
 /// # Errors
 /// Returns `jsonwebtoken::errors::Error` if token is invalid, expired, or malformed
+/// Minimum acceptable byte length for an HS256 JWT secret (256 bits).
+const MIN_JWT_SECRET_LEN: usize = 32;
+
+/// Validate that the JWT secret meets minimum length requirements.
+///
+/// Returns `Err` with a descriptive message when the secret is too short.
+/// Call this at startup so misconfiguration is caught before serving traffic.
+pub fn validate_jwt_secret<ExtraConfig>(config: &Config<ExtraConfig>) -> Result<(), String> {
+    if config.jwt.secret.len() < MIN_JWT_SECRET_LEN {
+        return Err(format!(
+            "JWT secret is too short ({} bytes). Minimum is {} bytes (256 bits).",
+            config.jwt.secret.len(),
+            MIN_JWT_SECRET_LEN,
+        ));
+    }
+    Ok(())
+}
+
 pub fn verify_token<ExtraConfig>(
     config: &Config<ExtraConfig>,
     token: &str,

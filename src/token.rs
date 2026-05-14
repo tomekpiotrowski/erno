@@ -1,4 +1,5 @@
 use rand::Rng;
+use rand::rngs::OsRng;
 use sha2::{Digest, Sha256};
 
 /// Generate a cryptographically secure random token.
@@ -14,10 +15,9 @@ use sha2::{Digest, Sha256};
 /// A string containing random alphanumeric characters (A-Z, a-z, 0-9)
 pub fn generate_secure_token(length: usize) -> String {
     const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    let mut rng = rand::thread_rng();
     (0..length)
         .map(|_| {
-            let idx = rng.gen_range(0..62);
+            let idx = OsRng.gen_range(0..62usize);
             CHARSET[idx] as char
         })
         .collect()

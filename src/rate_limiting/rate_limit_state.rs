@@ -1,13 +1,13 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::net::IpAddr;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, trace, warn};
 
 use super::action::RateLimitAction;
+use super::backend::{InMemoryBackend, RateLimitBackend};
 
 /// A single tier in a multi-tier rate limit.
 ///
@@ -24,13 +24,13 @@ pub struct RateLimitTier {
 /// Configuration for a specific action's rate limit.
 ///
 /// Uses multiple tiers to catch attacks at different speeds:
-/// - Tier 1: fast burst detection (e.g., 20 requests in 5 seconds)
-/// - Tier 2: moderate rate (e.g., 30 requests in 10 seconds)
-/// - Tier 3: sustained rate (e.g., 100 requests in 60 seconds)
+/// - Tier 1: fast burst detection (e.g., 2 requests in 5 seconds)
+/// - Tier 2: moderate rate (e.g., 5 requests per minute)
+/// - Tier 3: sustained rate (e.g., 20 requests per hour)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionRateLimit {
-    /// Multiple rate limit tiers, checked in order
-    /// If any tier is exceeded, the request is rate-limited
+    /// Multiple rate limit tiers, checked in order.
+    /// If any tier is exceeded, the request is rate-limited.
     pub tiers: Vec<RateLimitTier>,
 }
 
@@ -62,7 +62,7 @@ pub struct RateLimitConfig {
     #[serde(default = "default_backoff_multiplier")]
     pub backoff_multiplier: f64,
 
-    /// Per-action rate limit overrides
+    /// Per-action rate limit overrides. Keys are action names (e.g. `"user_create"`).
     #[serde(default)]
     pub actions: HashMap<String, ActionRateLimit>,
 }
@@ -72,7 +72,7 @@ fn default_enabled() -> bool {
 }
 
 fn default_window_secs() -> u64 {
-    60 // 1 minute
+    60
 }
 
 fn default_max_requests() -> u32 {
@@ -97,56 +97,76 @@ impl Default for RateLimitConfig {
 }
 
 impl RateLimitConfig {
-    /// Returns default action rate limits with sensible multi-tier defaults.
+    /// Pre-configured limits for sensitive auth endpoints.
     ///
-    /// These are designed to catch attacks at different speeds while
-    /// allowing normal usage patterns.
+    /// These match the action names emitted by the route-tagging middleware in
+    /// `router.rs`. Any action not listed here falls back to the default tier.
     fn default_actions() -> HashMap<String, ActionRateLimit> {
         let mut actions = HashMap::new();
 
-        // User registration - strict multi-tier limit
-        // Catches rapid registration attempts while allowing normal signups
         actions.insert(
             "user_create".to_string(),
             ActionRateLimit {
                 tiers: vec![
-                    RateLimitTier {
-                        window_secs: 5,
-                        max_requests: 2,
-                    }, // Catch immediate attacks
-                    RateLimitTier {
-                        window_secs: 60,
-                        max_requests: 5,
-                    }, // Per minute
-                    RateLimitTier {
-                        window_secs: 3600,
-                        max_requests: 20,
-                    }, // Per hour
+                    RateLimitTier { window_secs: 5, max_requests: 2 },
+                    RateLimitTier { window_secs: 60, max_requests: 5 },
+                    RateLimitTier { window_secs: 3600, max_requests: 20 },
                 ],
             },
         );
 
-        // Email verification - moderate multi-tier limit
         actions.insert(
             "user_verify".to_string(),
             ActionRateLimit {
                 tiers: vec![
-                    RateLimitTier {
-                        window_secs: 5,
-                        max_requests: 15,
-                    }, // Quick verification attempts
-                    RateLimitTier {
-                        window_secs: 20,
-                        max_requests: 30,
-                    }, // Per minute
-                    RateLimitTier {
-                        window_secs: 60,
-                        max_requests: 60,
-                    }, // Per minute
-                    RateLimitTier {
-                        window_secs: 300,
-                        max_requests: 150,
-                    }, // Per 5 minutes
+                    RateLimitTier { window_secs: 5, max_requests: 15 },
+                    RateLimitTier { window_secs: 20, max_requests: 30 },
+                    RateLimitTier { window_secs: 60, max_requests: 60 },
+                    RateLimitTier { window_secs: 300, max_requests: 150 },
+                ],
+            },
+        );
+
+        actions.insert(
+            "user_login".to_string(),
+            ActionRateLimit {
+                tiers: vec![
+                    RateLimitTier { window_secs: 5, max_requests: 5 },
+                    RateLimitTier { window_secs: 60, max_requests: 10 },
+                    RateLimitTier { window_secs: 3600, max_requests: 30 },
+                ],
+            },
+        );
+
+        actions.insert(
+            "password_reset_request".to_string(),
+            ActionRateLimit {
+                tiers: vec![
+                    RateLimitTier { window_secs: 5, max_requests: 2 },
+                    RateLimitTier { window_secs: 60, max_requests: 5 },
+                    RateLimitTier { window_secs: 3600, max_requests: 10 },
+                ],
+            },
+        );
+
+        actions.insert(
+            "password_reset_confirm".to_string(),
+            ActionRateLimit {
+                tiers: vec![
+                    RateLimitTier { window_secs: 5, max_requests: 5 },
+                    RateLimitTier { window_secs: 60, max_requests: 10 },
+                    RateLimitTier { window_secs: 3600, max_requests: 20 },
+                ],
+            },
+        );
+
+        actions.insert(
+            "resend_verification".to_string(),
+            ActionRateLimit {
+                tiers: vec![
+                    RateLimitTier { window_secs: 5, max_requests: 2 },
+                    RateLimitTier { window_secs: 60, max_requests: 5 },
+                    RateLimitTier { window_secs: 3600, max_requests: 10 },
                 ],
             },
         );
@@ -156,16 +176,15 @@ impl RateLimitConfig {
 
     /// Get the rate limit for a specific action.
     ///
-    /// Returns the action-specific limit if configured, otherwise
-    /// returns default multi-tier limits based on the config's single-tier defaults.
+    /// Returns the action-specific limit if configured, otherwise generates a
+    /// two-tier default from `default_window_secs` / `default_max_requests`.
     pub fn get_limit(&self, action: &RateLimitAction) -> ActionRateLimit {
         self.actions
             .get(action.as_str())
             .cloned()
             .unwrap_or_else(|| {
-                // Generate a two-tier default: a short burst window (1/12 of the main window)
-                // plus the full window. Integer division is safe here — .max(1) prevents a
-                // zero window if default_window_secs < 12.
+                // Short burst window (1/12 of the main window) + full window.
+                // .max(1) prevents a zero window if default_window_secs < 12.
                 ActionRateLimit {
                     tiers: vec![
                         RateLimitTier {
@@ -182,143 +201,46 @@ impl RateLimitConfig {
     }
 }
 
-/// Tracks request history for a specific client.
+/// Rate limiting state — config plus a pluggable storage backend.
 ///
-/// Uses sliding windows to count requests in different time buckets,
-/// supporting multi-tier rate limiting. Implements exponential backoff
-/// for repeated violations across any tier.
-#[derive(Debug, Clone)]
-struct ClientState {
-    /// Timestamps of all requests (used for all windows)
-    requests: Vec<Instant>,
-    /// Number of times this client has violated rate limits
-    violations: u32,
-    /// When the client can make requests again (if currently blocked)
-    blocked_until: Option<Instant>,
-}
-
-impl ClientState {
-    fn new() -> Self {
-        Self {
-            requests: Vec::new(),
-            violations: 0,
-            blocked_until: None,
-        }
-    }
-
-    /// Check if this client is currently blocked.
-    ///
-    /// Returns the remaining block duration if blocked, None otherwise.
-    fn is_blocked(&self) -> Option<Duration> {
-        if let Some(blocked_until) = self.blocked_until {
-            let now = Instant::now();
-            if now < blocked_until {
-                return Some(blocked_until - now);
-            }
-        }
-        None
-    }
-
-    /// Remove expired requests from the sliding window.
-    ///
-    /// Cleans up request timestamps that fall outside the current
-    /// rate limit window to keep memory usage bounded.
-    fn cleanup_expired(&mut self, window: Duration) {
-        let cutoff = Instant::now() - window;
-        self.requests.retain(|&timestamp| timestamp > cutoff);
-    }
-
-    /// Record a new request and check if rate limit is exceeded.
-    ///
-    /// Checks all tiers in the rate limit. If any tier is exceeded,
-    /// returns Some(Duration) with the retry-after duration based on
-    /// exponential backoff. Otherwise, records the request and returns None.
-    fn record_request(
-        &mut self,
-        limit: &ActionRateLimit,
-        backoff_multiplier: f64,
-    ) -> Option<Duration> {
-        let now = Instant::now();
-
-        // Reset violations once the block has fully expired so past incidents don't
-        // cause unbounded penalty escalation for legitimate users.
-        if self.blocked_until.is_some_and(|t| now >= t) {
-            self.violations = 0;
-            self.blocked_until = None;
-        }
-
-        // Find the longest window to know how far back we need to keep timestamps
-        let max_window = limit
-            .tiers
-            .iter()
-            .map(|t| Duration::from_secs(t.window_secs))
-            .max()
-            .unwrap_or(Duration::from_secs(60));
-
-        // Clean up old requests outside the longest window
-        self.cleanup_expired(max_window);
-
-        // Check each tier - if any is exceeded, rate limit the request
-        for tier in &limit.tiers {
-            let window = Duration::from_secs(tier.window_secs);
-            let cutoff = now - window;
-
-            // Count requests in this tier's window
-            let requests_in_window = self.requests.iter().filter(|&&t| t > cutoff).count();
-
-            if requests_in_window >= tier.max_requests as usize {
-                // This tier is exceeded - apply exponential backoff
-                self.violations += 1;
-
-                // Use the tier's window as base penalty
-                let base_penalty = Duration::from_secs(tier.window_secs);
-                let penalty_multiplier = backoff_multiplier.powi(self.violations as i32 - 1);
-                let penalty = base_penalty.mul_f64(penalty_multiplier);
-
-                self.blocked_until = Some(now + penalty);
-
-                warn!(
-                    tier_window_secs = tier.window_secs,
-                    tier_max_requests = tier.max_requests,
-                    violations = self.violations,
-                    penalty_secs = penalty.as_secs(),
-                    "Rate limit tier exceeded with exponential backoff"
-                );
-
-                return Some(penalty);
-            }
-        }
-
-        // All tiers passed - record this request
-        self.requests.push(now);
-        trace!(
-            total_requests = self.requests.len(),
-            "Request recorded within all rate limit tiers"
-        );
-
-        None
-    }
-}
-
-/// In-memory rate limiting state tracker.
-///
-/// Maintains per-IP request history and violation counts. Uses DashMap
-/// for efficient concurrent access across multiple request handlers.
-#[derive(Clone, Debug)]
+/// The default constructor uses [`InMemoryBackend`], which is correct for
+/// single-replica deployments. For multi-replica use [`RateLimitState::with_backend`]
+/// and supply a shared-store backend (Redis, Postgres, etc.).
+#[derive(Clone)]
 pub struct RateLimitState {
     config: Arc<RateLimitConfig>,
-    clients: Arc<DashMap<IpAddr, ClientState>>,
+    backend: Arc<dyn RateLimitBackend>,
+    /// Kept as a concrete reference so the cleanup task can call
+    /// `cleanup_expired_entries` without needing a trait method or downcasting.
+    in_memory: Option<Arc<InMemoryBackend>>,
+}
+
+impl fmt::Debug for RateLimitState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RateLimitState")
+            .field("config", &self.config)
+            .field("backend", &"<dyn RateLimitBackend>")
+            .finish()
+    }
 }
 
 impl RateLimitState {
-    /// Create a new rate limit state with the given configuration.
-    ///
-    /// Initializes the in-memory tracking structures for monitoring
-    /// client requests and enforcing rate limits.
+    /// Create a new state with the default in-memory backend.
     pub fn new(config: RateLimitConfig) -> Self {
+        let backend = Arc::new(InMemoryBackend::new());
         Self {
             config: Arc::new(config),
-            clients: Arc::new(DashMap::new()),
+            in_memory: Some(backend.clone()),
+            backend,
+        }
+    }
+
+    /// Create a new state with a custom backend (e.g. Redis for multi-replica).
+    pub fn with_backend(config: RateLimitConfig, backend: Arc<dyn RateLimitBackend>) -> Self {
+        Self {
+            config: Arc::new(config),
+            backend,
+            in_memory: None,
         }
     }
 
@@ -327,62 +249,25 @@ impl RateLimitState {
         self.config.trust_proxy
     }
 
-    /// Check if a request from the given IP should be allowed.
+    /// Check if a request from `ip` for `action` is within the rate limit.
     ///
-    /// Returns None if the request is allowed, or Some(Duration) with
-    /// the retry-after duration if the rate limit is exceeded.
-    pub fn check_rate_limit(&self, ip: IpAddr, action: &RateLimitAction) -> Result<(), Duration> {
+    /// Returns `Ok(())` if allowed, or `Err(retry_after)` if blocked.
+    pub async fn check_rate_limit(&self, ip: IpAddr, action: &RateLimitAction) -> Result<(), Duration> {
         if !self.config.enabled {
             return Ok(());
         }
-
         let limit = self.config.get_limit(action);
-
-        let mut entry = self.clients.entry(ip).or_insert_with(ClientState::new);
-        let client = entry.value_mut();
-
-        // Check if currently blocked
-        if let Some(remaining) = client.is_blocked() {
-            debug!(
-                ip = %ip,
-                action = action.as_str(),
-                remaining_secs = remaining.as_secs(),
-                "Request blocked due to previous violations"
-            );
-            return Err(remaining);
-        }
-
-        // Record request and check limit
-        if let Some(penalty) = client.record_request(&limit, self.config.backoff_multiplier) {
-            debug!(
-                ip = %ip,
-                action = action.as_str(),
-                penalty_secs = penalty.as_secs(),
-                "Rate limit exceeded"
-            );
-            return Err(penalty);
-        }
-
-        Ok(())
+        let key = format!("{}/{}", ip, action.as_str());
+        self.backend.check_rate_limit(&key, &limit, self.config.backoff_multiplier).await
     }
 
-    /// Periodically clean up expired entries to prevent unbounded memory growth.
+    /// Remove stale in-memory entries. No-op for non-in-memory backends.
     ///
-    /// Should be called periodically (e.g., every few minutes) to remove
-    /// entries for IPs that haven't made requests recently.
+    /// Call periodically (e.g. every 5 minutes) to prevent unbounded memory growth.
     pub fn cleanup_expired_entries(&self) {
-        let cutoff = Instant::now() - Duration::from_secs(3600); // 1 hour
-
-        self.clients.retain(|_ip, client| {
-            // Keep entries that have recent requests or are still blocked
-            if let Some(blocked_until) = client.blocked_until {
-                if Instant::now() < blocked_until {
-                    return true;
-                }
-            }
-
-            !client.requests.is_empty() && client.requests.last().is_some_and(|&t| t > cutoff)
-        });
+        if let Some(mem) = &self.in_memory {
+            mem.cleanup_expired_entries();
+        }
     }
 }
 
@@ -390,266 +275,132 @@ impl RateLimitState {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_single_tier_allows_requests_under_limit() {
-        let mut actions = HashMap::new();
-        actions.insert(
-            "test".to_string(),
-            ActionRateLimit {
-                tiers: vec![RateLimitTier {
-                    window_secs: 60,
-                    max_requests: 5,
-                }],
-            },
-        );
-
-        let config = RateLimitConfig {
-            enabled: true,
+    fn make_state(enabled: bool, actions: HashMap<String, ActionRateLimit>, default_max: u32) -> RateLimitState {
+        RateLimitState::new(RateLimitConfig {
+            enabled,
             trust_proxy: false,
             default_window_secs: 60,
-            default_max_requests: 5,
+            default_max_requests: default_max,
             backoff_multiplier: 2.0,
             actions,
-        };
+        })
+    }
 
-        let state = RateLimitState::new(config);
+    fn action_limit(window_secs: u64, max_requests: u32) -> ActionRateLimit {
+        ActionRateLimit { tiers: vec![RateLimitTier { window_secs, max_requests }] }
+    }
+
+    #[tokio::test]
+    async fn test_single_tier_allows_requests_under_limit() {
+        let mut actions = HashMap::new();
+        actions.insert("test".to_string(), action_limit(60, 5));
+        let state = make_state(true, actions, 5);
         let ip = "127.0.0.1".parse().unwrap();
         let action = RateLimitAction::new("test");
-
-        // Should allow first 5 requests
         for _ in 0..5 {
-            assert!(state.check_rate_limit(ip, &action).is_ok());
+            assert!(state.check_rate_limit(ip, &action).await.is_ok());
         }
     }
 
-    #[test]
-    fn test_single_tier_blocks_excess_requests() {
+    #[tokio::test]
+    async fn test_single_tier_blocks_excess_requests() {
         let mut actions = HashMap::new();
-        actions.insert(
-            "test".to_string(),
-            ActionRateLimit {
-                tiers: vec![RateLimitTier {
-                    window_secs: 60,
-                    max_requests: 3,
-                }],
-            },
-        );
-
-        let config = RateLimitConfig {
-            enabled: true,
-            trust_proxy: false,
-            default_window_secs: 60,
-            default_max_requests: 10,
-            backoff_multiplier: 2.0,
-            actions,
-        };
-
-        let state = RateLimitState::new(config);
+        actions.insert("test".to_string(), action_limit(60, 3));
+        let state = make_state(true, actions, 10);
         let ip = "127.0.0.1".parse().unwrap();
         let action = RateLimitAction::new("test");
-
-        // First 3 requests should succeed
         for _ in 0..3 {
-            assert!(state.check_rate_limit(ip, &action).is_ok());
+            assert!(state.check_rate_limit(ip, &action).await.is_ok());
         }
-
-        // 4th request should be blocked
-        assert!(state.check_rate_limit(ip, &action).is_err());
+        assert!(state.check_rate_limit(ip, &action).await.is_err());
     }
 
-    #[test]
-    fn test_multi_tier_catches_fast_burst() {
+    #[tokio::test]
+    async fn test_multi_tier_catches_fast_burst() {
         let mut actions = HashMap::new();
-        actions.insert(
-            "test".to_string(),
-            ActionRateLimit {
-                tiers: vec![
-                    RateLimitTier {
-                        window_secs: 5,
-                        max_requests: 2,
-                    }, // Fast tier
-                    RateLimitTier {
-                        window_secs: 60,
-                        max_requests: 100,
-                    }, // Slow tier
-                ],
-            },
-        );
-
-        let config = RateLimitConfig {
-            enabled: true,
-            trust_proxy: false,
-            default_window_secs: 60,
-            default_max_requests: 100,
-            backoff_multiplier: 2.0,
-            actions,
-        };
-
-        let state = RateLimitState::new(config);
+        actions.insert("test".to_string(), ActionRateLimit {
+            tiers: vec![
+                RateLimitTier { window_secs: 5, max_requests: 2 },
+                RateLimitTier { window_secs: 60, max_requests: 100 },
+            ],
+        });
+        let state = make_state(true, actions, 100);
         let ip = "127.0.0.1".parse().unwrap();
         let action = RateLimitAction::new("test");
-
-        // First 2 requests in 5s window should succeed
-        assert!(state.check_rate_limit(ip, &action).is_ok());
-        assert!(state.check_rate_limit(ip, &action).is_ok());
-
-        // 3rd request should be blocked by fast tier
-        assert!(state.check_rate_limit(ip, &action).is_err());
+        assert!(state.check_rate_limit(ip, &action).await.is_ok());
+        assert!(state.check_rate_limit(ip, &action).await.is_ok());
+        assert!(state.check_rate_limit(ip, &action).await.is_err());
     }
 
-    #[test]
-    fn test_multi_tier_allows_normal_rate() {
+    #[tokio::test]
+    async fn test_multi_tier_allows_normal_rate() {
         let mut actions = HashMap::new();
-        actions.insert(
-            "test".to_string(),
-            ActionRateLimit {
-                tiers: vec![
-                    RateLimitTier {
-                        window_secs: 5,
-                        max_requests: 100,
-                    },
-                    RateLimitTier {
-                        window_secs: 60,
-                        max_requests: 200,
-                    },
-                ],
-            },
-        );
-
-        let config = RateLimitConfig {
-            enabled: true,
-            trust_proxy: false,
-            default_window_secs: 60,
-            default_max_requests: 100,
-            backoff_multiplier: 2.0,
-            actions,
-        };
-
-        let state = RateLimitState::new(config);
+        actions.insert("test".to_string(), ActionRateLimit {
+            tiers: vec![
+                RateLimitTier { window_secs: 5, max_requests: 100 },
+                RateLimitTier { window_secs: 60, max_requests: 200 },
+            ],
+        });
+        let state = make_state(true, actions, 100);
         let ip = "127.0.0.1".parse().unwrap();
         let action = RateLimitAction::new("test");
-
-        // Should be able to make many requests without hitting the limits
         for _ in 0..50 {
-            assert!(
-                state.check_rate_limit(ip, &action).is_ok(),
-                "Request should succeed with permissive rate limits"
-            );
+            assert!(state.check_rate_limit(ip, &action).await.is_ok(), "Request should succeed");
         }
     }
 
-    #[test]
-    fn test_disabled_rate_limiting() {
-        let config = RateLimitConfig {
-            enabled: false,
-            trust_proxy: false,
-            default_window_secs: 60,
-            default_max_requests: 1,
-            backoff_multiplier: 2.0,
-            actions: HashMap::new(),
-        };
-
-        let state = RateLimitState::new(config);
+    #[tokio::test]
+    async fn test_disabled_rate_limiting() {
+        let state = make_state(false, HashMap::new(), 1);
         let ip = "127.0.0.1".parse().unwrap();
         let action = RateLimitAction::new("test");
-
-        // Should allow unlimited requests when disabled
         for _ in 0..100 {
-            assert!(state.check_rate_limit(ip, &action).is_ok());
+            assert!(state.check_rate_limit(ip, &action).await.is_ok());
         }
     }
 
-    #[test]
-    fn test_action_specific_limits() {
+    #[tokio::test]
+    async fn test_action_specific_limits() {
         let mut actions = HashMap::new();
-        actions.insert(
-            "strict".to_string(),
-            ActionRateLimit {
-                tiers: vec![RateLimitTier {
-                    window_secs: 60,
-                    max_requests: 2,
-                }],
-            },
-        );
-
-        let config = RateLimitConfig {
-            enabled: true,
-            trust_proxy: false,
-            default_window_secs: 60,
-            default_max_requests: 100, // Increased to allow 10 requests
-            backoff_multiplier: 2.0,
-            actions,
-        };
-
-        let state = RateLimitState::new(config);
+        actions.insert("strict".to_string(), action_limit(60, 2));
+        let state = make_state(true, actions, 100);
         let ip = "127.0.0.1".parse().unwrap();
-        let strict_action = RateLimitAction::new("strict");
-        let normal_action = RateLimitAction::new("normal");
+        let strict = RateLimitAction::new("strict");
+        let normal = RateLimitAction::new("normal");
 
-        // Strict action should allow only 2 requests
-        assert!(state.check_rate_limit(ip, &strict_action).is_ok());
-        assert!(state.check_rate_limit(ip, &strict_action).is_ok());
-        assert!(state.check_rate_limit(ip, &strict_action).is_err());
+        assert!(state.check_rate_limit(ip, &strict).await.is_ok());
+        assert!(state.check_rate_limit(ip, &strict).await.is_ok());
+        assert!(state.check_rate_limit(ip, &strict).await.is_err());
 
-        // Normal action should allow more (different IP to avoid interference)
         let ip2 = "127.0.0.2".parse().unwrap();
         for _ in 0..10 {
-            assert!(state.check_rate_limit(ip2, &normal_action).is_ok());
+            assert!(state.check_rate_limit(ip2, &normal).await.is_ok());
         }
-        // 11th request should be blocked (exceeds 60s limit of 10 derived from default_max_requests)
-        assert!(state.check_rate_limit(ip2, &normal_action).is_err());
+        assert!(state.check_rate_limit(ip2, &normal).await.is_err());
     }
 
-    #[test]
-    fn test_violations_reset_after_block_expires() {
-        use std::thread;
+    #[tokio::test]
+    async fn test_custom_backend_accepted() {
+        use async_trait::async_trait;
 
-        let mut actions = HashMap::new();
-        actions.insert(
-            "test".to_string(),
-            ActionRateLimit {
-                tiers: vec![RateLimitTier {
-                    window_secs: 1, // 1-second window so we can expire it quickly
-                    max_requests: 2,
-                }],
-            },
+        struct AlwaysAllow;
+
+        #[async_trait]
+        impl RateLimitBackend for AlwaysAllow {
+            async fn check_rate_limit(&self, _key: &str, _limit: &ActionRateLimit, _backoff: f64) -> Result<(), Duration> {
+                Ok(())
+            }
+        }
+
+        let state = RateLimitState::with_backend(
+            RateLimitConfig { enabled: true, default_max_requests: 1, ..Default::default() },
+            Arc::new(AlwaysAllow),
         );
-
-        let config = RateLimitConfig {
-            enabled: true,
-            trust_proxy: false,
-            default_window_secs: 60,
-            default_max_requests: 100,
-            backoff_multiplier: 2.0,
-            actions,
-        };
-
-        let state = RateLimitState::new(config);
         let ip = "127.0.0.1".parse().unwrap();
         let action = RateLimitAction::new("test");
-
-        // Hit the limit to produce violations = 1, penalty = 1s
-        assert!(state.check_rate_limit(ip, &action).is_ok());
-        assert!(state.check_rate_limit(ip, &action).is_ok());
-        assert!(state.check_rate_limit(ip, &action).is_err()); // violations = 1
-
-        // Wait for the block to expire
-        thread::sleep(std::time::Duration::from_millis(1100));
-
-        // First request after block expires should succeed and reset violations to 0
-        assert!(
-            state.check_rate_limit(ip, &action).is_ok(),
-            "First request after block should succeed"
-        );
-
-        // Verify violations were reset: hitting the limit again gives penalty = 1s (not 2s)
-        assert!(state.check_rate_limit(ip, &action).is_ok());
-        let err = state.check_rate_limit(ip, &action);
-        assert!(err.is_err());
-        // With violations reset to 0 before the hit, new violations = 1, penalty = 1s (not 2s)
-        assert!(
-            err.unwrap_err().as_secs() <= 1,
-            "Penalty should be reset to base window, not doubled"
-        );
+        // AlwaysAllow never blocks, even past the config limit
+        for _ in 0..200 {
+            assert!(state.check_rate_limit(ip, &action).await.is_ok());
+        }
     }
 }

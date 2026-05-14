@@ -46,6 +46,26 @@ where
 
     let user_id = token_row.user_id;
 
+    // Atomically claim all email-verification tokens for this user. If rows_affected == 0
+    // a concurrent request already consumed them — treat as expired/invalid.
+    let delete_result = user_token::Entity::delete_many()
+        .filter(user_token::Column::UserId.eq(user_id))
+        .filter(user_token::Column::TokenType.eq(UserTokenType::EmailVerification))
+        .exec(&app.db)
+        .await;
+
+    match delete_result {
+        Ok(r) if r.rows_affected == 0 => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(serde_json::json!({ "error": "invalid_or_expired_token" })),
+            )
+                .into_response()
+        }
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        Ok(_) => {}
+    }
+
     let user_update = user::ActiveModel {
         id: Set(user_id),
         email_verified_at: Set(Some(now)),
@@ -55,15 +75,13 @@ where
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
-    if user_token::Entity::delete_by_id(token_row.id)
-        .exec(&app.db)
-        .await
-        .is_err()
-    {
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-    }
+    // Re-fetch the user to get the current token_version for the JWT.
+    let verified_user = match user::Entity::find_by_id(user_id).one(&app.db).await {
+        Ok(Some(u)) => u,
+        _ => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
 
-    match generate_token(&app.config, user_id) {
+    match generate_token(&app.config, user_id, verified_user.token_version) {
         Ok(token) => (StatusCode::OK, Json(serde_json::json!({ "token": token }))).into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }

@@ -4,6 +4,7 @@ use crate::app::App;
 
 use super::handlers::{
     login::login,
+    logout::logout,
     password_reset::{password_reset_confirm, password_reset_request},
     register::register,
     resend_verification::resend_verification,
@@ -27,6 +28,7 @@ where
     Router::new()
         .route("/auth/register", post(register::<ExtraConfig>))
         .route("/auth/login", post(login::<ExtraConfig>))
+        .route("/auth/logout", post(logout::<ExtraConfig>))
         .route("/auth/email/verify", post(verify_email::<ExtraConfig>))
         .route(
             "/auth/email/resend-verification",
