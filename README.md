@@ -5,18 +5,40 @@
 [![Documentation](https://docs.rs/erno/badge.svg)](https://docs.rs/erno)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Shared infrastructure library for building REST APIs with Axum.
+Full-stack SaaS framework — a Rust/Axum backend library paired with an Angular library for building Ionic web and mobile apps.
+
+## Monorepo layout
+
+| Directory | What it is |
+|-----------|------------|
+| `api/` | Rust library crate — batteries-included backend (auth, jobs, billing, sync, storage) |
+| `app/` | Angular library (`erno-angular`) — consumed by Ionic apps for web and mobile |
+| `docs/` | Astro documentation site |
 
 ## Features
 
-- **Job Processing** - Background job scheduler with workers and advisory locks
-- **Authentication** - JWT-based authentication with current user extraction
-- **Configuration** - Environment-based configuration management
-- **Database** - SeaORM integration with migrations
-- **Telemetry** - Tracing and observability setup
-- **API Utilities** - JSON error handling, validation, rate limiting
-- **WebSocket** - WebSocket connection management
-- **Console** - Interactive Rhai scripting console
+### Backend (Rust / `api/`)
+
+- **Authentication** - JWT access + refresh tokens, registration, password reset, email verification
+- **Offline-first sync** - Delta sync engine with PostgreSQL LISTEN/NOTIFY, conflict detection, soft deletes
+- **Job processing** - Background job queue with advisory locks, retry, cron scheduling
+- **Billing** - Stripe integration, subscription plans, trial management, plan-based feature gates
+- **Storage** - S3 / local file storage abstraction
+- **Rate limiting** - Multi-tier adaptive rate limiting
+- **Authorization** - Pundit-style policy-based authz (`Policy` trait)
+- **WebSocket** - Real-time push to connected clients
+- **Metrics** - Prometheus-compatible `/metrics` endpoint
+- **Admin** - CLI/TUI admin commands
+
+### Frontend (Angular / `app/`)
+
+- **Auth service** - Login, registration, JWT token management and refresh
+- **HTTP interceptor** - Transparent token injection on every outbound request
+- **Realtime service** - WebSocket connection to backend push events
+- **Offline sync** - Local IndexedDB via Dexie + delta sync with the backend
+- **Storage service** - File upload/download against backend storage
+- **Billing service** - Stripe checkout and portal redirects
+- **Devtools** - Dev overlay and mail preview for local development
 
 ## Installation
 
