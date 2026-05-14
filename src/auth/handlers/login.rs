@@ -1,12 +1,12 @@
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use validator::Validate;
 
 use crate::{
     api::validated_json::ValidatedJson,
     app::App,
-    auth::jwt::generate_token,
+    auth::handlers::issue_token_pair,
     database::models::user,
     password::verify_password,
 };
@@ -18,10 +18,6 @@ pub struct LoginRequest {
     pub password: String,
 }
 
-#[derive(Serialize)]
-struct LoginResponse {
-    token: String,
-}
 
 pub async fn login<ExtraConfig>(
     State(app): State<App<ExtraConfig>>,
@@ -67,8 +63,8 @@ where
             .into_response();
     }
 
-    match generate_token(&app.config, user.id, user.token_version) {
-        Ok(token) => (StatusCode::OK, Json(LoginResponse { token })).into_response(),
+    match issue_token_pair(&app, &user).await {
+        Ok(pair) => (StatusCode::OK, Json(pair)).into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
@@ -119,6 +115,7 @@ mod tests {
         assert_eq!(response.status_code(), 200);
         let body: serde_json::Value = response.json();
         assert!(body["token"].is_string());
+        assert!(body["refresh_token"].is_string());
     }
 
     #[tokio::test]

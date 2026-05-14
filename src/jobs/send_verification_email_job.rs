@@ -38,7 +38,7 @@ impl<ExtraConfig: Clone + Send + Sync + 'static> Job<ExtraConfig>
             .map_err(|e| JobError::TryAgainLater(e.to_string()))?;
 
         let expires_at = Utc::now()
-            + chrono::Duration::hours(app.config.auth.token_expiration_hours as i64);
+            + chrono::Duration::hours(app.config.auth.one_time_token_expiry_hours as i64);
 
         user_token::ActiveModel {
             user_id: Set(args.user_id),

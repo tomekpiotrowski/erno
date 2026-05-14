@@ -15,9 +15,8 @@ pub fn handle_generate_secret_command() {
 
     println!("🔐 Generated JWT Secret:");
     println!();
-    println!("jwt:");
+    println!("auth:");
     println!("  secret: \"{}\"", encoded);
-    println!("  expiration_days: 7");
     println!();
     println!("Add this to your config/{{environment}}.yaml file.");
 }

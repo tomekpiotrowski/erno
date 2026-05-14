@@ -1,16 +1,40 @@
-use axum::{extract::State, http::StatusCode, response::IntoResponse};
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use sea_orm::sea_query::Expr;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use serde::Deserialize;
 
-use crate::{app::App, auth::current_user::CurrentUser, database::models::user};
+use crate::{
+    app::App,
+    auth::current_user::CurrentUser,
+    database::models::{user, user_token, user_token_type::UserTokenType},
+    token::hash_token,
+};
+
+#[derive(Debug, Deserialize, Default)]
+pub struct LogoutRequest {
+    pub refresh_token: Option<String>,
+}
 
 pub async fn logout<ExtraConfig>(
     State(app): State<App<ExtraConfig>>,
     current_user: CurrentUser,
+    body: Option<Json<LogoutRequest>>,
 ) -> impl IntoResponse
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
+    let refresh_token = body.and_then(|b| b.0.refresh_token);
+
+    if let Some(raw_token) = refresh_token {
+        let token_hash = hash_token(&raw_token);
+        let _ = user_token::Entity::delete_many()
+            .filter(user_token::Column::UserId.eq(current_user.id))
+            .filter(user_token::Column::TokenType.eq(UserTokenType::RefreshToken))
+            .filter(user_token::Column::TokenHash.eq(token_hash))
+            .exec(&app.db)
+            .await;
+    }
+
     let result = user::Entity::update_many()
         .col_expr(
             user::Column::TokenVersion,
@@ -36,9 +60,13 @@ mod tests {
     use crate::{
         app::App,
         auth::{jwt::generate_token, router::auth_router},
-        database::{migrations::Migrator, models::user},
+        database::{
+            migrations::Migrator,
+            models::{user, user_token, user_token_type::UserTokenType},
+        },
         password::hash_password,
         tests::setup_test::setup_test,
+        token::hash_token,
     };
 
     fn test_router(app: App) -> Router {
@@ -68,7 +96,6 @@ mod tests {
 
         let token = generate_token(&t.config, u.id, u.token_version).unwrap();
 
-        // Logout should succeed
         let response = t
             .server
             .post("/api/auth/logout")
@@ -76,11 +103,53 @@ mod tests {
             .await;
         assert_eq!(response.status_code(), 204);
 
-        // The same token should now be rejected
         let response = t
             .server
             .post("/api/auth/logout")
             .add_header("Authorization", format!("Bearer {token}"))
+            .await;
+        assert_eq!(response.status_code(), 401);
+    }
+
+    #[tokio::test]
+    async fn test_logout_deletes_refresh_token() {
+        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+
+        let u = user::ActiveModel {
+            email: Set("logout_refresh@example.com".to_string()),
+            password_hash: Set(hash_password("password123").unwrap()),
+            email_verified_at: Set(Some(Utc::now().naive_utc())),
+            ..Default::default()
+        }
+        .insert(&t.db)
+        .await
+        .unwrap();
+
+        user_token::ActiveModel {
+            user_id: Set(u.id),
+            token_type: Set(UserTokenType::RefreshToken),
+            token_hash: Set(hash_token("my_refresh_token")),
+            expires_at: Set((Utc::now() + chrono::Duration::days(30)).naive_utc()),
+            ..Default::default()
+        }
+        .insert(&t.db)
+        .await
+        .unwrap();
+
+        let token = generate_token(&t.config, u.id, u.token_version).unwrap();
+        let response = t
+            .server
+            .post("/api/auth/logout")
+            .add_header("Authorization", format!("Bearer {token}"))
+            .json(&json!({ "refresh_token": "my_refresh_token" }))
+            .await;
+        assert_eq!(response.status_code(), 204);
+
+        // Refresh token should now be gone
+        let response = t
+            .server
+            .post("/api/auth/refresh")
+            .json(&json!({ "refresh_token": "my_refresh_token" }))
             .await;
         assert_eq!(response.status_code(), 401);
     }
@@ -108,7 +177,6 @@ mod tests {
 
         let old_token = generate_token(&t.config, u.id, u.token_version).unwrap();
 
-        // Do a login to get the current token (same version)
         let login_response = t
             .server
             .post("/api/auth/login")
@@ -116,7 +184,6 @@ mod tests {
             .await;
         assert_eq!(login_response.status_code(), 200);
 
-        // Simulate a password reset by inserting a reset token then confirming it
         use crate::{
             database::models::{user_token, user_token_type::UserTokenType},
             token::hash_token,
@@ -139,7 +206,6 @@ mod tests {
             .await;
         assert_eq!(reset_response.status_code(), 200);
 
-        // The old token should now be rejected
         let response = t
             .server
             .post("/api/auth/logout")

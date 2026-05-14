@@ -11,4 +11,6 @@ pub enum UserTokenType {
     EmailVerification,
     #[sea_orm(string_value = "password_reset")]
     PasswordReset,
+    #[sea_orm(string_value = "refresh_token")]
+    RefreshToken,
 }

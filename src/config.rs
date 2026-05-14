@@ -92,7 +92,6 @@ pub struct Config<ExtraConfig = ()> {
     pub server: ServerConfig,
     pub email: EmailConfig,
     pub base_url: String,
-    pub jwt: JwtConfig,
     pub auth: AuthConfig,
     pub rate_limiting: RateLimitConfig,
     pub stripe: Option<StripeConfig>,
@@ -105,14 +104,23 @@ pub struct Config<ExtraConfig = ()> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct JwtConfig {
+pub struct AuthConfig {
     pub secret: String,
-    pub expiration_days: u64,
+    /// Access token TTL in minutes. Default: 15.
+    #[serde(default = "default_access_token_minutes")]
+    pub access_token_minutes: u64,
+    pub one_time_token_expiry_hours: u64,
+    /// Refresh token TTL in days. Default: 30.
+    #[serde(default = "default_refresh_token_days")]
+    pub refresh_token_days: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuthConfig {
-    pub token_expiration_hours: u64,
+const fn default_access_token_minutes() -> u64 {
+    15
+}
+
+const fn default_refresh_token_days() -> u64 {
+    30
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

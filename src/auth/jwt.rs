@@ -44,7 +44,7 @@ pub fn generate_token<ExtraConfig>(
     token_version: i32,
 ) -> Result<String, jsonwebtoken::errors::Error> {
     let now = Utc::now().timestamp() as usize;
-    let exp = now + (config.jwt.expiration_days * 86400) as usize;
+    let exp = now + (config.auth.access_token_minutes * 60) as usize;
 
     let claims = Claims {
         sub: user_id.to_string(),
@@ -56,7 +56,7 @@ pub fn generate_token<ExtraConfig>(
     encode(
         &Header::default(),
         &claims,
-        &EncodingKey::from_secret(config.jwt.secret.as_bytes()),
+        &EncodingKey::from_secret(config.auth.secret.as_bytes()),
     )
 }
 
@@ -81,10 +81,10 @@ const MIN_JWT_SECRET_LEN: usize = 32;
 /// Returns `Err` with a descriptive message when the secret is too short.
 /// Call this at startup so misconfiguration is caught before serving traffic.
 pub fn validate_jwt_secret<ExtraConfig>(config: &Config<ExtraConfig>) -> Result<(), String> {
-    if config.jwt.secret.len() < MIN_JWT_SECRET_LEN {
+    if config.auth.secret.len() < MIN_JWT_SECRET_LEN {
         return Err(format!(
             "JWT secret is too short ({} bytes). Minimum is {} bytes (256 bits).",
-            config.jwt.secret.len(),
+            config.auth.secret.len(),
             MIN_JWT_SECRET_LEN,
         ));
     }
@@ -97,7 +97,7 @@ pub fn verify_token<ExtraConfig>(
 ) -> Result<Claims, jsonwebtoken::errors::Error> {
     let token_data = decode::<Claims>(
         token,
-        &DecodingKey::from_secret(config.jwt.secret.as_bytes()),
+        &DecodingKey::from_secret(config.auth.secret.as_bytes()),
         &Validation::default(),
     )?;
 

@@ -13,12 +13,11 @@ port = 3000
 [email]
 type = "mock"
 
-[jwt]
-secret = "test_jwt_secret_for_testing_only_1234567890"
-expiration_days = 30
-
 [auth]
-token_expiration_hours = 24
+secret = "test_jwt_secret_for_testing_only_1234567890"
+access_token_minutes = 15
+one_time_token_expiry_hours = 24
+refresh_token_days = 30
 
 [jobs.cleanup]
 interval_seconds = 3600

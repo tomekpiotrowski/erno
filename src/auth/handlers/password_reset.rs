@@ -8,7 +8,7 @@ use validator::Validate;
 use crate::{
     api::validated_json::ValidatedJson,
     app::App,
-    auth::jwt::generate_token,
+    auth::handlers::issue_token_pair,
     database::models::{user, user_token, user_token_type::UserTokenType},
     jobs::send_password_reset_email_job::{SendPasswordResetEmailArgs, SendPasswordResetEmailJob},
     password::hash_password,
@@ -150,8 +150,8 @@ where
         _ => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    match generate_token(&app.config, user_id, updated_user.token_version) {
-        Ok(token) => (StatusCode::OK, Json(serde_json::json!({ "token": token }))).into_response(),
+    match issue_token_pair(&app, &updated_user).await {
+        Ok(pair) => (StatusCode::OK, Json(pair)).into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
@@ -256,6 +256,7 @@ mod tests {
         assert_eq!(response.status_code(), 200);
         let body: serde_json::Value = response.json();
         assert!(body["token"].is_string());
+        assert!(body["refresh_token"].is_string());
     }
 
     #[tokio::test]

@@ -6,6 +6,7 @@ use super::handlers::{
     login::login,
     logout::logout,
     password_reset::{password_reset_confirm, password_reset_request},
+    refresh::refresh,
     register::register,
     resend_verification::resend_verification,
     verify_email::verify_email,
@@ -42,5 +43,6 @@ where
             "/auth/password-reset/confirm",
             post(password_reset_confirm::<ExtraConfig>),
         )
+        .route("/auth/refresh", post(refresh::<ExtraConfig>))
         .with_state(app)
 }

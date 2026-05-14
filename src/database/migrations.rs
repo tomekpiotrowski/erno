@@ -14,6 +14,7 @@ mod m20260514_100002_create_trial_subscriptions;
 mod m20260514_100003_add_subscription_cache_to_users;
 mod m20260514_200000_create_files;
 mod m20260514_200001_create_file_attachments;
+mod m20260515_000001_add_refresh_token_type;
 
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
@@ -33,6 +34,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260514_100003_add_subscription_cache_to_users::Migration),
             Box::new(m20260514_200000_create_files::Migration),
             Box::new(m20260514_200001_create_file_attachments::Migration),
+            Box::new(m20260515_000001_add_refresh_token_type::Migration),
         ]
     }
 }
