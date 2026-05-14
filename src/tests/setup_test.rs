@@ -1,13 +1,10 @@
-use std::sync::Arc;
-
 use crate::{
     app::App, boot::read_config, environment::Environment, mailer::Mailer,
-    rate_limiting::RateLimitState, router::router, sync::queue::SyncQueue,
-    sync::registry::SyncRegistry, websocket::connections::Connections,
+    rate_limiting::RateLimitState, router::router, websocket::connections::Connections,
 };
 use axum::Router;
 use lettre::{transport::smtp::authentication::Credentials, AsyncSmtpTransport, Tokio1Executor};
-use sea_orm::{ConnectOptions, ConnectionTrait, DbBackend, Statement};
+use sea_orm::{ConnectOptions, ConnectionTrait, Statement};
 use sea_orm_migration::MigratorTrait;
 use tokio::sync::OnceCell;
 use tracing::debug;
@@ -56,15 +53,15 @@ async fn initialize_database_schema<AppMigrator: MigratorTrait>(fixture_loader: 
     let db = setup_database_connection(&app_config.database).await;
     debug!("Database connection established");
 
-    // Reset all migrations to a clean state and re-apply them.
+    // Reset and reapply migrations for a clean slate
     debug!("Refreshing database migrations");
     match AppMigrator::refresh(&db).await {
         Ok(()) => {
             debug!("Database migrations refreshed successfully");
         }
         Err(e) => {
-            error!("❌ Database migration refresh failed: {}", e);
-            panic!("Database migration refresh failed: {e}");
+            error!("❌ Database migrations failed: {}", e);
+            panic!("Database migrations failed: {e}");
         }
     }
 
@@ -133,7 +130,7 @@ pub async fn setup_test<AppMigrator: MigratorTrait>(
     // Begin a transaction manually - since we have only 1 connection,
     // all subsequent queries will be within this transaction
     debug!("Beginning transaction for test isolation");
-    db.execute(Statement::from_string(DbBackend::Postgres, "BEGIN"))
+    db.execute(Statement::from_string(db.get_database_backend(), "BEGIN"))
         .await
         .expect("Failed to begin transaction");
 
@@ -174,10 +171,11 @@ pub async fn setup_test<AppMigrator: MigratorTrait>(
         db: db.clone(),
         mailer: mailer.clone(),
         job_queue: job_queue.clone(),
-        sync_queue: SyncQueue::mock(),
-        sync_registry: Arc::new(SyncRegistry::new()),
+        sync_queue: crate::sync::queue::SyncQueue::mock(),
+        sync_registry: std::sync::Arc::new(crate::sync::registry::SyncRegistry::new()),
         rate_limit_state,
         websocket_connections: Connections::new(),
+        storage: crate::storage::FileStorage::mock(),
     };
 
     let test_router = router(app, app_router);
@@ -298,10 +296,11 @@ impl TestUtils {
             db: self.db.clone(),
             mailer: self.mailer.clone(),
             job_queue: self.job_queue.clone(),
-            sync_queue: SyncQueue::mock(),
-            sync_registry: Arc::new(SyncRegistry::new()),
+            sync_queue: crate::sync::queue::SyncQueue::mock(),
+            sync_registry: std::sync::Arc::new(crate::sync::registry::SyncRegistry::new()),
             rate_limit_state: RateLimitState::new(self.config.rate_limiting.clone()),
             websocket_connections: Connections::new(),
+            storage: crate::storage::FileStorage::mock(),
         };
 
         J::execute(&app, args).await
@@ -321,7 +320,10 @@ impl Drop for TestUtils {
         if let Ok(handle) = Handle::try_current() {
             handle.spawn(async move {
                 let _ = db
-                    .execute(Statement::from_string(DbBackend::Postgres, "ROLLBACK"))
+                    .execute(Statement::from_string(
+                        db.get_database_backend(),
+                        "ROLLBACK",
+                    ))
                     .await;
             });
         }

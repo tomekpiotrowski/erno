@@ -6,14 +6,8 @@ use std::time::Duration;
 use std::sync::Arc;
 
 use crate::{
-    app::App,
-    config::Config,
-    environment::Environment,
-    job_queue::JobQueue,
-    mailer::Mailer,
-    rate_limiting::RateLimitState,
-    sync::queue::SyncQueue,
-    sync::registry::SyncRegistry,
+    app::App, config::Config, environment::Environment, job_queue::JobQueue, mailer::Mailer,
+    rate_limiting::RateLimitState, sync::queue::SyncQueue, sync::registry::SyncRegistry,
     websocket::connections::Connections,
 };
 
@@ -43,6 +37,7 @@ async fn create_app_for_routes<ExtraConfig>(config: Config<ExtraConfig>) -> App<
 
     App {
         rate_limit_state: RateLimitState::new(config.rate_limiting.clone()),
+        storage: crate::storage::FileStorage::from_config(&config.storage),
         config,
         environment: Environment::Development,
         db,

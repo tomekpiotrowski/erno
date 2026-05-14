@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use crate::{
     config::Config, database::DatabaseSetupStatus, environment::Environment, job_queue::JobQueue,
-    jobs::Job, mailer::Mailer, rate_limiting::RateLimitState, sync::queue::SyncQueue,
-    sync::registry::SyncRegistry, websocket::connections::Connections,
+    jobs::Job, mailer::Mailer, rate_limiting::RateLimitState, storage::FileStorage,
+    sync::queue::SyncQueue, sync::registry::SyncRegistry, websocket::connections::Connections,
 };
 
 #[derive(Clone)]
@@ -24,6 +24,7 @@ pub struct App<ExtraConfig = ()> {
     pub sync_registry: Arc<SyncRegistry>,
     pub rate_limit_state: RateLimitState,
     pub websocket_connections: Connections,
+    pub storage: FileStorage,
 }
 
 impl<ExtraConfig> App<ExtraConfig> {

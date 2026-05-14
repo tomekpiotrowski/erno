@@ -1,4 +1,3 @@
-pub mod console;
 pub mod db;
 pub mod db_reset;
 pub mod generate_secret;

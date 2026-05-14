@@ -2,6 +2,7 @@
 
 use crate::database::models::job_result::JobResult;
 use sea_orm::entity::prelude::*;
+use sea_orm::{ActiveValue, ConnectionTrait};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "job_execution")]
@@ -33,7 +34,25 @@ impl Related<super::job::Entity> for Entity {
     }
 }
 
-impl ActiveModelBehavior for ActiveModel {}
+#[async_trait::async_trait]
+impl ActiveModelBehavior for ActiveModel {
+    async fn before_save<C>(mut self, _db: &C, insert: bool) -> Result<Self, DbErr>
+    where
+        C: ConnectionTrait,
+    {
+        if insert {
+            if matches!(self.id, ActiveValue::NotSet) {
+                self.id = ActiveValue::Set(uuid::Uuid::new_v4());
+            }
+
+            if matches!(self.created_at, ActiveValue::NotSet) {
+                self.created_at = ActiveValue::Set(chrono::Utc::now().naive_utc());
+            }
+        }
+
+        Ok(self)
+    }
+}
 
 #[allow(dead_code)]
 impl Model {

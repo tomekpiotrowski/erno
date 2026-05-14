@@ -11,7 +11,7 @@ use crate::{
     app::App,
     app_info::AppInfo,
     cli::{Cli, Commands},
-    commands::{console, db, db_reset, migrate, routes, serve, version},
+    commands::{db, db_reset, migrate, routes, serve, version},
     config::Config,
     environment::Environment,
     jobs::{job_registry::JobRegistry, scheduled_job::ScheduledJob},
@@ -145,9 +145,6 @@ pub async fn handle_command<AppMigrator: MigratorTrait, ExtraConfig>(
                 db_reset::handle_db_reset_command::<AppMigrator, ExtraConfig>(&config).await;
             }
         },
-        Some(Commands::Console) => {
-            console::handle_console_command(environment);
-        }
         Some(Commands::GenerateJwtSecret) => {
             crate::commands::generate_secret::handle_generate_secret_command();
         }

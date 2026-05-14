@@ -1,12 +1,7 @@
-use sea_orm::{ActiveEnum, DbBackend, Schema};
 use sea_orm_migration::{
     prelude::*,
     schema::{json_binary, string, timestamp, uuid},
 };
-use sea_query::extension::postgres::Type;
-
-use crate::database::models::job_result::JobResult;
-use crate::database::models::job_status::JobStatus;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -14,19 +9,6 @@ pub struct Migration;
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        let schema = Schema::new(DbBackend::Postgres);
-
-        // Create the job_status enum
-        manager
-            .create_type(schema.create_enum_from_active_enum::<JobStatus>())
-            .await?;
-
-        // Create the job_result enum
-        manager
-            .create_type(schema.create_enum_from_active_enum::<JobResult>())
-            .await?;
-
-        // Create the job table (modified structure)
         manager
             .create_table(
                 Table::create()
@@ -51,7 +33,7 @@ impl MigrationTrait for Migration {
                     .col(json_binary(Job::Arguments).not_null())
                     .col(
                         ColumnDef::new(Job::Status)
-                            .custom(JobStatus::name())
+                            .string_len(32)
                             .not_null()
                             .default("pending"),
                     )
@@ -66,7 +48,6 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Create the job_execution table
         manager
             .create_table(
                 Table::create()
@@ -80,7 +61,7 @@ impl MigrationTrait for Migration {
                     .col(uuid(JobExecution::JobId).not_null())
                     .col(
                         ColumnDef::new(JobExecution::Result)
-                            .custom(JobResult::name())
+                            .string_len(32)
                             .not_null(),
                     )
                     .col(timestamp(JobExecution::StartedAt).not_null())
@@ -108,7 +89,6 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Create indexes for job_execution table
         manager
             .create_index(
                 Index::create()
@@ -129,7 +109,6 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Create the updated_at trigger for the job table
         manager
             .get_connection()
             .execute_unprepared(
@@ -142,7 +121,6 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Create NOTIFY trigger for instant job pickup
         manager
             .get_connection()
             .execute_unprepared(
@@ -167,7 +145,6 @@ impl MigrationTrait for Migration {
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
-        // Drop the triggers first
         manager
             .get_connection()
             .execute_unprepared(
@@ -179,22 +156,12 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // Drop tables
         manager
             .drop_table(Table::drop().table(JobExecution::Table).to_owned())
             .await?;
 
         manager
             .drop_table(Table::drop().table(Job::Table).to_owned())
-            .await?;
-
-        // Drop types
-        manager
-            .drop_type(Type::drop().name(JobResult::name()).to_owned())
-            .await?;
-
-        manager
-            .drop_type(Type::drop().name(JobStatus::name()).to_owned())
             .await
     }
 }

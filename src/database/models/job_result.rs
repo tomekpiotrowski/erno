@@ -1,3 +1,4 @@
+use sea_orm::sea_query::StringLen;
 use sea_orm::DeriveActiveEnum;
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumIter, EnumString};
@@ -15,7 +16,11 @@ use strum::{Display, EnumIter, EnumString};
     EnumString,
     Display,
 )]
-#[sea_orm(rs_type = "String", db_type = "Enum", enum_name = "job_result")]
+#[sea_orm(
+    rs_type = "String",
+    db_type = "String(StringLen::N(32))",
+    enum_name = "job_result"
+)]
 pub enum JobResult {
     #[sea_orm(string_value = "completed")]
     Completed,

@@ -5,12 +5,12 @@ use crate::cli::Commands;
 
 pub fn setup_tracing_for_command(command: &Option<Commands>, server_log_level: &str) {
     // Set appropriate default tracing level based on command type:
-    // - CLI commands (migrate, console, version) use 'warn'/'error' to reduce noise
+    // - CLI commands (migrate, version) use 'warn'/'error' to reduce noise
     // - Server mode uses 'info' for operational visibility
     // - Users can override with RUST_LOG environment variable (e.g., RUST_LOG=debug)
     let default_level = match command {
         // CLI commands should have minimal log output for clean UX
-        Some(Commands::Migrate { .. } | Commands::Db { .. } | Commands::Console) => "warn",
+        Some(Commands::Migrate { .. } | Commands::Db { .. }) => "warn",
         Some(Commands::Version | Commands::GenerateJwtSecret | Commands::Routes) => "error", // Version, GenerateJwtSecret, and Routes should be very quiet
         // Server mode needs operational visibility
         Some(Commands::Serve) | None => server_log_level,

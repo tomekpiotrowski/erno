@@ -22,8 +22,6 @@ pub enum Commands {
         #[command(subcommand)]
         action: Option<DbAction>,
     },
-    /// Interactive Rhai console
-    Console,
     /// Generate a JWT secret for configuration
     GenerateJwtSecret,
     /// Show version information

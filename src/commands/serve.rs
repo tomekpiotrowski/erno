@@ -117,6 +117,8 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
     // Initialize WebSocket connections manager
     let websocket_connections = Connections::new();
 
+    let storage = crate::storage::FileStorage::from_config(&config.storage);
+
     let app = App {
         config: config.clone(),
         environment,
@@ -127,6 +129,7 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
         sync_registry: sync_registry.clone(),
         rate_limit_state,
         websocket_connections: websocket_connections.clone(),
+        storage,
     };
 
     // Spawn workers in the background

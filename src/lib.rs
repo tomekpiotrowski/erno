@@ -10,13 +10,13 @@
 
 pub mod api;
 pub mod app;
+pub mod billing;
 pub mod app_info;
 pub mod auth;
 pub mod boot;
 pub mod cli;
 pub mod commands;
 pub mod config;
-pub mod console;
 pub mod database;
 pub mod emails;
 pub mod environment;
@@ -27,6 +27,7 @@ pub mod password;
 pub mod policy;
 pub mod rate_limiting;
 pub mod router;
+pub mod storage;
 pub mod sync;
 pub mod setup_tracing;
 pub mod token;

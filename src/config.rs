@@ -1,7 +1,49 @@
+use lettre::message::Mailbox;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 
-use lettre::message::Mailbox;
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum StorageBackend {
+    #[default]
+    Local,
+    S3,
+}
+
+/// Works with AWS S3 and any S3-compatible service (Digital Ocean Spaces, MinIO, etc.).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct S3Config {
+    pub bucket: String,
+    pub region: String,
+    pub access_key_id: String,
+    pub secret_access_key: String,
+    /// Custom endpoint URL for S3-compatible services, e.g. "https://nyc3.digitaloceanspaces.com"
+    pub endpoint: Option<String>,
+    /// Optional CDN URL prefix; if set, used instead of presigned URLs
+    pub cdn_endpoint: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct StorageConfig {
+    #[serde(default)]
+    pub backend: StorageBackend,
+    /// Root path for local storage (default: "./storage")
+    pub local_path: Option<String>,
+    pub s3: Option<S3Config>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StripeConfig {
+    pub secret_key: String,
+    pub webhook_secret: String,
+    pub admin_token: String,
+    /// Maps plan name to Stripe Price ID, e.g. {"pro": "price_xxx"}
+    #[serde(default)]
+    pub price_ids: HashMap<String, String>,
+    pub success_url: String,
+    pub cancel_url: String,
+    pub portal_return_url: String,
+}
 
 pub use crate::rate_limiting::rate_limit_state::RateLimitConfig;
 
@@ -16,6 +58,9 @@ pub struct Config<ExtraConfig = ()> {
     pub jwt: JwtConfig,
     pub auth: AuthConfig,
     pub rate_limiting: RateLimitConfig,
+    pub stripe: Option<StripeConfig>,
+    #[serde(default)]
+    pub storage: StorageConfig,
     #[serde(flatten, default)]
     pub extra: ExtraConfig,
 }
