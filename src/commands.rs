@@ -5,3 +5,5 @@ pub mod migrate;
 pub mod routes;
 pub mod serve;
 pub mod version;
+#[cfg(feature = "tui")]
+pub mod admin;

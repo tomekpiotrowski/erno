@@ -12,6 +12,9 @@ pub fn setup_tracing_for_command(command: &Option<Commands>, server_log_level: &
         // CLI commands should have minimal log output for clean UX
         Some(Commands::Migrate { .. } | Commands::Db { .. }) => "warn",
         Some(Commands::Version | Commands::GenerateJwtSecret | Commands::Routes) => "error", // Version, GenerateJwtSecret, and Routes should be very quiet
+        // Admin TUI runs interactively — suppress log output
+        #[cfg(feature = "tui")]
+        Some(Commands::Admin) => "error",
         // Server mode needs operational visibility
         Some(Commands::Serve) | None => server_log_level,
     };

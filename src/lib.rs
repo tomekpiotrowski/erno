@@ -9,6 +9,8 @@
 // Modules will be added as we migrate functionality
 
 pub mod api;
+#[cfg(feature = "tui")]
+pub mod admin;
 pub mod app;
 pub mod billing;
 pub mod app_info;
