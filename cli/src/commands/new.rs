@@ -72,12 +72,8 @@ pub async fn handle_new(name: &str, path: Option<&str>, erno_path: Option<&str>,
         angular_version.as_deref(),
         erno_path,
     );
-    // The ionic blank template runs `ionic integrations enable capacitor` which
-    // uses bun regardless of flags. Remove the bun lockfile and node_modules so
-    // our npm install below produces a clean, npm-only install.
-    let app_dir = dest.join("app");
-    let _ = fs::remove_file(app_dir.join("bun.lockb"));
-    let _ = fs::remove_dir_all(app_dir.join("node_modules"));
+    // ionic start installs base deps before we patch package.json, so
+    // erno-angular and other additions are not yet in node_modules.
     install_app_deps(&dest, erno_angular_dep.starts_with("file:"));
 
     let config = GlobalConfig::load().ok();
