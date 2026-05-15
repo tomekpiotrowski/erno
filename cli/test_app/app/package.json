@@ -6,7 +6,7 @@
     "@angular/forms": "^20.3.0",
     "@angular/platform-browser": "^20.3.0",
     "@angular/router": "^20.3.0",
-    "erno-angular": "file:/home/tomek/Development/erno/app/dist/erno-angular-0.0.1.tgz",
+    "erno-angular": "file:/home/tomek/Development/erno/app/dist/erno-angular",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0"
   },
@@ -28,5 +28,8 @@
     "test": "ng test",
     "watch": "ng build --watch --configuration development"
   },
-  "version": "0.0.0"
+  "version": "0.0.0",
+  "installConfig": {
+    "installLinks": true
+  }
 }
