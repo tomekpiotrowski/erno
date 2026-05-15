@@ -4,9 +4,10 @@ use axum::{
     response::IntoResponse,
     Json,
 };
+use sea_orm::{EntityTrait, QueryOrder, QuerySelect};
 use uuid::Uuid;
 
-use crate::app::App;
+use crate::{app::App, database::models::job};
 
 pub async fn list_emails<ExtraConfig: Clone + Send + Sync + 'static>(
     State(app): State<App<ExtraConfig>>,
@@ -20,6 +21,29 @@ pub async fn clear_emails<ExtraConfig: Clone + Send + Sync + 'static>(
 ) -> impl IntoResponse {
     app.mailer.clear_messages();
     StatusCode::NO_CONTENT
+}
+
+pub async fn list_jobs<ExtraConfig: Clone + Send + Sync + 'static>(
+    State(app): State<App<ExtraConfig>>,
+) -> impl IntoResponse {
+    match job::Entity::find()
+        .order_by_desc(job::Column::CreatedAt)
+        .limit(100)
+        .all(&app.db)
+        .await
+    {
+        Ok(jobs) => Json(jobs).into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
+pub async fn clear_jobs<ExtraConfig: Clone + Send + Sync + 'static>(
+    State(app): State<App<ExtraConfig>>,
+) -> impl IntoResponse {
+    match job::Entity::delete_many().exec(&app.db).await {
+        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
 }
 
 pub async fn delete_email<ExtraConfig: Clone + Send + Sync + 'static>(

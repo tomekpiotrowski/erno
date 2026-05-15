@@ -3,7 +3,6 @@ import { HttpErrorResponse, HttpEvent, HttpHandler, HttpInterceptor, HttpRequest
 import { Observable, throwError, BehaviorSubject } from 'rxjs';
 import { catchError, filter, switchMap, take } from 'rxjs/operators';
 import { ErnoAuthService, LoginResponse } from '../auth/erno-auth.service';
-import { ErnoAlertsService } from '../alerts/erno-alerts.service';
 import { ERNO_CONFIG, ErnoConfig } from '../erno.config';
 
 @Injectable()
@@ -13,7 +12,6 @@ export class ErnoHttpInterceptor implements HttpInterceptor {
 
   constructor(
     private auth: ErnoAuthService,
-    private alerts: ErnoAlertsService,
     @Inject(ERNO_CONFIG) private config: ErnoConfig,
   ) {}
 
@@ -26,9 +24,6 @@ export class ErnoHttpInterceptor implements HttpInterceptor {
       catchError(err => {
         if (err instanceof HttpErrorResponse && err.status === 401 && !req.url.includes('/api/auth/refresh')) {
           return this.handle401(req, next);
-        }
-        if (err instanceof HttpErrorResponse && err.status === 500) {
-          this.alerts.error('A server error occurred. Please try again.');
         }
         return throwError(() => err);
       }),

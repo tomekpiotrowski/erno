@@ -1,4 +1,4 @@
-base_url = "https://example.com"
+api_url = "https://example.com"
 
 [tracing]
 log_level = "info"

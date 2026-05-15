@@ -18,9 +18,16 @@ use crate::{
 };
 
 #[derive(Debug, serde::Serialize)]
+pub struct UserInfo {
+    pub id: uuid::Uuid,
+    pub email: String,
+}
+
+#[derive(Debug, serde::Serialize)]
 pub struct TokenPair {
-    pub token: String,
+    pub access_token: String,
     pub refresh_token: String,
+    pub user: UserInfo,
 }
 
 /// Generate an access JWT and a fresh refresh token, persisting the refresh token to the DB.
@@ -49,7 +56,8 @@ where
     .map_err(|_| ())?;
 
     Ok(TokenPair {
-        token: access_token,
+        access_token,
         refresh_token: raw_refresh,
+        user: UserInfo { id: user.id, email: user.email.clone() },
     })
 }

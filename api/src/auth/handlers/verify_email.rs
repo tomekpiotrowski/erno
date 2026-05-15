@@ -147,7 +147,7 @@ mod tests {
             .await;
         assert_eq!(response.status_code(), 200);
         let body: serde_json::Value = response.json();
-        assert!(body["token"].is_string());
+        assert!(body["access_token"].is_string());
         assert!(body["refresh_token"].is_string());
     }
 

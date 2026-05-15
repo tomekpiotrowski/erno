@@ -3,8 +3,9 @@
 use crate::database::models::job_status::JobStatus;
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue, ConnectionTrait};
+use serde::Serialize;
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize)]
 #[sea_orm(table_name = "job")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]

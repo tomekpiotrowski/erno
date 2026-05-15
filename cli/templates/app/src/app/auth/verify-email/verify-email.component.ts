@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnInit, signal } from '@angular/core';
-import { ActivatedRoute } from '@angular/router';
-import { ErnoAuthService } from 'erno-angular';
+import { ActivatedRoute, Router } from '@angular/router';
+import { ErnoAuthService, ErnoAlertsService } from 'erno-angular';
 
 @Component({
   selector: 'app-verify-email',
@@ -9,10 +9,15 @@ import { ErnoAuthService } from 'erno-angular';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class VerifyEmailComponent implements OnInit {
-  state = signal<'loading' | 'success' | 'error'>('loading');
+  state = signal<'loading' | 'error'>('loading');
   error = signal('');
 
-  constructor(private auth: ErnoAuthService, private route: ActivatedRoute) {}
+  constructor(
+    private auth: ErnoAuthService,
+    private alerts: ErnoAlertsService,
+    private route: ActivatedRoute,
+    private router: Router,
+  ) {}
 
   ngOnInit() {
     const token = this.route.snapshot.queryParamMap.get('token') ?? '';
@@ -22,7 +27,10 @@ export class VerifyEmailComponent implements OnInit {
       return;
     }
     this.auth.verifyEmail(token).subscribe({
-      next: () => { this.state.set('success'); },
+      next: () => {
+        this.alerts.success('Email verified!');
+        this.router.navigate(['/']);
+      },
       error: (e) => {
         this.state.set('error');
         this.error.set(e?.error?.message ?? 'Verification failed. The link may have expired.');

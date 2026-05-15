@@ -12,7 +12,9 @@ import { ErnoStorageService } from './storage/erno-storage.service';
 import { ErnoBillingService } from './billing/erno-billing.service';
 import { ErnoDevtoolsComponent } from './devtools/erno-devtools.component';
 import { ErnoDevMailService } from './devtools/erno-dev-mail.service';
+import { ErnoDevJobsService } from './devtools/erno-dev-jobs.service';
 import { ErnoAlertsService } from './alerts/erno-alerts.service';
+import { ErnoHttpService } from './http/erno-http.service';
 
 @NgModule({
   imports: [CommonModule, HttpClientModule],
@@ -26,6 +28,7 @@ export class ErnoModule {
       providers: [
         { provide: ERNO_CONFIG, useValue: config },
         { provide: HTTP_INTERCEPTORS, useClass: ErnoHttpInterceptor, multi: true },
+        ErnoHttpService,
         ErnoAuthService,
         ErnoRealtimeService,
         ErnoDatabaseService,
@@ -33,6 +36,7 @@ export class ErnoModule {
         ErnoStorageService,
         ErnoBillingService,
         ErnoDevMailService,
+        ErnoDevJobsService,
         ErnoAlertsService,
       ],
     };

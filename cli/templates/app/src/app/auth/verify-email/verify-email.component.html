@@ -6,11 +6,6 @@
     <ion-card-content>
       <p *ngIf="state() === 'loading'">Verifying…</p>
 
-      <ion-text color="success" *ngIf="state() === 'success'">
-        <p>Email verified — you can now sign in.</p>
-        <p><a routerLink="/login">Sign in</a></p>
-      </ion-text>
-
       <ion-text color="danger" *ngIf="state() === 'error'">
         <p>{{ error() }}</p>
         <p><a routerLink="/login">Back to sign in</a></p>

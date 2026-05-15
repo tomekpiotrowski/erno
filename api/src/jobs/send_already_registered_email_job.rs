@@ -19,7 +19,7 @@ impl<ExtraConfig: Clone + Send + Sync + 'static> Job<ExtraConfig>
     }
 
     async fn execute(app: &App<ExtraConfig>, args: Self::Arguments) -> Result<(), JobError> {
-        let login_url = format!("{}/login", app.config.base_url);
+        let login_url = format!("{}/login", app.config.app_url());
         let body = format!(
             "<p>Someone (possibly you) tried to register an account with this email address, \
              but an account already exists.</p>\

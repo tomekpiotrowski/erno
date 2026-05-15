@@ -53,7 +53,7 @@ impl<ExtraConfig: Clone + Send + Sync + 'static> Job<ExtraConfig>
 
         let verify_url = format!(
             "{}/verify-email?token={}",
-            app.config.base_url, args.raw_token
+            app.config.app_url(), args.raw_token
         );
         let body = format!(
             "<p>Click <a href=\"{url}\">here</a> to verify your email.</p><p>Or paste: {url}</p>",

@@ -4,10 +4,6 @@
       <ion-card-title>Sign in</ion-card-title>
     </ion-card-header>
     <ion-card-content>
-      <ion-text color="success" *ngIf="resetSuccess">
-        <p>Password updated — you can now sign in.</p>
-      </ion-text>
-
       <form [formGroup]="form" (ngSubmit)="submit()">
         <ion-item>
           <ion-label position="floating">Email</ion-label>

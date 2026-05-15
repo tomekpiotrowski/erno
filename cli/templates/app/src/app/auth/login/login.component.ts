@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import { FormGroup, FormControl, Validators } from '@angular/forms';
-import { ActivatedRoute, Router } from '@angular/router';
+import { Router } from '@angular/router';
 import { ErnoAuthService } from 'erno-angular';
 
 @Component({
@@ -16,15 +16,11 @@ export class LoginComponent {
   });
   error = signal('');
   loading = signal(false);
-  resetSuccess = false;
 
   constructor(
     private auth: ErnoAuthService,
     private router: Router,
-    private route: ActivatedRoute,
-  ) {
-    this.resetSuccess = this.route.snapshot.queryParamMap.get('reset') === '1';
-  }
+  ) {}
 
   submit() {
     if (this.form.invalid || this.loading()) return;

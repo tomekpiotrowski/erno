@@ -91,7 +91,12 @@ pub struct Config<ExtraConfig = ()> {
     pub jobs: JobsConfig,
     pub server: ServerConfig,
     pub email: EmailConfig,
-    pub base_url: String,
+    /// API server base URL (used for CORS, self-referencing API links).
+    pub api_url: String,
+    /// Frontend app URL used in email links (verify-email, password-reset, etc.).
+    /// Defaults to `api_url` when not set.
+    #[serde(default)]
+    pub app_url: Option<String>,
     pub auth: AuthConfig,
     pub rate_limiting: RateLimitConfig,
     pub stripe: Option<StripeConfig>,
@@ -103,6 +108,13 @@ pub struct Config<ExtraConfig = ()> {
     pub cors: CorsConfig,
     #[serde(flatten, default)]
     pub extra: ExtraConfig,
+}
+
+impl<ExtraConfig> Config<ExtraConfig> {
+    /// Returns the frontend app URL for use in email links.
+    pub fn app_url(&self) -> &str {
+        self.app_url.as_deref().unwrap_or(&self.api_url)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

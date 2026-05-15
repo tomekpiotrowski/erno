@@ -51,16 +51,20 @@ export class ErnoAuthService {
     );
   }
 
-  verifyEmail(token: string): Observable<void> {
-    return this.http.post<void>(`${this.config.baseUrl}/api/auth/email/verify`, { token });
+  verifyEmail(token: string): Observable<LoginResponse> {
+    return this.http.post<LoginResponse>(`${this.config.baseUrl}/api/auth/email/verify`, { token }).pipe(
+      tap(res => this.storeSession(res)),
+    );
   }
 
   requestPasswordReset(email: string): Observable<void> {
     return this.http.post<void>(`${this.config.baseUrl}/api/auth/password-reset/request`, { email });
   }
 
-  confirmPasswordReset(token: string, password: string): Observable<void> {
-    return this.http.post<void>(`${this.config.baseUrl}/api/auth/password-reset/confirm`, { token, password });
+  confirmPasswordReset(token: string, password: string): Observable<LoginResponse> {
+    return this.http.post<LoginResponse>(`${this.config.baseUrl}/api/auth/password-reset/confirm`, { token, password }).pipe(
+      tap(res => this.storeSession(res)),
+    );
   }
 
   private storeSession(res: LoginResponse): void {

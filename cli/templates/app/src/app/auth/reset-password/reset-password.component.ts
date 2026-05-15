@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, signal } from '@angular/core';
 import { AbstractControl, FormControl, FormGroup, ValidationErrors, Validators } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
-import { ErnoAuthService } from 'erno-angular';
+import { ErnoAuthService, ErnoAlertsService } from 'erno-angular';
 
 function passwordsMatch(group: AbstractControl): ValidationErrors | null {
   const pw = group.get('password')?.value;
@@ -29,6 +29,7 @@ export class ResetPasswordComponent implements OnInit {
 
   constructor(
     private auth: ErnoAuthService,
+    private alerts: ErnoAlertsService,
     private router: Router,
     private route: ActivatedRoute,
   ) {}
@@ -45,7 +46,10 @@ export class ResetPasswordComponent implements OnInit {
     this.loading.set(true);
     this.error.set('');
     this.auth.confirmPasswordReset(this.token, this.form.value.password!).subscribe({
-      next: () => this.router.navigate(['/login'], { queryParams: { reset: '1' } }),
+      next: () => {
+        this.alerts.success('Password updated — you can now sign in.');
+        this.router.navigate(['/login']);
+      },
       error: (e) => {
         this.error.set(e?.error?.message ?? 'Reset failed. The link may have expired.');
         this.loading.set(false);
