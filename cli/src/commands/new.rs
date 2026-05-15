@@ -32,6 +32,7 @@ const VERIFY_EMAIL_COMPONENT_TS: &str = include_str!("../../templates/app/src/ap
 const VERIFY_EMAIL_COMPONENT_HTML: &str = include_str!("../../templates/app/src/app/auth/verify-email/verify-email.component.html");
 const HOME_PAGE_TS: &str = include_str!("../../templates/app/src/app/home/home.page.ts");
 const HOME_PAGE_HTML: &str = include_str!("../../templates/app/src/app/home/home.page.html");
+const APP_CAPACITOR_CONFIG_TS: &str = include_str!("../../templates/app/capacitor.config.ts");
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -66,12 +67,17 @@ pub async fn handle_new(name: &str, path: Option<&str>, erno_path: Option<&str>,
     patch_app(
         &dest,
         name,
+        &bundle_id,
         &erno_angular_dep,
         angular_version.as_deref(),
         erno_path,
     );
-    // ionic start installs deps via bun before we patch package.json, so
-    // erno-angular is missing from node_modules. Re-run npm install now.
+    // The ionic blank template runs `ionic integrations enable capacitor` which
+    // uses bun regardless of flags. Remove the bun lockfile and node_modules so
+    // our npm install below produces a clean, npm-only install.
+    let app_dir = dest.join("app");
+    let _ = fs::remove_file(app_dir.join("bun.lockb"));
+    let _ = fs::remove_dir_all(app_dir.join("node_modules"));
     install_app_deps(&dest, erno_angular_dep.starts_with("file:"));
 
     let config = GlobalConfig::load().ok();
@@ -268,7 +274,7 @@ fn install_app_deps(dest: &Path, use_install_links: bool) {
 
 // ── Ionic app scaffold (via ionic start) ──────────────────────────────────────
 
-fn ionic_new_app(name: &str, bundle_id: &str, dest: &Path) {
+fn ionic_new_app(_name: &str, _bundle_id: &str, dest: &Path) {
     let ionic = match crate::ng::find_ionic_binary() {
         Some(p) => p,
         None => {
@@ -285,10 +291,8 @@ fn ionic_new_app(name: &str, bundle_id: &str, dest: &Path) {
             "app",
             "blank",
             "--type=angular",
-            "--capacitor",
             "--no-deps",
             "--no-git",
-            &format!("--package-id={bundle_id}"),
         ])
         .env("CI", "true")
         .env("NG_CLI_ANALYTICS", "false")
@@ -300,7 +304,7 @@ fn ionic_new_app(name: &str, bundle_id: &str, dest: &Path) {
         });
 
     if !status.success() {
-        eprintln!("❌  ionic start failed (name={name})");
+        eprintln!("❌  ionic start failed");
         std::process::exit(1);
     }
 }
@@ -322,6 +326,7 @@ fn read_angular_version_from_dist(erno_path: &str) -> Option<String> {
 fn patch_app(
     dest: &Path,
     name: &str,
+    bundle_id: &str,
     erno_angular_dep: &str,
     angular_version: Option<&str>,
     erno_path: Option<&str>,
@@ -340,6 +345,15 @@ fn patch_app(
 
     pkg["name"] = serde_json::Value::String(format!("{name}-app"));
     pkg["dependencies"]["erno-angular"] = serde_json::Value::String(erno_angular_dep.to_string());
+
+    // Capacitor — added here rather than via `ionic start --capacitor` to avoid
+    // that step running bun install, which conflicts with our npm-only workflow.
+    pkg["dependencies"]["@capacitor/core"] = serde_json::Value::String("^7.0.0".to_string());
+    pkg["dependencies"]["@capacitor/app"] = serde_json::Value::String("^7.0.0".to_string());
+    pkg["dependencies"]["@capacitor/haptics"] = serde_json::Value::String("^7.0.0".to_string());
+    pkg["dependencies"]["@capacitor/keyboard"] = serde_json::Value::String("^7.0.0".to_string());
+    pkg["dependencies"]["@capacitor/status-bar"] = serde_json::Value::String("^7.0.0".to_string());
+    pkg["devDependencies"]["@capacitor/cli"] = serde_json::Value::String("^7.0.0".to_string());
 
     // When erno-angular is installed as a symlink (file: directory dep), npm does
     // not hoist its dependencies into the consumer's node_modules. Inject them
@@ -437,6 +451,10 @@ fn patch_app(
     write(&app.join("src/app/auth/verify-email/verify-email.component.html"), VERIFY_EMAIL_COMPONENT_HTML);
     write(&app.join("src/app/home/home.page.ts"), HOME_PAGE_TS);
     write(&app.join("src/app/home/home.page.html"), HOME_PAGE_HTML);
+    write(
+        &app.join("capacitor.config.ts"),
+        &render(APP_CAPACITOR_CONFIG_TS, &[("bundle_id", bundle_id), ("name", name)]),
+    );
 }
 
 // ── Database creation ─────────────────────────────────────────────────────────
