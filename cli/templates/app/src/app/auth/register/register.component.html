@@ -4,12 +4,12 @@
       <ion-card-title>Create account</ion-card-title>
     </ion-card-header>
     <ion-card-content>
-      <ion-text color="success" *ngIf="done">
+      <ion-text color="success" *ngIf="done()">
         <p>Check your email to verify your account.</p>
         <p><a routerLink="/login">Back to sign in</a></p>
       </ion-text>
 
-      <form *ngIf="!done" [formGroup]="form" (ngSubmit)="submit()">
+      <form *ngIf="!done()" [formGroup]="form" (ngSubmit)="submit()">
         <ion-item>
           <ion-label position="floating">Email</ion-label>
           <ion-input type="email" formControlName="email" autocomplete="email"></ion-input>
@@ -26,16 +26,16 @@
         <ion-text color="danger" *ngIf="form.errors?.['mismatch'] && form.get('confirm')?.dirty">
           <p class="ion-padding-start">Passwords do not match.</p>
         </ion-text>
-        <ion-text color="danger" *ngIf="error">
-          <p class="ion-padding-start">{{ error }}</p>
+        <ion-text color="danger" *ngIf="error()">
+          <p class="ion-padding-start">{{ error() }}</p>
         </ion-text>
 
-        <ion-button expand="block" type="submit" [disabled]="loading" class="ion-margin-top">
-          {{ loading ? 'Creating account…' : 'Create account' }}
+        <ion-button expand="block" type="submit" [disabled]="loading()" class="ion-margin-top">
+          {{ loading() ? 'Creating account…' : 'Create account' }}
         </ion-button>
       </form>
 
-      <p class="ion-text-center ion-margin-top" *ngIf="!done">
+      <p class="ion-text-center ion-margin-top" *ngIf="!done()">
         Already have an account? <a routerLink="/login">Sign in</a>
       </p>
     </ion-card-content>

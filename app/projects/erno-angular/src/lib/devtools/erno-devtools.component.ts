@@ -1,4 +1,4 @@
-import { Component, isDevMode, OnInit } from '@angular/core';
+import { ChangeDetectionStrategy, Component, isDevMode, OnInit, signal } from '@angular/core';
 import { ErnoSyncService } from '../sync/erno-sync.service';
 import { ErnoDevMailService, MockEmail } from './erno-dev-mail.service';
 
@@ -7,6 +7,7 @@ type Tab = 'status' | 'emails';
 @Component({
   selector: 'erno-devtools',
   standalone: false,
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div *ngIf="visible" class="erno-devtools" [class.wide]="tab === 'emails'">
       <div class="header">
@@ -14,7 +15,7 @@ type Tab = 'status' | 'emails';
         <div class="tabs">
           <button [class.active]="tab === 'status'" (click)="tab = 'status'">Status</button>
           <button [class.active]="tab === 'emails'" (click)="switchToEmails()">
-            Emails<span *ngIf="emails.length"> ({{ emails.length }})</span>
+            Emails<span *ngIf="emails().length"> ({{ emails().length }})</span>
           </button>
         </div>
       </div>
@@ -27,16 +28,16 @@ type Tab = 'status' | 'emails';
 
       <ng-container *ngIf="tab === 'emails'">
         <div class="email-toolbar">
-          <button (click)="clearAll()" [disabled]="emails.length === 0">Clear all</button>
+          <button (click)="clearAll()" [disabled]="emails().length === 0">Clear all</button>
         </div>
-        <div *ngIf="emails.length === 0" class="empty">No emails sent.</div>
-        <div *ngFor="let email of emails" class="email-row">
+        <div *ngIf="emails().length === 0" class="empty">No emails sent.</div>
+        <div *ngFor="let email of emails()" class="email-row">
           <div class="email-summary" (click)="toggle(email.id)">
-            <span class="arrow">{{ expanded === email.id ? '▾' : '▸' }}</span>
+            <span class="arrow">{{ expanded() === email.id ? '▾' : '▸' }}</span>
             <span class="subject">{{ email.subject }}</span>
             <span class="to">→ {{ email.to }}</span>
           </div>
-          <ng-container *ngIf="expanded === email.id">
+          <ng-container *ngIf="expanded() === email.id">
             <iframe *ngIf="email.body_html" [srcdoc]="email.body_html" sandbox class="body-frame"></iframe>
             <pre *ngIf="!email.body_html && email.body_text" class="body-text">{{ email.body_text }}</pre>
             <button class="delete-btn" (click)="deleteEmail(email.id)">× delete</button>
@@ -91,8 +92,8 @@ export class ErnoDevtoolsComponent implements OnInit {
   wsStatus = 'disconnected';
 
   tab: Tab = 'status';
-  emails: MockEmail[] = [];
-  expanded: string | null = null;
+  emails = signal<MockEmail[]>([]);
+  expanded = signal<string | null>(null);
 
   constructor(
     private sync: ErnoSyncService,
@@ -115,26 +116,26 @@ export class ErnoDevtoolsComponent implements OnInit {
   }
 
   toggle(id: string): void {
-    this.expanded = this.expanded === id ? null : id;
+    this.expanded.set(this.expanded() === id ? null : id);
   }
 
   loadEmails(): void {
     this.mailService.list().subscribe(emails => {
-      this.emails = emails;
+      this.emails.set(emails);
     });
   }
 
   deleteEmail(id: string): void {
     this.mailService.delete(id).subscribe(() => {
-      this.emails = this.emails.filter(e => e.id !== id);
-      if (this.expanded === id) this.expanded = null;
+      this.emails.update(list => list.filter(e => e.id !== id));
+      if (this.expanded() === id) this.expanded.set(null);
     });
   }
 
   clearAll(): void {
     this.mailService.clear().subscribe(() => {
-      this.emails = [];
-      this.expanded = null;
+      this.emails.set([]);
+      this.expanded.set(null);
     });
   }
 }

@@ -18,12 +18,12 @@
           <ion-input type="password" formControlName="password" autocomplete="current-password"></ion-input>
         </ion-item>
 
-        <ion-text color="danger" *ngIf="error">
-          <p class="ion-padding-start">{{ error }}</p>
+        <ion-text color="danger" *ngIf="error()">
+          <p class="ion-padding-start">{{ error() }}</p>
         </ion-text>
 
-        <ion-button expand="block" type="submit" [disabled]="loading" class="ion-margin-top">
-          {{ loading ? 'Signing in…' : 'Sign in' }}
+        <ion-button expand="block" type="submit" [disabled]="loading()" class="ion-margin-top">
+          {{ loading() ? 'Signing in…' : 'Sign in' }}
         </ion-button>
       </form>
 

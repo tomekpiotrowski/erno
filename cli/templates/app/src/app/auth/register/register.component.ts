@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import { AbstractControl, FormControl, FormGroup, ValidationErrors, Validators } from '@angular/forms';
 import { ErnoAuthService } from 'erno-angular';
 
@@ -12,6 +12,7 @@ function passwordsMatch(group: AbstractControl): ValidationErrors | null {
   selector: 'app-register',
   templateUrl: './register.component.html',
   standalone: false,
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class RegisterComponent {
   form = new FormGroup(
@@ -22,22 +23,22 @@ export class RegisterComponent {
     },
     { validators: passwordsMatch },
   );
-  error = '';
-  loading = false;
-  done = false;
+  error = signal('');
+  loading = signal(false);
+  done = signal(false);
 
   constructor(private auth: ErnoAuthService) {}
 
   submit() {
-    if (this.form.invalid || this.loading) return;
-    this.loading = true;
-    this.error = '';
+    if (this.form.invalid || this.loading()) return;
+    this.loading.set(true);
+    this.error.set('');
     const { email, password } = this.form.value;
     this.auth.register(email!, password!).subscribe({
-      next: () => { this.done = true; },
+      next: () => { this.done.set(true); },
       error: (e) => {
-        this.error = e?.error?.message ?? 'Registration failed';
-        this.loading = false;
+        this.error.set(e?.error?.message ?? 'Registration failed');
+        this.loading.set(false);
       },
     });
   }
