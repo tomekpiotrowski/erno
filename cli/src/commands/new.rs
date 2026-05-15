@@ -18,6 +18,21 @@ const API_PRODUCTION_TOML: &str = include_str!("../../templates/api/config/produ
 const API_TEST_TOML: &str = include_str!("../../templates/api/config/test.toml");
 const APP_MODULE_TS: &str = include_str!("../../templates/app/app.module.ts");
 const APP_COMPONENT_HTML: &str = include_str!("../../templates/app/app.component.html");
+const APP_STYLES_CSS: &str = include_str!("../../templates/app/src/styles.css");
+const APP_ROUTING_MODULE_TS: &str = include_str!("../../templates/app/src/app/app-routing-module.ts");
+const AUTH_GUARD_TS: &str = include_str!("../../templates/app/src/app/auth/auth.guard.ts");
+const LOGIN_COMPONENT_TS: &str = include_str!("../../templates/app/src/app/auth/login/login.component.ts");
+const LOGIN_COMPONENT_HTML: &str = include_str!("../../templates/app/src/app/auth/login/login.component.html");
+const REGISTER_COMPONENT_TS: &str = include_str!("../../templates/app/src/app/auth/register/register.component.ts");
+const REGISTER_COMPONENT_HTML: &str = include_str!("../../templates/app/src/app/auth/register/register.component.html");
+const FORGOT_PASSWORD_COMPONENT_TS: &str = include_str!("../../templates/app/src/app/auth/forgot-password/forgot-password.component.ts");
+const FORGOT_PASSWORD_COMPONENT_HTML: &str = include_str!("../../templates/app/src/app/auth/forgot-password/forgot-password.component.html");
+const RESET_PASSWORD_COMPONENT_TS: &str = include_str!("../../templates/app/src/app/auth/reset-password/reset-password.component.ts");
+const RESET_PASSWORD_COMPONENT_HTML: &str = include_str!("../../templates/app/src/app/auth/reset-password/reset-password.component.html");
+const VERIFY_EMAIL_COMPONENT_TS: &str = include_str!("../../templates/app/src/app/auth/verify-email/verify-email.component.ts");
+const VERIFY_EMAIL_COMPONENT_HTML: &str = include_str!("../../templates/app/src/app/auth/verify-email/verify-email.component.html");
+const HOME_COMPONENT_TS: &str = include_str!("../../templates/app/src/app/home/home.component.ts");
+const HOME_COMPONENT_HTML: &str = include_str!("../../templates/app/src/app/home/home.component.html");
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -83,11 +98,14 @@ fn resolve_erno_deps(erno_path: Option<&str>) -> (String, String) {
                 std::process::exit(1);
             }
             (
-                format!(r#"{{ path = "{}" }}"#, api_path.display()),
+                format!(r#"{{ path = "{}", features = ["admin"] }}"#, api_path.display()),
                 format!("file:{}", angular_dist.display()),
             )
         }
-        None => (format!(r#"{{ git = "{ERNO_GIT}" }}"#), "^0.0.1".to_string()),
+        None => (
+            format!(r#"{{ git = "{ERNO_GIT}", features = ["admin"] }}"#),
+            "^0.0.1".to_string(),
+        ),
     }
 }
 
@@ -361,8 +379,23 @@ fn patch_app(
     }
 
     // Replace ng-generated files with erno versions
+    write(&app.join("src/styles.css"), APP_STYLES_CSS);
     write(&app.join("src/app/app-module.ts"), APP_MODULE_TS);
     write(&app.join("src/app/app.html"), APP_COMPONENT_HTML);
+    write(&app.join("src/app/app-routing-module.ts"), APP_ROUTING_MODULE_TS);
+    write(&app.join("src/app/auth/auth.guard.ts"), AUTH_GUARD_TS);
+    write(&app.join("src/app/auth/login/login.component.ts"), LOGIN_COMPONENT_TS);
+    write(&app.join("src/app/auth/login/login.component.html"), LOGIN_COMPONENT_HTML);
+    write(&app.join("src/app/auth/register/register.component.ts"), REGISTER_COMPONENT_TS);
+    write(&app.join("src/app/auth/register/register.component.html"), REGISTER_COMPONENT_HTML);
+    write(&app.join("src/app/auth/forgot-password/forgot-password.component.ts"), FORGOT_PASSWORD_COMPONENT_TS);
+    write(&app.join("src/app/auth/forgot-password/forgot-password.component.html"), FORGOT_PASSWORD_COMPONENT_HTML);
+    write(&app.join("src/app/auth/reset-password/reset-password.component.ts"), RESET_PASSWORD_COMPONENT_TS);
+    write(&app.join("src/app/auth/reset-password/reset-password.component.html"), RESET_PASSWORD_COMPONENT_HTML);
+    write(&app.join("src/app/auth/verify-email/verify-email.component.ts"), VERIFY_EMAIL_COMPONENT_TS);
+    write(&app.join("src/app/auth/verify-email/verify-email.component.html"), VERIFY_EMAIL_COMPONENT_HTML);
+    write(&app.join("src/app/home/home.component.ts"), HOME_COMPONENT_TS);
+    write(&app.join("src/app/home/home.component.html"), HOME_COMPONENT_HTML);
 }
 
 // ── Database creation ─────────────────────────────────────────────────────────

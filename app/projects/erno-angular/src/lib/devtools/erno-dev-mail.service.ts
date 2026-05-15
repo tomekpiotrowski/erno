@@ -1,7 +1,7 @@
-import { inject, Injectable } from '@angular/core';
+import { Inject, Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { ERNO_CONFIG } from '../erno.config';
+import { ERNO_CONFIG, ErnoConfig } from '../erno.config';
 
 export interface MockEmail {
   id: string;
@@ -15,8 +15,10 @@ export interface MockEmail {
 
 @Injectable()
 export class ErnoDevMailService {
-  private http = inject(HttpClient);
-  private config = inject(ERNO_CONFIG);
+  constructor(
+    private http: HttpClient,
+    @Inject(ERNO_CONFIG) private config: ErnoConfig,
+  ) {}
 
   list(): Observable<MockEmail[]> {
     return this.http.get<MockEmail[]>(`${this.config.baseUrl}/dev/emails`);

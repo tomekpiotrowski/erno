@@ -1,17 +1,19 @@
-import { inject, Injectable } from '@angular/core';
+import { Inject, Injectable } from '@angular/core';
 import { HttpErrorResponse, HttpEvent, HttpHandler, HttpInterceptor, HttpRequest } from '@angular/common/http';
 import { Observable, throwError, BehaviorSubject } from 'rxjs';
 import { catchError, filter, switchMap, take } from 'rxjs/operators';
 import { ErnoAuthService, LoginResponse } from '../auth/erno-auth.service';
-import { ERNO_CONFIG } from '../erno.config';
+import { ERNO_CONFIG, ErnoConfig } from '../erno.config';
 
 @Injectable()
 export class ErnoHttpInterceptor implements HttpInterceptor {
-  private auth = inject(ErnoAuthService);
-  private config = inject(ERNO_CONFIG);
-
   private refreshing = false;
   private refreshSubject = new BehaviorSubject<LoginResponse | null>(null);
+
+  constructor(
+    private auth: ErnoAuthService,
+    @Inject(ERNO_CONFIG) private config: ErnoConfig,
+  ) {}
 
   intercept(req: HttpRequest<unknown>, next: HttpHandler): Observable<HttpEvent<unknown>> {
     if (!req.url.startsWith(this.config.baseUrl)) {
@@ -20,7 +22,7 @@ export class ErnoHttpInterceptor implements HttpInterceptor {
 
     return next.handle(this.addToken(req)).pipe(
       catchError(err => {
-        if (err instanceof HttpErrorResponse && err.status === 401 && !req.url.includes('/auth/refresh')) {
+        if (err instanceof HttpErrorResponse && err.status === 401 && !req.url.includes('/api/auth/refresh')) {
           return this.handle401(req, next);
         }
         return throwError(() => err);

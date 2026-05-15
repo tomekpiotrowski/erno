@@ -1,14 +1,17 @@
 ---
 title: Erno
-description: Shared infrastructure library for building REST APIs with Axum
+description: Full-stack SaaS framework — Rust API + Angular frontend, batteries included
 template: splash
 hero:
-  tagline: Shared infrastructure library for building REST APIs with Axum
+  tagline: Full-stack SaaS framework — Rust API + Angular frontend, batteries included
   actions:
-    - text: API Guide
-      link: /api/
+    - text: Get Started
+      link: /cli/
       icon: right-arrow
       variant: primary
+    - text: API Reference
+      link: /api/
+      icon: open-book
     - text: GitHub
       link: https://github.com/tomekpiotrowski/erno
       icon: external
@@ -17,22 +20,22 @@ hero:
 import { CardGrid, Card } from '@astrojs/starlight/components';
 
 <CardGrid stagger>
+  <Card title="Scaffolding" icon="rocket">
+    `erno new my_app` creates a full-stack project with a Rust API and Angular frontend in seconds — databases included.
+  </Card>
   <Card title="Authentication" icon="lock-open">
-    JWT-based authentication with current user extraction and protected route support.
+    JWT-based authentication with current user extraction, refresh tokens, password reset, and email verification.
   </Card>
-  <Card title="Job Processing" icon="rocket">
-    Background job scheduler with workers, cron expressions, and advisory locks.
+  <Card title="Offline-First Sync" icon="random">
+    Delta sync engine over WebSocket — changes propagate to connected clients in real time, with local IndexedDB fallback.
   </Card>
-  <Card title="Database" icon="laptop">
-    SeaORM integration with built-in migrations and connection management.
+  <Card title="Job Processing" icon="setting">
+    Background job scheduler with workers, cron expressions, and PostgreSQL advisory locks — no Redis required.
   </Card>
-  <Card title="Rate Limiting" icon="warning">
-    Per-action rate limiting middleware with configurable windows and limits.
+  <Card title="Billing" icon="approve-check-circle">
+    Stripe subscriptions, trial management, and plan-gated middleware out of the box.
   </Card>
-  <Card title="WebSocket" icon="random">
-    WebSocket connection management with broadcast and per-user channels.
-  </Card>
-  <Card title="Telemetry" icon="information">
-    Distributed tracing and Prometheus metrics out of the box.
+  <Card title="Batteries Included" icon="laptop">
+    Database migrations, file storage (S3/local), rate limiting, Prometheus metrics, WebSocket, email — all wired up.
   </Card>
 </CardGrid>

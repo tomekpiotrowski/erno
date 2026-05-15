@@ -43,27 +43,33 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>) {
         }
     }
 
-    let mut api_child = if has_cargo_watch() {
-        Command::new("cargo")
-            .args(["watch", "-x", "run"])
-            .current_dir(&api_dir)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("failed to spawn `cargo watch`")
+    let mut api_cmd = if has_cargo_watch() {
+        let mut cmd = Command::new("cargo");
+        cmd.args(["watch", "-x", "run"]);
+        cmd
     } else {
         println!("{CYAN}[api]{RESET} cargo-watch not found — run `cargo install cargo-watch` for auto-reload");
-        Command::new("cargo")
-            .arg("run")
-            .current_dir(&api_dir)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("failed to spawn `cargo run`")
+        let mut cmd = Command::new("cargo");
+        cmd.arg("run");
+        cmd
     };
 
-    let mut app_child = Command::new("npm")
-        .arg("start")
+    #[cfg(unix)]
+    api_cmd.process_group(0);
+
+    let mut api_child = api_cmd
+        .current_dir(&api_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn api process");
+
+    let mut app_cmd = Command::new("npm");
+    app_cmd.arg("start");
+    #[cfg(unix)]
+    app_cmd.process_group(0);
+
+    let mut app_child = app_cmd
         .current_dir(&app_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -120,7 +126,18 @@ async fn wait_child(child: Arc<Mutex<Child>>) {
 }
 
 async fn kill_child(child: &Arc<Mutex<Child>>) {
-    let _ = child.lock().await.kill().await;
+    let mut guard = child.lock().await;
+
+    // Kill the entire process group so grandchildren (e.g. cargo run, ng serve)
+    // don't survive after their parent (cargo watch, npm) is gone.
+    #[cfg(unix)]
+    if let Some(pid) = guard.id() {
+        unsafe {
+            libc::kill(-(pid as libc::pid_t), libc::SIGKILL);
+        }
+    }
+
+    let _ = guard.kill().await;
 }
 
 fn has_cargo_watch() -> bool {

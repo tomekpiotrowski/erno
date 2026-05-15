@@ -1,6 +1,4 @@
-import { Component, inject, isDevMode, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { ErnoRealtimeService } from '../realtime/erno-realtime.service';
+import { Component, isDevMode, OnInit } from '@angular/core';
 import { ErnoSyncService } from '../sync/erno-sync.service';
 import { ErnoDevMailService, MockEmail } from './erno-dev-mail.service';
 
@@ -88,17 +86,20 @@ type Tab = 'status' | 'emails';
   `],
 })
 export class ErnoDevtoolsComponent implements OnInit {
-  private realtime = inject(ErnoRealtimeService);
-  private sync = inject(ErnoSyncService);
-  private mailService = inject(ErnoDevMailService);
-
   readonly visible = isDevMode();
-  readonly syncStatus$ = this.sync.status$;
+  readonly syncStatus$;
   wsStatus = 'disconnected';
 
   tab: Tab = 'status';
   emails: MockEmail[] = [];
   expanded: string | null = null;
+
+  constructor(
+    private sync: ErnoSyncService,
+    private mailService: ErnoDevMailService,
+  ) {
+    this.syncStatus$ = this.sync.status$;
+  }
 
   ngOnInit(): void {
     // WS connection state will be surfaced via ErnoRealtimeService in a later iteration

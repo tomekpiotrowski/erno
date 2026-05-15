@@ -1,7 +1,7 @@
-import { inject, Injectable } from '@angular/core';
+import { Inject, Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { BehaviorSubject } from 'rxjs';
-import { ERNO_CONFIG } from '../erno.config';
+import { ERNO_CONFIG, ErnoConfig } from '../erno.config';
 import { ErnoDatabaseService } from './erno-database.service';
 import { ErnoRealtimeService, SyncPushEvent } from '../realtime/erno-realtime.service';
 
@@ -17,15 +17,17 @@ export interface SyncDeltaItem {
 
 @Injectable()
 export class ErnoSyncService {
-  private config = inject(ERNO_CONFIG);
-  private http = inject(HttpClient);
-  private db = inject(ErnoDatabaseService);
-  private realtime = inject(ErnoRealtimeService);
-
   private _status = new BehaviorSubject<SyncStatus>('idle');
   readonly status$ = this._status.asObservable();
 
   private entityHandlers = new Map<string, (item: SyncDeltaItem) => Promise<void>>();
+
+  constructor(
+    @Inject(ERNO_CONFIG) private config: ErnoConfig,
+    private http: HttpClient,
+    private db: ErnoDatabaseService,
+    private realtime: ErnoRealtimeService,
+  ) {}
 
   register<T>(entity: string, handler: (item: SyncDeltaItem) => Promise<void>): void {
     this.entityHandlers.set(entity, handler);
@@ -43,7 +45,7 @@ export class ErnoSyncService {
       for (const [entity, handler] of this.entityHandlers) {
         const since = await this.db.getLastSyncSeq(entity);
         const items = await this.http
-          .get<SyncDeltaItem[]>(`${this.config.baseUrl}/sync/delta`, { params: { entity, since } })
+          .get<SyncDeltaItem[]>(`${this.config.baseUrl}/api/sync/delta`, { params: { entity, since } })
           .toPromise();
 
         if (!items?.length) continue;

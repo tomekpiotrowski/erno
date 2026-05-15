@@ -1,7 +1,7 @@
-import { inject, Injectable } from '@angular/core';
+import { Inject, Injectable } from '@angular/core';
 import { HttpClient, HttpEvent, HttpHeaders, HttpRequest } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { ERNO_CONFIG } from '../erno.config';
+import { ERNO_CONFIG, ErnoConfig } from '../erno.config';
 
 export interface UploadUrlResponse {
   upload_url: string;
@@ -10,11 +10,13 @@ export interface UploadUrlResponse {
 
 @Injectable()
 export class ErnoStorageService {
-  private config = inject(ERNO_CONFIG);
-  private http = inject(HttpClient);
+  constructor(
+    @Inject(ERNO_CONFIG) private config: ErnoConfig,
+    private http: HttpClient,
+  ) {}
 
   getUploadUrl(filename: string, contentType: string): Observable<UploadUrlResponse> {
-    return this.http.post<UploadUrlResponse>(`${this.config.baseUrl}/storage/upload-url`, { filename, content_type: contentType });
+    return this.http.post<UploadUrlResponse>(`${this.config.baseUrl}/api/storage/upload-url`, { filename, content_type: contentType });
   }
 
   upload(file: File, uploadUrl: string): Observable<HttpEvent<unknown>> {
@@ -26,10 +28,10 @@ export class ErnoStorageService {
   }
 
   getDownloadUrl(filePath: string): Observable<{ url: string }> {
-    return this.http.get<{ url: string }>(`${this.config.baseUrl}/storage/download-url`, { params: { path: filePath } });
+    return this.http.get<{ url: string }>(`${this.config.baseUrl}/api/storage/download-url`, { params: { path: filePath } });
   }
 
   delete(filePath: string): Observable<void> {
-    return this.http.delete<void>(`${this.config.baseUrl}/storage/files`, { params: { path: filePath } });
+    return this.http.delete<void>(`${this.config.baseUrl}/api/storage/files`, { params: { path: filePath } });
   }
 }

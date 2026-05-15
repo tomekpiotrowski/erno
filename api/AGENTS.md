@@ -20,7 +20,7 @@ Rate limiting and email sending are disabled in the test environment.
 | Flag | Purpose |
 |------|---------|
 | `test-utils` | Adds `axum-test` + `lets_expect`; needed to compile and run tests |
-| `tui` | Adds `ratatui` for the optional admin TUI |
+| `admin` | Adds `ratatui` for the admin TUI |
 
 ## Key modules
 
@@ -34,7 +34,7 @@ Rate limiting and email sending are disabled in the test environment.
 | `rate_limiting` | Multi-tier adaptive rate limiting |
 | `policy` | Pundit-style authorization (`Policy` trait) |
 | `metrics` | Prometheus metrics |
-| `admin` | CLI/TUI admin commands (requires `tui` feature) |
+| `admin` | CLI/TUI admin commands (requires `admin` feature) |
 
 ## Architecture notes
 

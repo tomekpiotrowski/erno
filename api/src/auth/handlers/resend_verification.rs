@@ -60,14 +60,13 @@ mod tests {
 
     use crate::{
         app::App,
-        auth::router::auth_router,
         database::{migrations::Migrator, models::user},
         password::hash_password,
         tests::setup_test::setup_test,
     };
 
-    fn test_router(app: App) -> Router {
-        Router::new().merge(auth_router(app))
+    fn test_router(_app: App) -> Router {
+        Router::new()
     }
     fn no_fixtures(
         db: &sea_orm::DatabaseConnection,

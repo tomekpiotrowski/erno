@@ -8,7 +8,7 @@ name = "test_app"
 path = "src/main.rs"
 
 [dependencies]
-erno = { path = "/home/tomek/Development/erno/api" }
+erno = { path = "/home/tomek/Development/erno/api", features = ["admin"] }
 sea-orm-migration = { version = "1.1", features = ["sqlx-postgres"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 async-trait = "0.1"

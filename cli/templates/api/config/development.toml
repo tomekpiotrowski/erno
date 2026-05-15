@@ -38,3 +38,6 @@ enabled = true
 default_window_secs = 60
 default_max_requests = 100
 backoff_multiplier = 2.0
+
+[cors]
+allowed_origins = ["http://localhost:4200"]

@@ -10,6 +10,10 @@ export default defineConfig({
       ],
       sidebar: [
         {
+          label: 'CLI',
+          autogenerate: { directory: 'cli' },
+        },
+        {
           label: 'API',
           autogenerate: { directory: 'api' },
         },

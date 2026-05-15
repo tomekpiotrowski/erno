@@ -40,3 +40,9 @@ impl MigratorTrait for Migrator {
 }
 
 pub struct Migrator;
+
+/// Returns all built-in erno framework migrations.
+/// Scaffolded apps chain these at the front of their own Migrator.
+pub fn erno_migrations() -> Vec<Box<dyn MigrationTrait>> {
+    Migrator::migrations()
+}

@@ -5,6 +5,7 @@ pub mod job_result;
 pub mod job_supervisor;
 pub mod scheduled_job;
 mod scheduler;
+pub mod send_already_registered_email_job;
 pub mod send_password_reset_email_job;
 pub mod send_verification_email_job;
 mod worker;

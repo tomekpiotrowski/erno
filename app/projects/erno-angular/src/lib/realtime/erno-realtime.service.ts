@@ -1,8 +1,7 @@
-import { inject, Injectable, OnDestroy } from '@angular/core';
-import { Observable, Subject, timer } from 'rxjs';
+import { Inject, Injectable, OnDestroy } from '@angular/core';
+import { Observable, Subject } from 'rxjs';
 import { webSocket, WebSocketSubject } from 'rxjs/webSocket';
-import { retryWhen, delay, tap } from 'rxjs/operators';
-import { ERNO_CONFIG } from '../erno.config';
+import { ERNO_CONFIG, ErnoConfig } from '../erno.config';
 import { ErnoAuthService } from '../auth/erno-auth.service';
 
 export interface SyncPushEvent {
@@ -14,11 +13,13 @@ export interface SyncPushEvent {
 
 @Injectable()
 export class ErnoRealtimeService implements OnDestroy {
-  private config = inject(ERNO_CONFIG);
-  private auth = inject(ErnoAuthService);
-
   private socket$: WebSocketSubject<SyncPushEvent> | null = null;
   private messages$ = new Subject<SyncPushEvent>();
+
+  constructor(
+    @Inject(ERNO_CONFIG) private config: ErnoConfig,
+    private auth: ErnoAuthService,
+  ) {}
 
   get events$(): Observable<SyncPushEvent> {
     return this.messages$.asObservable();

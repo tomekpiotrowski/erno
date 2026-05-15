@@ -29,7 +29,7 @@ pub enum Commands {
     /// List all application routes
     Routes,
     /// Open the admin text user interface
-    #[cfg(feature = "tui")]
+    #[cfg(feature = "admin")]
     Admin,
 }
 

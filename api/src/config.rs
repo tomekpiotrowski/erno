@@ -99,6 +99,8 @@ pub struct Config<ExtraConfig = ()> {
     pub storage: StorageConfig,
     #[serde(default)]
     pub metrics: MetricsConfig,
+    #[serde(default)]
+    pub cors: CorsConfig,
     #[serde(flatten, default)]
     pub extra: ExtraConfig,
 }
@@ -151,6 +153,14 @@ where
 
 fn default_use_tls() -> bool {
     true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CorsConfig {
+    /// Origins allowed to call the API, e.g. ["http://localhost:4200"].
+    /// An empty list disables CORS headers entirely.
+    #[serde(default)]
+    pub allowed_origins: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

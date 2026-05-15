@@ -1,8 +1,10 @@
-use axum::{extract::Request, middleware::Next, response::Response, routing::get, Router};
+use axum::{extract::Request, http::HeaderValue, middleware::Next, response::Response, routing::get, Router};
+use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 use crate::{
     api, app::App,
+    auth::router::auth_router,
     config::EmailConfig,
     dev,
     environment::Environment,
@@ -41,6 +43,9 @@ where
     let rate_limit_state = app.rate_limit_state.clone();
     let rate_limiting_enabled = app.config.rate_limiting.enabled;
     let metrics_enabled = app.config.metrics.enabled;
+    let cors_origins: Vec<HeaderValue> = app.config.cors.allowed_origins.iter()
+        .filter_map(|o| o.parse().ok())
+        .collect();
     let metrics_state = MetricsEndpointState {
         handle: app.prometheus_handle.clone(),
         auth_token: app.config.metrics.auth_token.clone(),
@@ -55,8 +60,9 @@ where
         .with_state(app.clone());
 
     let app_for_dev = app.clone();
+    // Auth routes are auto-mounted alongside user routes under /api.
     let mut rate_limited = Router::new()
-        .nest("/api", app_router(app))
+        .nest("/api", auth_router(app.clone()).merge(app_router(app)))
         .merge(ws_router);
 
     if metrics_enabled {
@@ -92,6 +98,16 @@ where
 
     if is_dev_mock {
         base = base.merge(dev::router::dev_router(app_for_dev));
+    }
+
+    if !cors_origins.is_empty() {
+        base = base.layer(
+            CorsLayer::new()
+                .allow_origin(cors_origins)
+                .allow_methods(tower_http::cors::Any)
+                .allow_headers(tower_http::cors::Any)
+                .allow_credentials(false),
+        );
     }
 
     base

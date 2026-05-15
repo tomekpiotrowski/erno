@@ -8,6 +8,7 @@ Rust/Axum SaaS infrastructure library — batteries-included auth, jobs, billing
 |-----------|------------|
 | `api/`    | Main Rust library crate — see `api/AGENTS.md` for development instructions |
 | `app/`    | Angular library (`erno-angular`) for Ionic web + mobile — see `app/AGENTS.md` |
+| `cli/`    | `erno` CLI binary — scaffolding, environment checks — see `cli/AGENTS.md` |
 | `docs/`   | Astro documentation site |
 
 ## API (Rust)
@@ -17,6 +18,10 @@ Rust/Axum SaaS infrastructure library — batteries-included auth, jobs, billing
 ## App (Angular)
 
 `app/` contains `erno-angular` — an Angular 20 library that Ionic apps consume for web and mobile. See `app/AGENTS.md` for build instructions, service reference, and architecture notes.
+
+## CLI
+
+`cli/` contains the `erno` binary. Install with `cargo install --path cli` or `cargo install erno-cli`. See `cli/AGENTS.md` for command reference and development instructions.
 
 ## Docs (Astro)
 

@@ -59,7 +59,7 @@ mod tests {
 
     use crate::{
         app::App,
-        auth::{jwt::generate_token, router::auth_router},
+        auth::jwt::generate_token,
         database::{
             migrations::Migrator,
             models::{user, user_token, user_token_type::UserTokenType},
@@ -69,8 +69,8 @@ mod tests {
         token::hash_token,
     };
 
-    fn test_router(app: App) -> Router {
-        Router::new().merge(auth_router(app))
+    fn test_router(_app: App) -> Router {
+        Router::new()
     }
     fn no_fixtures(
         db: &sea_orm::DatabaseConnection,
