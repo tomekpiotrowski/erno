@@ -14,7 +14,13 @@ use crate::{
     commands::{db, db_reset, migrate, routes, serve, version},
     config::Config,
     environment::Environment,
-    jobs::{job_registry::JobRegistry, scheduled_job::ScheduledJob},
+    jobs::{
+        job_registry::JobRegistry,
+        scheduled_job::ScheduledJob,
+        send_already_registered_email_job::SendAlreadyRegisteredEmailJob,
+        send_password_reset_email_job::SendPasswordResetEmailJob,
+        send_verification_email_job::SendVerificationEmailJob,
+    },
     setup_tracing::setup_tracing_for_command,
     sync::registry::SyncRegistry,
 };
@@ -83,17 +89,29 @@ where
     debug!("Environment set to: {:?}", environment);
     trace!("Configuration loaded");
 
+    let mut job_registry = config.job_registry;
+    register_builtin_jobs::<ExtraConfig>(&mut job_registry);
+
     handle_command::<AppMigrator, ExtraConfig>(
         environment,
         app_config,
         cli,
         config.app_router,
-        config.job_registry,
+        job_registry,
         config.job_schedule,
         config.sync_registry,
         config.app_info,
     )
     .await;
+}
+
+fn register_builtin_jobs<ExtraConfig>(job_registry: &mut JobRegistry<ExtraConfig>)
+where
+    ExtraConfig: Clone + Send + Sync + 'static,
+{
+    job_registry.register_job::<SendVerificationEmailJob<ExtraConfig>>();
+    job_registry.register_job::<SendPasswordResetEmailJob<ExtraConfig>>();
+    job_registry.register_job::<SendAlreadyRegisteredEmailJob<ExtraConfig>>();
 }
 
 #[must_use]
