@@ -58,6 +58,7 @@ Checks everything needed to build and run Erno projects:
 | Node.js | Yes |
 | npm | Yes |
 | Angular CLI (`ng`) | Yes |
+| Ionic CLI (`ionic`) | Yes |
 | PostgreSQL client (`psql`) | Yes |
 | PostgreSQL server running | Yes |
 | `~/.erno/config.toml` | Yes |
@@ -71,7 +72,7 @@ Exit code is `0` if all required checks pass, `1` otherwise.
 ## new
 
 ```sh
-erno new <name> [--path <dir>] [--erno-path <erno-dir>]
+erno new <name> [--path <dir>] [--erno-path <erno-dir>] [--bundle-id <id>]
 ```
 
 Scaffolds a new full-stack project under `./<name>/`:
@@ -89,17 +90,21 @@ Scaffolds a new full-stack project under `./<name>/`:
 │       ├── main.rs
 │       └── migrations/
 │           └── mod.rs          # extends erno_migrations()
-└── app/                        # Angular frontend
+└── app/                        # Ionic/Angular/Capacitor frontend
     ├── package.json            # depends on erno-angular
     ├── angular.json
-    ├── tsconfig.json
+    ├── capacitor.config.ts     # Capacitor bundle ID and web dir
     └── src/
-        ├── main.ts
+        ├── global.scss         # Ionic global styles
+        ├── theme/
+        │   └── variables.scss  # Ionic CSS custom properties
         └── app/
-            ├── app.config.ts   # ErnoModule.forRoot() wired up
-            ├── app.routes.ts
+            ├── app.module.ts   # IonicModule + ErnoModule.forRoot() wired up
+            ├── app-routing.module.ts
             ├── app.component.ts
-            └── app.component.html
+            ├── app.component.html
+            ├── auth/           # login, register, forgot/reset password, verify email
+            └── home/           # authenticated home page
 ```
 
 Also creates the `<name>_development` and `<name>_test` PostgreSQL databases using the admin credentials from `~/.erno/config.toml`.
@@ -110,6 +115,7 @@ Also creates the `<name>_development` and `<name>_test` PostgreSQL databases usi
 |------|---------|-------------|
 | `--path <dir>` | current directory | Parent directory for the new project |
 | `--erno-path <erno-dir>` | git reference | Path to a local erno repository root or its `api/` directory (for development against an unpublished erno) |
+| `--bundle-id <id>` | `com.example.<name>` | Capacitor bundle ID (reverse-DNS, no dashes) |
 
 ### Erno dependency
 

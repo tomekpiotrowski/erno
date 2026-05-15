@@ -18,8 +18,7 @@ const API_PRODUCTION_TOML: &str = include_str!("../../templates/api/config/produ
 const API_TEST_TOML: &str = include_str!("../../templates/api/config/test.toml");
 const APP_MODULE_TS: &str = include_str!("../../templates/app/app.module.ts");
 const APP_COMPONENT_HTML: &str = include_str!("../../templates/app/app.component.html");
-const APP_STYLES_CSS: &str = include_str!("../../templates/app/src/styles.css");
-const APP_ROUTING_MODULE_TS: &str = include_str!("../../templates/app/src/app/app-routing-module.ts");
+const APP_ROUTING_MODULE_TS: &str = include_str!("../../templates/app/src/app/app-routing.module.ts");
 const AUTH_GUARD_TS: &str = include_str!("../../templates/app/src/app/auth/auth.guard.ts");
 const LOGIN_COMPONENT_TS: &str = include_str!("../../templates/app/src/app/auth/login/login.component.ts");
 const LOGIN_COMPONENT_HTML: &str = include_str!("../../templates/app/src/app/auth/login/login.component.html");
@@ -31,12 +30,12 @@ const RESET_PASSWORD_COMPONENT_TS: &str = include_str!("../../templates/app/src/
 const RESET_PASSWORD_COMPONENT_HTML: &str = include_str!("../../templates/app/src/app/auth/reset-password/reset-password.component.html");
 const VERIFY_EMAIL_COMPONENT_TS: &str = include_str!("../../templates/app/src/app/auth/verify-email/verify-email.component.ts");
 const VERIFY_EMAIL_COMPONENT_HTML: &str = include_str!("../../templates/app/src/app/auth/verify-email/verify-email.component.html");
-const HOME_COMPONENT_TS: &str = include_str!("../../templates/app/src/app/home/home.component.ts");
-const HOME_COMPONENT_HTML: &str = include_str!("../../templates/app/src/app/home/home.component.html");
+const HOME_PAGE_TS: &str = include_str!("../../templates/app/src/app/home/home.page.ts");
+const HOME_PAGE_HTML: &str = include_str!("../../templates/app/src/app/home/home.page.html");
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
-pub async fn handle_new(name: &str, path: Option<&str>, erno_path: Option<&str>) {
+pub async fn handle_new(name: &str, path: Option<&str>, erno_path: Option<&str>, bundle_id: Option<&str>) {
     validate_name(name);
 
     let dest = match path {
@@ -53,13 +52,17 @@ pub async fn handle_new(name: &str, path: Option<&str>, erno_path: Option<&str>)
     let jwt_secret = generate_jwt_secret();
     let db_name = name.replace('-', "_");
     let db_password = db_name.clone();
+    // Capacitor bundle IDs must not contain dashes; replace with underscores.
+    let bundle_id = bundle_id
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| format!("com.example.{}", name.replace('-', "_")));
 
     println!("Creating {}...", dest.display());
 
     let angular_version = erno_path.and_then(read_angular_version_from_dist);
 
     create_api(&dest, name, &db_name, &jwt_secret, &db_password, &erno_dep);
-    ng_new_app(&dest);
+    ionic_new_app(name, &bundle_id, &dest);
     patch_app(
         &dest,
         name,
@@ -238,40 +241,41 @@ fn create_api(
     write(&dest.join(".gitignore"), GITIGNORE);
 }
 
-// ── Angular app scaffold (via ng new) ─────────────────────────────────────────
+// ── Ionic app scaffold (via ionic start) ──────────────────────────────────────
 
-fn ng_new_app(dest: &Path) {
-    let ng = match crate::ng::find_ng_binary() {
+fn ionic_new_app(name: &str, bundle_id: &str, dest: &Path) {
+    let ionic = match crate::ng::find_ionic_binary() {
         Some(p) => p,
         None => {
-            eprintln!("❌  Angular CLI (ng) not found. Run: npm install -g @angular/cli");
+            eprintln!("❌  Ionic CLI not found. Run: npm install -g @ionic/cli");
             std::process::exit(1);
         }
     };
 
-    println!("  Scaffolding Angular app...");
+    println!("  Scaffolding Ionic app...");
 
-    let status = Command::new(ng)
+    let status = Command::new(ionic)
         .args([
-            "new",
+            "start",
             "app",
-            "--no-standalone",
-            "--routing",
-            "--style=css",
-            "--skip-git",
-            "--skip-install",
-            "--defaults",
+            "blank",
+            "--type=angular",
+            "--capacitor",
+            "--no-deps",
+            "--no-git",
+            &format!("--package-id={bundle_id}"),
         ])
+        .env("CI", "true")
         .env("NG_CLI_ANALYTICS", "false")
         .current_dir(dest)
         .status()
         .unwrap_or_else(|e| {
-            eprintln!("❌  Failed to run ng new: {e}");
+            eprintln!("❌  Failed to run ionic start: {e}");
             std::process::exit(1);
         });
 
     if !status.success() {
-        eprintln!("❌  ng new failed");
+        eprintln!("❌  ionic start failed (name={name})");
         std::process::exit(1);
     }
 }
@@ -378,11 +382,23 @@ fn patch_app(
         }
     }
 
-    // Replace ng-generated files with erno versions
-    write(&app.join("src/styles.css"), APP_STYLES_CSS);
-    write(&app.join("src/app/app-module.ts"), APP_MODULE_TS);
-    write(&app.join("src/app/app.html"), APP_COMPONENT_HTML);
-    write(&app.join("src/app/app-routing-module.ts"), APP_ROUTING_MODULE_TS);
+    // ionic start generates `import 'zone.js'` in polyfills.ts; comment it out
+    // so Angular runs in zoneless mode (provideZonelessChangeDetection() in app.module.ts).
+    let polyfills_path = app.join("src/polyfills.ts");
+    if let Ok(content) = fs::read_to_string(&polyfills_path) {
+        let patched = content.replace("import 'zone.js';", "// import 'zone.js';");
+        write(&polyfills_path, &patched);
+    }
+
+    // ionic start generates a lazily-loaded home page with its own module; remove those
+    // files since we use eager routing with HomeComponent declared directly in AppModule.
+    let _ = fs::remove_file(app.join("src/app/home/home.module.ts"));
+    let _ = fs::remove_file(app.join("src/app/home/home-routing.module.ts"));
+
+    // Replace ionic-generated files with erno versions
+    write(&app.join("src/app/app.module.ts"), APP_MODULE_TS);
+    write(&app.join("src/app/app.component.html"), APP_COMPONENT_HTML);
+    write(&app.join("src/app/app-routing.module.ts"), APP_ROUTING_MODULE_TS);
     write(&app.join("src/app/auth/auth.guard.ts"), AUTH_GUARD_TS);
     write(&app.join("src/app/auth/login/login.component.ts"), LOGIN_COMPONENT_TS);
     write(&app.join("src/app/auth/login/login.component.html"), LOGIN_COMPONENT_HTML);
@@ -394,8 +410,8 @@ fn patch_app(
     write(&app.join("src/app/auth/reset-password/reset-password.component.html"), RESET_PASSWORD_COMPONENT_HTML);
     write(&app.join("src/app/auth/verify-email/verify-email.component.ts"), VERIFY_EMAIL_COMPONENT_TS);
     write(&app.join("src/app/auth/verify-email/verify-email.component.html"), VERIFY_EMAIL_COMPONENT_HTML);
-    write(&app.join("src/app/home/home.component.ts"), HOME_COMPONENT_TS);
-    write(&app.join("src/app/home/home.component.html"), HOME_COMPONENT_HTML);
+    write(&app.join("src/app/home/home.page.ts"), HOME_PAGE_TS);
+    write(&app.join("src/app/home/home.page.html"), HOME_PAGE_HTML);
 }
 
 // ── Database creation ─────────────────────────────────────────────────────────

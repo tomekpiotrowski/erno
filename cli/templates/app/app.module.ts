@@ -1,11 +1,13 @@
 import { NgModule, provideZonelessChangeDetection } from '@angular/core';
 import { BrowserModule } from '@angular/platform-browser';
+import { RouteReuseStrategy } from '@angular/router';
+import { IonicModule, IonicRouteStrategy } from '@ionic/angular';
 import { ReactiveFormsModule } from '@angular/forms';
 import { ErnoModule } from 'erno-angular';
 
-import { AppRoutingModule } from './app-routing-module';
-import { App } from './app';
-import { HomeComponent } from './home/home.component';
+import { AppRoutingModule } from './app-routing.module';
+import { AppComponent } from './app.component';
+import { HomePage } from './home/home.page';
 import { LoginComponent } from './auth/login/login.component';
 import { RegisterComponent } from './auth/register/register.component';
 import { ForgotPasswordComponent } from './auth/forgot-password/forgot-password.component';
@@ -14,8 +16,8 @@ import { VerifyEmailComponent } from './auth/verify-email/verify-email.component
 
 @NgModule({
   declarations: [
-    App,
-    HomeComponent,
+    AppComponent,
+    HomePage,
     LoginComponent,
     RegisterComponent,
     ForgotPasswordComponent,
@@ -24,6 +26,7 @@ import { VerifyEmailComponent } from './auth/verify-email/verify-email.component
   ],
   imports: [
     BrowserModule,
+    IonicModule.forRoot(),
     ReactiveFormsModule,
     AppRoutingModule,
     ErnoModule.forRoot({
@@ -31,7 +34,10 @@ import { VerifyEmailComponent } from './auth/verify-email/verify-email.component
       wsUrl: 'ws://localhost:3000',
     }),
   ],
-  providers: [provideZonelessChangeDetection()],
-  bootstrap: [App],
+  providers: [
+    provideZonelessChangeDetection(),
+    { provide: RouteReuseStrategy, useClass: IonicRouteStrategy },
+  ],
+  bootstrap: [AppComponent],
 })
 export class AppModule {}

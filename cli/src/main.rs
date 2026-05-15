@@ -25,6 +25,9 @@ enum Commands {
         /// Local path to the erno repository root (default: uses git reference)
         #[arg(long, value_name = "PATH")]
         erno_path: Option<String>,
+        /// Capacitor bundle ID (default: com.example.<name>)
+        #[arg(long, value_name = "ID")]
+        bundle_id: Option<String>,
     },
     /// Configure global Erno settings (~/.erno/config.toml)
     Setup,
@@ -42,7 +45,8 @@ async fn main() {
             name,
             path,
             erno_path,
-        } => commands::new::handle_new(&name, path.as_deref(), erno_path.as_deref()).await,
+            bundle_id,
+        } => commands::new::handle_new(&name, path.as_deref(), erno_path.as_deref(), bundle_id.as_deref()).await,
         Commands::Setup => commands::setup::handle_setup().await,
         Commands::Dev => commands::dev::handle_dev(None).await,
     }

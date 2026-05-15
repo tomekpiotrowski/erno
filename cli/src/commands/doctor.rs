@@ -102,6 +102,7 @@ async fn run_checks() -> Vec<CheckResult> {
         check_node(),
         check_npm(),
         check_angular_cli(),
+        check_ionic_cli(),
         check_psql(),
         check_pg_isready(),
         check_global_config(),
@@ -168,6 +169,16 @@ fn check_angular_cli() -> CheckResult {
                 .map(|s| s.trim().to_string())
                 .unwrap_or_else(|| "found".to_string());
             CheckResult::pass("Angular CLI", ver)
+        }
+    }
+}
+
+fn check_ionic_cli() -> CheckResult {
+    match crate::ng::find_ionic_binary().and_then(|ionic| Command::new(ionic).arg("--version").output().ok()) {
+        None => CheckResult::fail("Ionic CLI", "Install with: npm install -g @ionic/cli"),
+        Some(out) => {
+            let ver = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            CheckResult::pass("Ionic CLI", if ver.is_empty() { "found".to_string() } else { ver })
         }
     }
 }

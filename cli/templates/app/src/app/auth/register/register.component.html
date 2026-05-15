@@ -1,34 +1,43 @@
-<div class="auth-page">
-  <div class="card">
-    <h1>Create account</h1>
+<ion-content class="ion-padding">
+  <ion-card>
+    <ion-card-header>
+      <ion-card-title>Create account</ion-card-title>
+    </ion-card-header>
+    <ion-card-content>
+      <ion-text color="success" *ngIf="done">
+        <p>Check your email to verify your account.</p>
+        <p><a routerLink="/login">Back to sign in</a></p>
+      </ion-text>
 
-    <div *ngIf="done" class="success">
-      Check your email to verify your account.
-      <div class="links"><a routerLink="/login">Back to sign in</a></div>
-    </div>
+      <form *ngIf="!done" [formGroup]="form" (ngSubmit)="submit()">
+        <ion-item>
+          <ion-label position="floating">Email</ion-label>
+          <ion-input type="email" formControlName="email" autocomplete="email"></ion-input>
+        </ion-item>
+        <ion-item>
+          <ion-label position="floating">Password</ion-label>
+          <ion-input type="password" formControlName="password" autocomplete="new-password"></ion-input>
+        </ion-item>
+        <ion-item>
+          <ion-label position="floating">Confirm password</ion-label>
+          <ion-input type="password" formControlName="confirm" autocomplete="new-password"></ion-input>
+        </ion-item>
 
-    <form *ngIf="!done" [formGroup]="form" (ngSubmit)="submit()">
-      <label for="email">Email</label>
-      <input id="email" type="email" formControlName="email" autocomplete="email" />
+        <ion-text color="danger" *ngIf="form.errors?.['mismatch'] && form.get('confirm')?.dirty">
+          <p class="ion-padding-start">Passwords do not match.</p>
+        </ion-text>
+        <ion-text color="danger" *ngIf="error">
+          <p class="ion-padding-start">{{ error }}</p>
+        </ion-text>
 
-      <label for="password">Password</label>
-      <input id="password" type="password" formControlName="password" autocomplete="new-password" />
+        <ion-button expand="block" type="submit" [disabled]="loading" class="ion-margin-top">
+          {{ loading ? 'Creating account…' : 'Create account' }}
+        </ion-button>
+      </form>
 
-      <label for="confirm">Confirm password</label>
-      <input id="confirm" type="password" formControlName="confirm" autocomplete="new-password" />
-
-      <div class="error" *ngIf="form.errors?.['mismatch'] && form.get('confirm')?.dirty">
-        Passwords do not match.
-      </div>
-      <div class="error" *ngIf="error">{{ error }}</div>
-
-      <button type="submit" [disabled]="loading">
-        {{ loading ? 'Creating account…' : 'Create account' }}
-      </button>
-    </form>
-
-    <div class="links" *ngIf="!done">
-      Already have an account? <a routerLink="/login">Sign in</a>
-    </div>
-  </div>
-</div>
+      <p class="ion-text-center ion-margin-top" *ngIf="!done">
+        Already have an account? <a routerLink="/login">Sign in</a>
+      </p>
+    </ion-card-content>
+  </ion-card>
+</ion-content>

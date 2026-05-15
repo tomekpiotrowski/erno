@@ -1,17 +1,20 @@
-<div class="auth-page">
-  <div class="card">
-    <h1>Verify email</h1>
+<ion-content class="ion-padding">
+  <ion-card>
+    <ion-card-header>
+      <ion-card-title>Verify email</ion-card-title>
+    </ion-card-header>
+    <ion-card-content>
+      <p *ngIf="state === 'loading'">Verifying…</p>
 
-    <p *ngIf="state === 'loading'">Verifying…</p>
+      <ion-text color="success" *ngIf="state === 'success'">
+        <p>Email verified — you can now sign in.</p>
+        <p><a routerLink="/login">Sign in</a></p>
+      </ion-text>
 
-    <div *ngIf="state === 'success'" class="success">
-      Email verified — you can now sign in.
-      <div class="links"><a routerLink="/login">Sign in</a></div>
-    </div>
-
-    <div *ngIf="state === 'error'" class="error">
-      {{ error }}
-      <div class="links"><a routerLink="/login">Back to sign in</a></div>
-    </div>
-  </div>
-</div>
+      <ion-text color="danger" *ngIf="state === 'error'">
+        <p>{{ error }}</p>
+        <p><a routerLink="/login">Back to sign in</a></p>
+      </ion-text>
+    </ion-card-content>
+  </ion-card>
+</ion-content>
