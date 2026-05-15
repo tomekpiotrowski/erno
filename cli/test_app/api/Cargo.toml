@@ -1,0 +1,17 @@
+[package]
+name = "test_app"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "test_app"
+path = "src/main.rs"
+
+[dependencies]
+erno = { path = "/home/tomek/Development/erno/api" }
+sea-orm-migration = { version = "1.1", features = ["sqlx-postgres"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+async-trait = "0.1"
+axum = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

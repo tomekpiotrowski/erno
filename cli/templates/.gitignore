@@ -1,0 +1,5 @@
+/api/target
+/app/dist
+/app/node_modules
+config/local.toml
+.env

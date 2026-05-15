@@ -1,0 +1,40 @@
+base_url = "http://localhost:3001"
+
+[tracing]
+log_level = "warn"
+
+[database]
+url = "postgres://{{db_name}}:{{db_password}}@localhost/{{db_name}}_test"
+pool_size = 2
+
+[server]
+port = 3001
+
+[email]
+type = "mock"
+
+[auth]
+secret = "test_jwt_secret_for_testing_only_1234567890"
+access_token_minutes = 15
+one_time_token_expiry_hours = 24
+refresh_token_days = 30
+
+[jobs.cleanup]
+interval_seconds = 3600
+completed_retention_seconds = 7200
+failed_retention_seconds = 172800
+batch_size = 1000
+
+[jobs.workers.default]
+jobs = []
+count = 1
+job_timeout = 300
+max_retries = 4
+base_retry_delay_seconds = 60
+retry_backoff_multiplier = 5
+
+[rate_limiting]
+enabled = false
+default_window_secs = 60
+default_max_requests = 1000
+backoff_multiplier = 2.0

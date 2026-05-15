@@ -1,0 +1,40 @@
+base_url = "https://example.com"
+
+[tracing]
+log_level = "info"
+
+[database]
+url = "postgres://test_app:CHANGE_ME_DB_PASSWORD@localhost/test_app_production"
+pool_size = 10
+
+[server]
+port = 3000
+
+[email]
+type = "smtp"
+
+[auth]
+secret = "CHANGE_ME_run_erno_generate-jwt-secret"
+access_token_minutes = 15
+one_time_token_expiry_hours = 24
+refresh_token_days = 30
+
+[jobs.cleanup]
+interval_seconds = 3600
+completed_retention_seconds = 7200
+failed_retention_seconds = 172800
+batch_size = 1000
+
+[jobs.workers.default]
+jobs = []
+count = 4
+job_timeout = 300
+max_retries = 4
+base_retry_delay_seconds = 60
+retry_backoff_multiplier = 5
+
+[rate_limiting]
+enabled = true
+default_window_secs = 60
+default_max_requests = 100
+backoff_multiplier = 2.0
