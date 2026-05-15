@@ -28,8 +28,5 @@
     "test": "ng test",
     "watch": "ng build --watch --configuration development"
   },
-  "version": "0.0.0",
-  "installConfig": {
-    "installLinks": true
-  }
+  "version": "0.0.0"
 }

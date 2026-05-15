@@ -281,7 +281,6 @@ fn patch_app(dest: &Path, name: &str, erno_angular_dep: &str, angular_version: O
 
     pkg["name"] = serde_json::Value::String(format!("{name}-app"));
     pkg["dependencies"]["erno-angular"] = serde_json::Value::String(erno_angular_dep.to_string());
-    pkg["installConfig"] = serde_json::json!({ "installLinks": true });
 
     // Pin @angular/* versions to match what erno-angular was compiled against,
     // overriding whatever ng new chose based on the globally installed CLI.
@@ -304,6 +303,22 @@ fn patch_app(dest: &Path, name: &str, erno_angular_dep: &str, angular_version: O
         &pkg_path,
         &(serde_json::to_string_pretty(&pkg).unwrap() + "\n"),
     );
+
+    // Write .npmrc so that file: directory deps are copied instead of
+    // symlinked (install-links=true). Without this npm ≥8 creates a symlink,
+    // which causes two Angular runtimes to be loaded and triggers NG0203.
+    if erno_angular_dep.starts_with("file:") {
+        let npmrc_path = app.join(".npmrc");
+        let existing = fs::read_to_string(&npmrc_path).unwrap_or_default();
+        if !existing.contains("install-links") {
+            let content = if existing.is_empty() {
+                "install-links=true\n".to_string()
+            } else {
+                format!("{}\ninstall-links=true\n", existing.trim_end())
+            };
+            write(&npmrc_path, &content);
+        }
+    }
 
     // Replace ng-generated files with erno versions
     write(&app.join("src/app/app-module.ts"), APP_MODULE_TS);
