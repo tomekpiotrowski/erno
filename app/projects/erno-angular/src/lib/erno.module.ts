@@ -12,6 +12,7 @@ import { ErnoStorageService } from './storage/erno-storage.service';
 import { ErnoBillingService } from './billing/erno-billing.service';
 import { ErnoDevtoolsComponent } from './devtools/erno-devtools.component';
 import { ErnoDevMailService } from './devtools/erno-dev-mail.service';
+import { ErnoAlertsService } from './alerts/erno-alerts.service';
 
 @NgModule({
   imports: [CommonModule, HttpClientModule],
@@ -32,6 +33,7 @@ export class ErnoModule {
         ErnoStorageService,
         ErnoBillingService,
         ErnoDevMailService,
+        ErnoAlertsService,
       ],
     };
   }
