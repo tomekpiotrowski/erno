@@ -45,7 +45,13 @@ pub async fn handle_new(name: &str, path: Option<&str>, erno_path: Option<&str>)
 
     create_api(&dest, name, &db_name, &jwt_secret, &db_password, &erno_dep);
     ng_new_app(&dest);
-    patch_app(&dest, name, &erno_angular_dep, angular_version.as_deref());
+    patch_app(
+        &dest,
+        name,
+        &erno_angular_dep,
+        angular_version.as_deref(),
+        erno_path,
+    );
 
     let config = GlobalConfig::load().ok();
     if let Some(config) = config {
@@ -266,7 +272,13 @@ fn read_angular_version_from_dist(erno_path: &str) -> Option<String> {
 
 // ── Patch Angular app with erno-specific changes ──────────────────────────────
 
-fn patch_app(dest: &Path, name: &str, erno_angular_dep: &str, angular_version: Option<&str>) {
+fn patch_app(
+    dest: &Path,
+    name: &str,
+    erno_angular_dep: &str,
+    angular_version: Option<&str>,
+    erno_path: Option<&str>,
+) {
     let app = dest.join("app");
 
     let pkg_path = app.join("package.json");
@@ -281,6 +293,30 @@ fn patch_app(dest: &Path, name: &str, erno_angular_dep: &str, angular_version: O
 
     pkg["name"] = serde_json::Value::String(format!("{name}-app"));
     pkg["dependencies"]["erno-angular"] = serde_json::Value::String(erno_angular_dep.to_string());
+
+    // When erno-angular is installed as a symlink (file: directory dep), npm does
+    // not hoist its dependencies into the consumer's node_modules. Inject them
+    // here so they are present alongside the symlink.
+    if let Some(ep) = erno_path {
+        let (repo_root, _) = resolve_local_erno_paths(ep);
+        let lib_pkg_path = repo_root.join("app/dist/erno-angular/package.json");
+        if let Ok(content) = fs::read_to_string(&lib_pkg_path) {
+            if let Ok(lib_pkg) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(deps) = lib_pkg["dependencies"].as_object() {
+                    for (dep_name, dep_ver) in deps {
+                        // Angular packages are already present in the app; skip them.
+                        if dep_name.starts_with("@angular/") {
+                            continue;
+                        }
+                        // Only insert if not already declared by the app.
+                        if pkg["dependencies"][dep_name].is_null() {
+                            pkg["dependencies"][dep_name] = dep_ver.clone();
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // Pin @angular/* versions to match what erno-angular was compiled against,
     // overriding whatever ng new chose based on the globally installed CLI.
@@ -304,19 +340,23 @@ fn patch_app(dest: &Path, name: &str, erno_angular_dep: &str, angular_version: O
         &(serde_json::to_string_pretty(&pkg).unwrap() + "\n"),
     );
 
-    // Write .npmrc so that file: directory deps are copied instead of
-    // symlinked (install-links=true). Without this npm ≥8 creates a symlink,
-    // which causes two Angular runtimes to be loaded and triggers NG0203.
+    // When erno-angular is a symlink, the bundler (esbuild) by default follows
+    // symlinks and resolves imports from the real path — finding Angular in the
+    // Erno workspace's node_modules instead of the app's, which loads two
+    // Angular runtimes and causes NG0203. Setting preserveSymlinks=true tells
+    // esbuild to resolve from the symlink location (the app's node_modules),
+    // so only one Angular runtime is ever loaded.
     if erno_angular_dep.starts_with("file:") {
-        let npmrc_path = app.join(".npmrc");
-        let existing = fs::read_to_string(&npmrc_path).unwrap_or_default();
-        if !existing.contains("install-links") {
-            let content = if existing.is_empty() {
-                "install-links=true\n".to_string()
-            } else {
-                format!("{}\ninstall-links=true\n", existing.trim_end())
-            };
-            write(&npmrc_path, &content);
+        let angular_json_path = app.join("angular.json");
+        if let Ok(aj_content) = fs::read_to_string(&angular_json_path) {
+            if let Ok(mut aj) = serde_json::from_str::<serde_json::Value>(&aj_content) {
+                let build_opts = &mut aj["projects"]["app"]["architect"]["build"]["options"];
+                build_opts["preserveSymlinks"] = serde_json::Value::Bool(true);
+                write(
+                    &angular_json_path,
+                    &(serde_json::to_string_pretty(&aj).unwrap() + "\n"),
+                );
+            }
         }
     }
 
