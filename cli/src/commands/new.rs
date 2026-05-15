@@ -70,6 +70,9 @@ pub async fn handle_new(name: &str, path: Option<&str>, erno_path: Option<&str>,
         angular_version.as_deref(),
         erno_path,
     );
+    // ionic start installs deps via bun before we patch package.json, so
+    // erno-angular is missing from node_modules. Re-run npm install now.
+    install_app_deps(&dest, erno_angular_dep.starts_with("file:"));
 
     let config = GlobalConfig::load().ok();
     if let Some(config) = config {
@@ -239,6 +242,28 @@ fn create_api(
         ),
     );
     write(&dest.join(".gitignore"), GITIGNORE);
+}
+
+// ── Install app npm dependencies ─────────────────────────────────────────────
+
+fn install_app_deps(dest: &Path, use_install_links: bool) {
+    let app = dest.join("app");
+    println!("  Installing app dependencies...");
+    let mut cmd = std::process::Command::new("npm");
+    cmd.arg("install");
+    if use_install_links {
+        // file: directory deps are symlinked by default; --install-links copies
+        // them instead, which avoids the duplicate Angular runtime (NG0203).
+        cmd.arg("--install-links");
+    }
+    let status = cmd.current_dir(&app).status().unwrap_or_else(|e| {
+        eprintln!("❌  Failed to run npm install: {e}");
+        std::process::exit(1);
+    });
+    if !status.success() {
+        eprintln!("❌  npm install failed");
+        std::process::exit(1);
+    }
 }
 
 // ── Ionic app scaffold (via ionic start) ──────────────────────────────────────
