@@ -6,11 +6,18 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalConfig {
     pub postgres: PostgresConfig,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub github: Option<GithubConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PostgresConfig {
     pub admin_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GithubConfig {
+    pub token: String,
 }
 
 impl Default for GlobalConfig {
@@ -19,6 +26,7 @@ impl Default for GlobalConfig {
             postgres: PostgresConfig {
                 admin_url: "postgres://erno:erno@localhost:5432/postgres".to_string(),
             },
+            github: None,
         }
     }
 }
@@ -55,7 +63,10 @@ impl GlobalConfig {
             std::fs::create_dir_all(parent)?;
         }
 
-        let content = format!("[postgres]\nadmin_url = {:?}\n", self.postgres.admin_url);
+        let mut content = format!("[postgres]\nadmin_url = {:?}\n", self.postgres.admin_url);
+        if let Some(gh) = &self.github {
+            content.push_str(&format!("\n[github]\ntoken = {:?}\n", gh.token));
+        }
         std::fs::write(path, content)
     }
 }

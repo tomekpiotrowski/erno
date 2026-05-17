@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 
-use crate::global_config::GlobalConfig;
+use crate::global_config::{GithubConfig, GlobalConfig};
 
 pub async fn handle_setup() {
     let defaults = GlobalConfig::default();
@@ -28,8 +28,33 @@ pub async fn handle_setup() {
         }
     }
 
+    println!("\nGitHub personal access token (optional — enables `erno deploy` automation).");
+    println!("Required scopes: repo, write:packages");
+    println!("Create one at: https://github.com/settings/tokens/new");
+    let github_token_input = prompt("GitHub token [skip]", "");
+
+    let github = if github_token_input.is_empty() {
+        None
+    } else {
+        print!("Verifying GitHub token... ");
+        io::stdout().flush().unwrap();
+        match verify_github_token(&github_token_input).await {
+            Ok(login) => {
+                println!("ok ({})", login);
+                Some(GithubConfig { token: github_token_input })
+            }
+            Err(e) => {
+                println!("failed");
+                eprintln!("  Could not verify token: {e}");
+                eprintln!("  Skipping GitHub configuration.");
+                None
+            }
+        }
+    };
+
     let config = GlobalConfig {
         postgres: crate::global_config::PostgresConfig { admin_url },
+        github,
     };
 
     match config.save() {
@@ -62,6 +87,28 @@ fn prompt(label: &str, default: &str) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+async fn verify_github_token(token: &str) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let resp = client
+        .get("https://api.github.com/user")
+        .header("Authorization", format!("Bearer {token}"))
+        .header("User-Agent", "erno-cli")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    let login = json["login"]
+        .as_str()
+        .ok_or("missing login field")?
+        .to_string();
+    Ok(login)
 }
 
 async fn verify_postgres_connection(url: &str) -> Result<(), tokio_postgres::Error> {

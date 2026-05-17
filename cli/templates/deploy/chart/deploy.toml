@@ -1,0 +1,2 @@
+[production]
+kubernetes_context = "{{kubernetes_context}}"

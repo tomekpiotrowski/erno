@@ -1,0 +1,9 @@
+image:
+  pullPolicy: IfNotPresent
+
+api:
+  replicas: 1
+  port: 3000
+
+app:
+  replicas: 1

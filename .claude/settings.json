@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls /home/tomek/Development/erno-ionic-app-scaffold/.claude/plans/)",
+      "Read(//home/tomek/Development/erno-ionic-app-scaffold/.claude/**)",
+      "Read(//home/tomek/Development/erno-ionic-app-scaffold/cli/test_app/app/**)",
+      "Read(//home/tomek/Development/erno-ionic-app-scaffold/cli/test_app/app/src/app/home/**)",
+      "Bash(xargs cat)"
+    ]
+  }
+}

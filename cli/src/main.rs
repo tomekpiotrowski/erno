@@ -2,7 +2,7 @@ mod commands;
 mod global_config;
 mod ng;
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(name = "erno", about = "CLI tool for the Erno framework")]
@@ -33,6 +33,28 @@ enum Commands {
     Setup,
     /// Start the api and app dev servers
     Dev,
+    /// Set up and manage production deployment
+    Deploy(DeployArgs),
+}
+
+#[derive(Args)]
+struct DeployArgs {
+    #[command(subcommand)]
+    command: DeployCommands,
+}
+
+#[derive(Subcommand)]
+enum DeployCommands {
+    /// Generate Dockerfiles, Helm chart, and GitHub Actions workflow
+    Init,
+    /// Deploy a specific version to the cluster
+    Install {
+        /// Image tag / Helm chart version to deploy (e.g. v1.2.3)
+        version: String,
+        /// Target environment
+        #[arg(long, default_value = "production")]
+        env: String,
+    },
 }
 
 #[tokio::main]
@@ -49,5 +71,11 @@ async fn main() {
         } => commands::new::handle_new(&name, path.as_deref(), erno_path.as_deref(), bundle_id.as_deref()).await,
         Commands::Setup => commands::setup::handle_setup().await,
         Commands::Dev => commands::dev::handle_dev(None).await,
+        Commands::Deploy(args) => match args.command {
+            DeployCommands::Init => commands::deploy::handle_deploy_init().await,
+            DeployCommands::Install { version, env } => {
+                commands::deploy::handle_deploy_install(&version, &env).await
+            }
+        },
     }
 }

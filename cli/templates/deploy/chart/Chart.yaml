@@ -1,0 +1,5 @@
+apiVersion: v2
+appVersion: "0"
+description: {{name}} chart
+name: {{name}}
+version: 1.0.0
