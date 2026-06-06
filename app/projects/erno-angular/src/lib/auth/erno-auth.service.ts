@@ -45,6 +45,14 @@ export class ErnoAuthService {
     );
   }
 
+  /** Permanently delete the current account and all its data. Requires the
+   * current password. Clears the local session on success. */
+  deleteAccount(password: string): Observable<void> {
+    return this.http.request<void>('delete', `${this.config.baseUrl}/api/account`, { body: { password } }).pipe(
+      tap(() => this.clearSession()),
+    );
+  }
+
   refresh(): Observable<LoginResponse> {
     return this.http.post<LoginResponse>(`${this.config.baseUrl}/api/auth/refresh`, { refresh_token: this.refreshToken }).pipe(
       tap(res => this.storeSession(res)),

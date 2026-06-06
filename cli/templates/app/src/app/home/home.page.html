@@ -9,4 +9,8 @@
 
 <ion-content class="ion-padding">
   <p>Signed in as <strong>{{ auth.currentUser?.email }}</strong></p>
+
+  <ion-button expand="block" color="danger" fill="outline" (click)="confirmDeleteAccount()">
+    Delete account
+  </ion-button>
 </ion-content>

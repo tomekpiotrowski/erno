@@ -99,3 +99,68 @@ fn router(app: App) -> Router {
 | `POST` | `/auth/email/resend-verification` | Re-send the verification email |
 | `POST` | `/auth/password-reset/request` | Send password reset email |
 | `POST` | `/auth/password-reset/confirm` | Apply new password via one-time token |
+| `DELETE` | `/api/account` | Permanently delete the account and all its data |
+
+## Account deletion
+
+`DELETE /api/account` lets a logged-in user permanently delete their account — a hard
+requirement for App Store / Play Store submissions. It is mounted by `auth_router` at the top
+level (`/api/account`, not under `/auth`).
+
+The request must include the current password; a mismatch returns `403`:
+
+```http
+DELETE /api/account
+Authorization: Bearer <access-token>
+Content-Type: application/json
+
+{ "password": "current-password" }
+```
+
+On success it returns `204 No Content`. In one transaction Erno deletes the `users` row — which
+cascades to `user_tokens` and the Stripe/trial/gift subscription tables — and then enqueues
+retryable background jobs to **cancel the Stripe subscription** and **delete the user's uploaded
+files**. (`ErnoAuthService.deleteAccount(password)` in `erno-angular` wraps this and clears the
+local session.)
+
+### Deleting app-owned data
+
+Erno only owns the tables above. For your own per-user tables you have two options (use either or
+both):
+
+1. **`ON DELETE CASCADE`** — give your tables a foreign key to `users` with cascade delete, and they
+   are removed automatically when the user row goes.
+2. **`UserDataDeleter` hook** — implement the trait and register it; it runs inside the deletion
+   transaction (before the user row is removed), so returning `Err` aborts and rolls back the whole
+   deletion.
+
+```rust
+use erno::account::UserDataDeleter;
+use sea_orm::{DatabaseTransaction, DbErr};
+use uuid::Uuid;
+
+struct MyDataDeleter;
+
+#[async_trait::async_trait]
+impl UserDataDeleter for MyDataDeleter {
+    async fn delete_user_data(&self, txn: &DatabaseTransaction, user_id: Uuid) -> Result<(), DbErr> {
+        my_table::Entity::delete_many()
+            .filter(my_table::Column::UserId.eq(user_id))
+            .exec(txn)
+            .await?;
+        Ok(())
+    }
+}
+
+// wire it during boot
+BootConfig::new(app_info, app_router, registry, schedule)
+    .on_delete_user(std::sync::Arc::new(MyDataDeleter));
+```
+
+The `cancel_stripe_subscription` and `delete_user_files` jobs are registered automatically — make
+sure a worker pool lists them in `jobs` (the `erno new` scaffold already does). If either job
+exhausts its retries it logs an error via its `on_permanent_failure` hook (see the
+[jobs docs](/api/jobs/#retries-and-failure-handling)); register an app-wide `JobFailureHandler` to be
+alerted.
+
+Admin operators can run the same purge from the console TUI (select a user → `x` → confirm).
