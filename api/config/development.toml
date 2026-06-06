@@ -20,19 +20,25 @@ access_token_minutes = 15
 one_time_token_expiry_hours = 24
 refresh_token_days = 30
 
+# App-wide defaults for job retries/timeouts. Worker pools and individual jobs
+# may override any of these; anything left unset inherits these values.
+[jobs.defaults]
+job_timeout = 300
+max_retries = 4
+base_retry_delay_seconds = 60
+retry_backoff_multiplier = 5
+
 [jobs.cleanup]
 interval_seconds = 3600
 completed_retention_seconds = 7200
 failed_retention_seconds = 172800
 batch_size = 1000
 
+# Omit job_timeout/max_retries/base_retry_delay_seconds/retry_backoff_multiplier
+# to inherit [jobs.defaults]; set any of them here to override for this pool.
 [jobs.workers.default]
 jobs = []
 count = 2
-job_timeout = 300
-max_retries = 4
-base_retry_delay_seconds = 60
-retry_backoff_multiplier = 5
 
 [rate_limiting]
 enabled = true
