@@ -6,6 +6,7 @@ use sea_orm::DatabaseConnection;
 use std::sync::Arc;
 
 use crate::{
+    account::UserDataDeleter,
     config::Config,
     database::DatabaseSetupStatus,
     environment::Environment,
@@ -37,6 +38,8 @@ pub struct App<ExtraConfig = ()> {
     pub prometheus_handle: PrometheusHandle,
     /// Optional app-wide hook invoked when any job permanently fails.
     pub job_failure_handler: Option<Arc<dyn JobFailureHandler>>,
+    /// Optional hook for deleting app-owned per-user data on account deletion.
+    pub user_data_deleter: Option<Arc<dyn UserDataDeleter>>,
 }
 
 impl<ExtraConfig> App<ExtraConfig> {

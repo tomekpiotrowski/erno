@@ -8,6 +8,7 @@
 
 // Modules will be added as we migrate functionality
 
+pub mod account;
 pub mod api;
 #[cfg(feature = "admin")]
 pub mod admin;

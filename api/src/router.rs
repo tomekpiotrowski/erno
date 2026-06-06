@@ -26,6 +26,7 @@ async fn tag_rate_limit_action(mut req: Request, next: Next) -> Response {
         "/api/auth/email/resend-verification" => "resend_verification",
         "/api/auth/password-reset/request" => "password_reset_request",
         "/api/auth/password-reset/confirm" => "password_reset_confirm",
+        "/api/account" => "account_delete",
         _ => "default",
     };
     req.extensions_mut()

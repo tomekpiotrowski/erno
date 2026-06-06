@@ -8,8 +8,10 @@ use serde::de::DeserializeOwned;
 use tracing::{debug, trace};
 
 use crate::{
+    account::UserDataDeleter,
     app::App,
     app_info::AppInfo,
+    billing::jobs::cancel_stripe_subscription_job::CancelStripeSubscriptionJob,
     cli::{Cli, Commands},
     commands::{db, db_reset, migrate, routes, serve, version},
     config::Config,
@@ -21,6 +23,7 @@ use crate::{
         send_verification_email_job::SendVerificationEmailJob,
     },
     setup_tracing::setup_tracing_for_command,
+    storage::delete_user_files_job::DeleteUserFilesJob,
     sync::registry::SyncRegistry,
 };
 use std::sync::Arc;
@@ -38,6 +41,7 @@ pub struct BootConfig<ExtraConfig = ()> {
     pub job_schedule: Vec<ScheduledJob>,
     pub sync_registry: SyncRegistry,
     pub job_failure_handler: Option<Arc<dyn JobFailureHandler>>,
+    pub user_data_deleter: Option<Arc<dyn UserDataDeleter>>,
 }
 
 impl<ExtraConfig> BootConfig<ExtraConfig> {
@@ -55,6 +59,7 @@ impl<ExtraConfig> BootConfig<ExtraConfig> {
             job_schedule,
             sync_registry: SyncRegistry::new(),
             job_failure_handler: None,
+            user_data_deleter: None,
         }
     }
 
@@ -73,6 +78,13 @@ impl<ExtraConfig> BootConfig<ExtraConfig> {
     #[must_use]
     pub fn on_job_failure(mut self, handler: Arc<dyn JobFailureHandler>) -> Self {
         self.job_failure_handler = Some(handler);
+        self
+    }
+
+    /// Register a hook that deletes app-owned per-user data on account deletion.
+    #[must_use]
+    pub fn on_delete_user(mut self, deleter: Arc<dyn UserDataDeleter>) -> Self {
+        self.user_data_deleter = Some(deleter);
         self
     }
 }
@@ -111,6 +123,7 @@ where
         config.sync_registry,
         config.app_info,
         config.job_failure_handler,
+        config.user_data_deleter,
     )
     .await;
 }
@@ -122,6 +135,9 @@ where
     job_registry.register_job::<SendVerificationEmailJob<ExtraConfig>>();
     job_registry.register_job::<SendPasswordResetEmailJob<ExtraConfig>>();
     job_registry.register_job::<SendAlreadyRegisteredEmailJob<ExtraConfig>>();
+    // Account-deletion cleanup jobs.
+    job_registry.register_job::<CancelStripeSubscriptionJob<ExtraConfig>>();
+    job_registry.register_job::<DeleteUserFilesJob<ExtraConfig>>();
 }
 
 #[must_use]
@@ -160,6 +176,7 @@ pub async fn handle_command<AppMigrator: MigratorTrait, ExtraConfig>(
     sync_registry: SyncRegistry,
     app_info: AppInfo,
     job_failure_handler: Option<Arc<dyn JobFailureHandler>>,
+    user_data_deleter: Option<Arc<dyn UserDataDeleter>>,
 ) where
     ExtraConfig: Clone + Default + DeserializeOwned + Send + Sync + 'static,
 {
@@ -187,7 +204,7 @@ pub async fn handle_command<AppMigrator: MigratorTrait, ExtraConfig>(
         #[cfg(feature = "admin")]
         Some(Commands::Admin) => {
             let db = crate::database::setup_database_connection(&config.database).await;
-            crate::commands::admin::handle_admin_command(db, config.stripe).await;
+            crate::commands::admin::handle_admin_command(db, config.stripe, user_data_deleter).await;
         }
         Some(Commands::Serve) | None => {
             serve::handle_serve_command::<AppMigrator, ExtraConfig>(
@@ -198,6 +215,7 @@ pub async fn handle_command<AppMigrator: MigratorTrait, ExtraConfig>(
                 job_schedule,
                 sync_registry,
                 job_failure_handler,
+                user_data_deleter,
             )
             .await;
         }

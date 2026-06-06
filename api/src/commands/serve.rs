@@ -34,6 +34,7 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
     job_schedule: Vec<ScheduledJob>,
     sync_registry: SyncRegistry,
     job_failure_handler: Option<Arc<dyn JobFailureHandler>>,
+    user_data_deleter: Option<Arc<dyn crate::account::UserDataDeleter>>,
 ) where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
@@ -139,6 +140,7 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
         metrics_collectors: metrics_collectors.clone(),
         prometheus_handle,
         job_failure_handler,
+        user_data_deleter,
     };
 
     // Spawn workers in the background

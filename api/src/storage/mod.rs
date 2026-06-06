@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 use crate::config::{StorageBackend, StorageConfig};
 
+pub mod delete_user_files_job;
 pub mod error;
 pub mod local;
 pub mod models;
@@ -146,6 +147,35 @@ impl FileStorage {
             .all(db)
             .await?;
 
+        self.remove_attachments(db, attachments).await
+    }
+
+    /// Remove **all** attachments for a record (regardless of name) and delete
+    /// any files that become orphaned. Used when wiping everything attached to a
+    /// record — e.g. account deletion removing every `record_type = "user"` file.
+    pub async fn detach_all_for_record(
+        &self,
+        db: &DatabaseConnection,
+        record_type: impl Into<String>,
+        record_id: Uuid,
+    ) -> Result<(), StorageError> {
+        let record_type = record_type.into();
+
+        let attachments = file_attachment::Entity::find()
+            .filter(file_attachment::Column::RecordType.eq(&record_type))
+            .filter(file_attachment::Column::RecordId.eq(record_id))
+            .all(db)
+            .await?;
+
+        self.remove_attachments(db, attachments).await
+    }
+
+    /// Delete the given attachment rows and any files left with no attachments.
+    async fn remove_attachments(
+        &self,
+        db: &DatabaseConnection,
+        attachments: Vec<file_attachment::Model>,
+    ) -> Result<(), StorageError> {
         for attachment in attachments {
             let file_id = attachment.file_id;
 

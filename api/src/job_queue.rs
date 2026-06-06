@@ -29,43 +29,57 @@ impl JobQueue {
         Self::Database
     }
 
-    /// Schedule a job
+    /// Schedule a typed job. Accepts any `ConnectionTrait`, so it works with a
+    /// `DatabaseConnection` or a `DatabaseTransaction` (for atomic enqueues).
     pub async fn add<J, ExtraConfig>(
         &self,
-        db: &sea_orm::DatabaseConnection,
+        conn: &impl sea_orm::ConnectionTrait,
         arguments: J::Arguments,
     ) -> Result<(), sea_orm::DbErr>
     where
         J: Job<ExtraConfig>,
         J::Arguments: serde::Serialize,
     {
+        self.enqueue_by_name(conn, J::name(), serde_json::to_value(arguments).unwrap())
+            .await
+    }
+
+    /// Schedule a job by its registered type name with a raw JSON payload.
+    ///
+    /// Useful where the concrete `Job` type isn't available (e.g. enqueuing from
+    /// the admin TUI, or a shared routine that can't name the generic). Accepts
+    /// any `ConnectionTrait` so it can run inside a transaction.
+    pub async fn enqueue_by_name(
+        &self,
+        conn: &impl sea_orm::ConnectionTrait,
+        job_type: &str,
+        arguments: serde_json::Value,
+    ) -> Result<(), sea_orm::DbErr> {
         match self {
             Self::Database => {
                 // Real implementation - insert into database
                 use crate::database::models::{job, job_status::JobStatus};
                 use sea_orm::ActiveModelTrait;
 
-                let job_id = uuid::Uuid::new_v4();
-
                 let job_model = job::ActiveModel {
-                    id: sea_orm::Set(job_id),
+                    id: sea_orm::Set(uuid::Uuid::new_v4()),
                     created_at: sea_orm::NotSet,
                     updated_at: sea_orm::NotSet,
-                    r#type: sea_orm::Set(J::name().to_string()),
-                    arguments: sea_orm::Set(serde_json::to_value(arguments).unwrap()),
+                    r#type: sea_orm::Set(job_type.to_string()),
+                    arguments: sea_orm::Set(arguments),
                     status: sea_orm::Set(JobStatus::Pending),
                     retry_count: sea_orm::Set(0),
                     next_execution_at: sea_orm::Set(None),
                 };
 
-                job_model.insert(db).await?;
+                job_model.insert(conn).await?;
                 Ok(())
             }
             Self::Mock(scheduled) => {
                 // Mock implementation - capture the job
                 scheduled.lock().unwrap().push(EnqueuedJob {
-                    job_type: J::name().to_string(),
-                    arguments: serde_json::to_value(arguments).unwrap(),
+                    job_type: job_type.to_string(),
+                    arguments,
                 });
                 Ok(())
             }

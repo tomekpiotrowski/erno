@@ -1,8 +1,12 @@
-use axum::{routing::post, Router};
+use axum::{
+    routing::{delete, post},
+    Router,
+};
 
 use crate::app::App;
 
 use super::handlers::{
+    delete_account::delete_account,
     login::login,
     logout::logout,
     password_reset::{password_reset_confirm, password_reset_request},
@@ -44,5 +48,7 @@ where
             post(password_reset_confirm::<ExtraConfig>),
         )
         .route("/auth/refresh", post(refresh::<ExtraConfig>))
+        // Account deletion is mounted at the top level (`/api/account`), not under `/auth`.
+        .route("/account", delete(delete_account::<ExtraConfig>))
         .with_state(app)
 }

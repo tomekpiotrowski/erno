@@ -181,6 +181,7 @@ pub async fn setup_test<AppMigrator: MigratorTrait>(
             crate::metrics::collector::CollectorRegistry::default(),
         ),
         job_failure_handler: None,
+        user_data_deleter: None,
     };
 
     let test_router = router(app, app_router);
@@ -311,6 +312,7 @@ impl TestUtils {
                 crate::metrics::collector::CollectorRegistry::default(),
             ),
             job_failure_handler: None,
+            user_data_deleter: None,
         };
 
         J::execute(&app, args).await

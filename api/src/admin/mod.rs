@@ -25,7 +25,10 @@ use sea_orm::{
 use tokio::runtime::Handle;
 use uuid::Uuid;
 
+use std::sync::Arc;
+
 use crate::{
+    account::UserDataDeleter,
     billing::{
         handlers::webhooks::update_user_subscription_cache,
         lookup::{load_current_subscription, CurrentSubscription},
@@ -144,6 +147,7 @@ struct AdminApp<'a> {
     db: &'a DatabaseConnection,
     plans: &'a [String],
     handle: &'a Handle,
+    deleter: Option<&'a Arc<dyn UserDataDeleter>>,
     screen: Screen,
     dashboard: DashboardData,
     users: UsersState,
@@ -152,11 +156,17 @@ struct AdminApp<'a> {
 }
 
 impl<'a> AdminApp<'a> {
-    fn new(db: &'a DatabaseConnection, plans: &'a [String], handle: &'a Handle) -> Self {
+    fn new(
+        db: &'a DatabaseConnection,
+        plans: &'a [String],
+        handle: &'a Handle,
+        deleter: Option<&'a Arc<dyn UserDataDeleter>>,
+    ) -> Self {
         Self {
             db,
             plans,
             handle,
+            deleter,
             screen: Screen::Dashboard,
             dashboard: DashboardData::default(),
             users: UsersState::default(),
@@ -363,8 +373,21 @@ impl<'a> AdminApp<'a> {
 
     fn do_delete_user(&mut self, user_id: Uuid) {
         let db = self.db;
-        let result = self.handle.block_on(async {
-            user::Entity::delete_by_id(user_id).exec(db).await
+        let deleter = self.deleter;
+        // Run the same purge the HTTP endpoint uses: hard-delete framework data
+        // and enqueue the Stripe-cancel + file-delete jobs, atomically.
+        let result = self.handle.block_on(async move {
+            use sea_orm::TransactionTrait;
+            let txn = db.begin().await?;
+            crate::account::purge_user_account(
+                &txn,
+                &crate::job_queue::JobQueue::database(),
+                deleter,
+                user_id,
+            )
+            .await?;
+            txn.commit().await?;
+            Ok::<(), sea_orm::DbErr>(())
         });
 
         match result {
@@ -1426,6 +1449,7 @@ pub fn run(
     db: &DatabaseConnection,
     plans: &[String],
     handle: &Handle,
+    deleter: Option<&Arc<dyn UserDataDeleter>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -1434,7 +1458,7 @@ pub fn run(
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
-    let result = run_inner(&mut terminal, db, plans, handle);
+    let result = run_inner(&mut terminal, db, plans, handle, deleter);
 
     disable_raw_mode()?;
     io::stdout().execute(LeaveAlternateScreen)?;
@@ -1447,8 +1471,9 @@ fn run_inner(
     db: &DatabaseConnection,
     plans: &[String],
     handle: &Handle,
+    deleter: Option<&Arc<dyn UserDataDeleter>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut app = AdminApp::new(db, plans, handle);
+    let mut app = AdminApp::new(db, plans, handle, deleter);
     app.load_dashboard();
 
     loop {
