@@ -6,9 +6,15 @@ use std::time::Duration;
 use std::sync::Arc;
 
 use crate::{
-    app::App, config::Config, environment::Environment, job_queue::JobQueue, mailer::Mailer,
+    app::App,
+    config::Config,
+    environment::Environment,
+    job_queue::JobQueue,
+    mailer::Mailer,
     metrics::{self, collector::CollectorRegistry},
-    rate_limiting::RateLimitState, sync::queue::SyncQueue, sync::registry::SyncRegistry,
+    rate_limiting::RateLimitState,
+    sync::queue::SyncQueue,
+    sync::registry::SyncRegistry,
     websocket::connections::Connections,
 };
 

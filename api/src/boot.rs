@@ -15,9 +15,7 @@ use crate::{
     config::Config,
     environment::Environment,
     jobs::{
-        failure_handler::JobFailureHandler,
-        job_registry::JobRegistry,
-        scheduled_job::ScheduledJob,
+        failure_handler::JobFailureHandler, job_registry::JobRegistry, scheduled_job::ScheduledJob,
         send_already_registered_email_job::SendAlreadyRegisteredEmailJob,
         send_password_reset_email_job::SendPasswordResetEmailJob,
         send_verification_email_job::SendVerificationEmailJob,
@@ -151,6 +149,7 @@ where
         .expect("Failed to deserialize configuration")
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_command<AppMigrator: MigratorTrait, ExtraConfig>(
     environment: Environment,
     config: Config<ExtraConfig>,

@@ -194,7 +194,11 @@ fn start_scheduler(db: &DatabaseConnection, job_schedule: Vec<ScheduledJob>) {
 }
 
 /// Start the stuck job recovery task
-fn start_recovery_task(config: &WorkersConfig, defaults: JobRetryDefaults, db: &DatabaseConnection) {
+fn start_recovery_task(
+    config: &WorkersConfig,
+    defaults: JobRetryDefaults,
+    db: &DatabaseConnection,
+) {
     let recovery_config = config.clone();
     let recovery_db = db.clone();
     spawn(async move {

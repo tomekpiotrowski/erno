@@ -5,7 +5,7 @@ use sea_orm::{
 };
 use sqlx::postgres::PgListener;
 use std::time::{Duration, Instant};
-use tokio::time::{timeout};
+use tokio::time::timeout;
 use tracing::{debug, error, info, warn};
 
 use crate::app::App;
@@ -88,7 +88,10 @@ where
         // Wait for NOTIFY or periodic timeout as a safety net
         match timeout(Duration::from_secs(POLL_INTERVAL_SECS), listener.recv()).await {
             Ok(Ok(_)) => {
-                debug!("Worker '{}' received job notification", worker_instance_name);
+                debug!(
+                    "Worker '{}' received job notification",
+                    worker_instance_name
+                );
             }
             Ok(Err(e)) => {
                 error!("Worker '{}' PgListener error: {}", worker_instance_name, e);
@@ -407,3 +410,304 @@ fn calculate_next_retry_time(retry_count: i32, resolved: &ResolvedRetryConfig) -
 }
 
 // Execution is provided by the application via the `executor` function parameter.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::JobRetryDefaults;
+
+    fn defaults() -> JobRetryDefaults {
+        JobRetryDefaults {
+            job_timeout: 300,
+            max_retries: 4,
+            base_retry_delay_seconds: 60,
+            retry_backoff_multiplier: 5,
+        }
+    }
+
+    fn pool(
+        job_timeout: Option<u32>,
+        max_retries: Option<i32>,
+        base_retry_delay_seconds: Option<u64>,
+        retry_backoff_multiplier: Option<u64>,
+    ) -> WorkerQueueConfig {
+        WorkerQueueConfig {
+            jobs: vec![],
+            count: 1,
+            job_timeout,
+            max_retries,
+            base_retry_delay_seconds,
+            retry_backoff_multiplier,
+        }
+    }
+
+    #[test]
+    fn resolve_uses_app_defaults_when_nothing_overrides() {
+        let resolved = resolve_retry_config(
+            &defaults(),
+            &pool(None, None, None, None),
+            JobRetryOverrides::default(),
+        );
+        assert_eq!(resolved.max_retries, 4);
+        assert_eq!(resolved.job_timeout, 300);
+        assert_eq!(resolved.base_retry_delay_seconds, 60);
+        assert_eq!(resolved.retry_backoff_multiplier, 5);
+    }
+
+    #[test]
+    fn pool_overrides_defaults_per_field() {
+        let resolved = resolve_retry_config(
+            &defaults(),
+            &pool(None, Some(8), Some(30), None),
+            JobRetryOverrides::default(),
+        );
+        // Pool-set fields win; unset fields inherit app defaults.
+        assert_eq!(resolved.max_retries, 8);
+        assert_eq!(resolved.base_retry_delay_seconds, 30);
+        assert_eq!(resolved.retry_backoff_multiplier, 5);
+        assert_eq!(resolved.job_timeout, 300);
+    }
+
+    #[test]
+    fn job_override_wins_over_pool_and_default() {
+        let job = JobRetryOverrides {
+            max_retries: Some(10),
+            base_retry_delay_seconds: None,
+            retry_backoff_multiplier: None,
+            job_timeout: Some(5),
+        };
+        let resolved = resolve_retry_config(&defaults(), &pool(None, Some(8), Some(30), None), job);
+        // Precedence: job → pool → default.
+        assert_eq!(resolved.max_retries, 10); // job beats pool's 8
+        assert_eq!(resolved.job_timeout, 5); // job beats default 300
+        assert_eq!(resolved.base_retry_delay_seconds, 30); // pool, since job unset
+        assert_eq!(resolved.retry_backoff_multiplier, 5); // default, since both unset
+    }
+
+    #[test]
+    fn next_retry_time_uses_resolved_backoff() {
+        let resolved = ResolvedRetryConfig {
+            job_timeout: 300,
+            max_retries: 5,
+            base_retry_delay_seconds: 10,
+            retry_backoff_multiplier: 2,
+        };
+        let now = chrono::Utc::now().naive_utc();
+        // delay = base * multiplier^retry_count
+        let t0 = calculate_next_retry_time(0, &resolved); // 10 * 2^0 = 10s
+        let t2 = calculate_next_retry_time(2, &resolved); // 10 * 2^2 = 40s
+        let d0 = (t0 - now).num_seconds();
+        let d2 = (t2 - now).num_seconds();
+        assert!((9..=12).contains(&d0), "expected ~10s, got {d0}");
+        assert!((39..=42).contains(&d2), "expected ~40s, got {d2}");
+    }
+
+    // --- DB-backed tests for the worker's failure/retry path ---
+
+    use crate::jobs::{Job, JobError};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    fn no_router(_app: crate::app::App) -> axum::Router {
+        axum::Router::new()
+    }
+
+    fn no_fixtures(
+        db: &sea_orm::DatabaseConnection,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
+        Box::pin(async move {
+            let _ = db;
+        })
+    }
+
+    fn test_app(
+        t: &crate::tests::setup_test::TestUtils,
+        handler: Option<Arc<dyn crate::jobs::failure_handler::JobFailureHandler>>,
+    ) -> crate::app::App {
+        crate::app::App {
+            config: t.config.clone(),
+            environment: t.environment,
+            db: t.db.clone(),
+            mailer: t.mailer.clone(),
+            job_queue: t.job_queue.clone(),
+            sync_queue: crate::sync::queue::SyncQueue::mock(),
+            sync_registry: Arc::new(crate::sync::registry::SyncRegistry::new()),
+            rate_limit_state: crate::rate_limiting::RateLimitState::new(
+                t.config.rate_limiting.clone(),
+            ),
+            websocket_connections: crate::websocket::connections::Connections::new(),
+            storage: crate::storage::FileStorage::mock(),
+            prometheus_handle: crate::metrics::setup_metrics(),
+            metrics_collectors: Arc::new(crate::metrics::collector::CollectorRegistry::default()),
+            job_failure_handler: handler,
+        }
+    }
+
+    async fn insert_running_job(db: &sea_orm::DatabaseConnection, job_type: &str) -> job::Model {
+        use sea_orm::{ActiveModelTrait, Set};
+        job::ActiveModel {
+            id: Set(uuid::Uuid::new_v4()),
+            r#type: Set(job_type.to_string()),
+            arguments: Set(serde_json::json!({})),
+            status: Set(JobStatus::Running),
+            retry_count: Set(0),
+            next_execution_at: Set(None),
+            ..Default::default()
+        }
+        .insert(db)
+        .await
+        .unwrap()
+    }
+
+    fn pool_for(job_type: &str) -> WorkerQueueConfig {
+        WorkerQueueConfig {
+            jobs: vec![job_type.to_string()],
+            count: 1,
+            job_timeout: None,
+            max_retries: None,
+            base_retry_delay_seconds: None,
+            retry_backoff_multiplier: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn permanent_failure_runs_per_job_and_app_wide_hooks() {
+        use sea_orm::EntityTrait;
+
+        // A job whose per-job override forbids retries, so a TryAgainLater
+        // failure becomes permanent on the first attempt.
+        static PER_JOB_CALLS: AtomicUsize = AtomicUsize::new(0);
+        struct FailingJob;
+        impl Job for FailingJob {
+            type Arguments = serde_json::Value;
+            fn name() -> &'static str {
+                "failing_job_test"
+            }
+            async fn execute(
+                _app: &crate::app::App,
+                _args: serde_json::Value,
+            ) -> Result<(), JobError> {
+                Err(JobError::TryAgainLater("boom".to_string()))
+            }
+            fn max_retries() -> Option<i32> {
+                Some(0)
+            }
+            async fn on_permanent_failure(
+                _app: &crate::app::App,
+                _args: &serde_json::Value,
+                _error: &str,
+            ) {
+                PER_JOB_CALLS.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        struct RecordingHandler(Arc<AtomicUsize>);
+        #[async_trait::async_trait]
+        impl crate::jobs::failure_handler::JobFailureHandler for RecordingHandler {
+            async fn on_permanent_failure(
+                &self,
+                _job_type: &str,
+                _arguments: &serde_json::Value,
+                _error: &str,
+            ) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let t = crate::tests::setup_test::setup_test::<crate::database::migrations::Migrator>(
+            no_router,
+            no_fixtures,
+        )
+        .await;
+
+        let app_calls = Arc::new(AtomicUsize::new(0));
+        let app = test_app(&t, Some(Arc::new(RecordingHandler(app_calls.clone()))));
+
+        let mut registry = JobRegistry::<()>::new();
+        registry.register_job::<FailingJob>();
+
+        let job_row = insert_running_job(&t.db, "failing_job_test").await;
+        execute_and_update_job(
+            &job_row,
+            &pool_for("failing_job_test"),
+            &app,
+            &registry,
+            "test-0",
+        )
+        .await
+        .unwrap();
+
+        let updated = job::Entity::find_by_id(job_row.id)
+            .one(&t.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.status, JobStatus::Failed);
+        assert_eq!(PER_JOB_CALLS.load(Ordering::SeqCst), 1, "per-job hook");
+        assert_eq!(app_calls.load(Ordering::SeqCst), 1, "app-wide hook");
+    }
+
+    #[tokio::test]
+    async fn transient_failure_schedules_retry_without_hooks() {
+        use sea_orm::EntityTrait;
+
+        // No per-job override: max_retries inherits the app default (>0), so a
+        // TryAgainLater failure is rescheduled rather than failed.
+        static HOOK_CALLS: AtomicUsize = AtomicUsize::new(0);
+        struct RetryingJob;
+        impl Job for RetryingJob {
+            type Arguments = serde_json::Value;
+            fn name() -> &'static str {
+                "retrying_job_test"
+            }
+            async fn execute(
+                _app: &crate::app::App,
+                _args: serde_json::Value,
+            ) -> Result<(), JobError> {
+                Err(JobError::TryAgainLater("later".to_string()))
+            }
+            async fn on_permanent_failure(
+                _app: &crate::app::App,
+                _args: &serde_json::Value,
+                _error: &str,
+            ) {
+                HOOK_CALLS.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let t = crate::tests::setup_test::setup_test::<crate::database::migrations::Migrator>(
+            no_router,
+            no_fixtures,
+        )
+        .await;
+        let app = test_app(&t, None);
+
+        let mut registry = JobRegistry::<()>::new();
+        registry.register_job::<RetryingJob>();
+
+        let job_row = insert_running_job(&t.db, "retrying_job_test").await;
+        execute_and_update_job(
+            &job_row,
+            &pool_for("retrying_job_test"),
+            &app,
+            &registry,
+            "test-0",
+        )
+        .await
+        .unwrap();
+
+        let updated = job::Entity::find_by_id(job_row.id)
+            .one(&t.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.status, JobStatus::PendingRetry);
+        assert_eq!(updated.retry_count, 1);
+        assert!(updated.next_execution_at.is_some());
+        assert_eq!(
+            HOOK_CALLS.load(Ordering::SeqCst),
+            0,
+            "no permanent-failure hook on retry"
+        );
+    }
+}

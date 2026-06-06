@@ -6,11 +6,19 @@ use sea_orm::DatabaseConnection;
 use std::sync::Arc;
 
 use crate::{
-    config::Config, database::DatabaseSetupStatus, environment::Environment, job_queue::JobQueue,
-    jobs::failure_handler::JobFailureHandler, jobs::Job, mailer::Mailer,
+    config::Config,
+    database::DatabaseSetupStatus,
+    environment::Environment,
+    job_queue::JobQueue,
+    jobs::failure_handler::JobFailureHandler,
+    jobs::Job,
+    mailer::Mailer,
     metrics::{collector::CollectorRegistry, PrometheusHandle},
-    rate_limiting::RateLimitState, storage::FileStorage,
-    sync::queue::SyncQueue, sync::registry::SyncRegistry, websocket::connections::Connections,
+    rate_limiting::RateLimitState,
+    storage::FileStorage,
+    sync::queue::SyncQueue,
+    sync::registry::SyncRegistry,
+    websocket::connections::Connections,
 };
 
 #[derive(Clone)]
@@ -41,7 +49,6 @@ impl<ExtraConfig> App<ExtraConfig> {
             .add::<J, ExtraConfig>(&self.db, arguments)
             .await
     }
-
 }
 
 #[derive(Debug, thiserror::Error)]
