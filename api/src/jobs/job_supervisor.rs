@@ -8,7 +8,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     app::App,
-    config::{CleanupConfig, JobsConfig, WorkerQueueConfig, WorkersConfig},
+    config::{CleanupConfig, JobRetryDefaults, JobsConfig, WorkerQueueConfig, WorkersConfig},
     database::models::{
         job::{self, Entity as JobEntity},
         job_execution,
@@ -76,7 +76,7 @@ pub async fn job_supervisor<ExtraConfig>(
     start_scheduler(&app.db, job_schedule);
 
     // Start the stuck job recovery task
-    start_recovery_task(&jobs_config.workers, &app.db);
+    start_recovery_task(&jobs_config.workers, jobs_config.defaults, &app.db);
 
     // Start the job cleanup task
     start_cleanup_task(&jobs_config.cleanup, &app.db);
@@ -194,7 +194,11 @@ fn start_scheduler(db: &DatabaseConnection, job_schedule: Vec<ScheduledJob>) {
 }
 
 /// Start the stuck job recovery task
-fn start_recovery_task(config: &WorkersConfig, db: &DatabaseConnection) {
+fn start_recovery_task(
+    config: &WorkersConfig,
+    defaults: JobRetryDefaults,
+    db: &DatabaseConnection,
+) {
     let recovery_config = config.clone();
     let recovery_db = db.clone();
     spawn(async move {
@@ -206,7 +210,7 @@ fn start_recovery_task(config: &WorkersConfig, db: &DatabaseConnection) {
                 info!("🏥 Starting stuck job recovery");
                 let config = recovery_config.clone();
                 async move {
-                    run_recovery_loop(&config, &db).await;
+                    run_recovery_loop(&config, defaults, &db).await;
                 }
             },
         )
@@ -221,9 +225,13 @@ async fn run_supervisor_loop() {
     }
 }
 
-async fn run_recovery_loop(config: &WorkersConfig, db: &DatabaseConnection) {
+async fn run_recovery_loop(
+    config: &WorkersConfig,
+    defaults: JobRetryDefaults,
+    db: &DatabaseConnection,
+) {
     loop {
-        match recover_stuck_jobs(config, db).await {
+        match recover_stuck_jobs(config, defaults, db).await {
             Ok(recovered_count) => {
                 if recovered_count > 0 {
                     info!("🏥 Recovered {} stuck jobs", recovered_count);
@@ -243,12 +251,14 @@ async fn run_recovery_loop(config: &WorkersConfig, db: &DatabaseConnection) {
 /// Finds and recovers jobs that have been running longer than 2x their timeout
 async fn recover_stuck_jobs(
     config: &WorkersConfig,
+    defaults: JobRetryDefaults,
     db: &DatabaseConnection,
 ) -> Result<usize, DbErr> {
     let mut total_recovered = 0;
 
     for (pool_name, worker_config) in &config.workers {
-        let recovered_count = recover_stuck_jobs_for_pool(pool_name, worker_config, db).await?;
+        let recovered_count =
+            recover_stuck_jobs_for_pool(pool_name, worker_config, defaults, db).await?;
         total_recovered += recovered_count;
     }
 
@@ -258,10 +268,13 @@ async fn recover_stuck_jobs(
 async fn recover_stuck_jobs_for_pool(
     pool_name: &str,
     worker_config: &WorkerQueueConfig,
+    defaults: JobRetryDefaults,
     db: &DatabaseConnection,
 ) -> Result<usize, DbErr> {
-    // Calculate the stuck threshold: 2x the job timeout
-    let stuck_threshold_seconds = worker_config.job_timeout * 2;
+    // Calculate the stuck threshold: 2x the job timeout. The pool's timeout is
+    // an optional override of the app-wide default.
+    let job_timeout = worker_config.job_timeout.unwrap_or(defaults.job_timeout);
+    let stuck_threshold_seconds = job_timeout * 2;
     let stuck_threshold = chrono::Duration::seconds(stuck_threshold_seconds.into());
     let cutoff_time = chrono::Utc::now().naive_utc() - stuck_threshold;
 

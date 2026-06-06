@@ -6,10 +6,19 @@ use sea_orm::DatabaseConnection;
 use std::sync::Arc;
 
 use crate::{
-    config::Config, database::DatabaseSetupStatus, environment::Environment, job_queue::JobQueue,
-    jobs::Job, mailer::Mailer, metrics::{collector::CollectorRegistry, PrometheusHandle},
-    rate_limiting::RateLimitState, storage::FileStorage,
-    sync::queue::SyncQueue, sync::registry::SyncRegistry, websocket::connections::Connections,
+    config::Config,
+    database::DatabaseSetupStatus,
+    environment::Environment,
+    job_queue::JobQueue,
+    jobs::failure_handler::JobFailureHandler,
+    jobs::Job,
+    mailer::Mailer,
+    metrics::{collector::CollectorRegistry, PrometheusHandle},
+    rate_limiting::RateLimitState,
+    storage::FileStorage,
+    sync::queue::SyncQueue,
+    sync::registry::SyncRegistry,
+    websocket::connections::Connections,
 };
 
 #[derive(Clone)]
@@ -26,6 +35,8 @@ pub struct App<ExtraConfig = ()> {
     pub storage: FileStorage,
     pub metrics_collectors: Arc<CollectorRegistry>,
     pub prometheus_handle: PrometheusHandle,
+    /// Optional app-wide hook invoked when any job permanently fails.
+    pub job_failure_handler: Option<Arc<dyn JobFailureHandler>>,
 }
 
 impl<ExtraConfig> App<ExtraConfig> {
@@ -38,7 +49,6 @@ impl<ExtraConfig> App<ExtraConfig> {
             .add::<J, ExtraConfig>(&self.db, arguments)
             .await
     }
-
 }
 
 #[derive(Debug, thiserror::Error)]

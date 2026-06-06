@@ -19,12 +19,19 @@ access_token_minutes = 15
 one_time_token_expiry_hours = 24
 refresh_token_days = 30
 
+[jobs.defaults]
+job_timeout = 300
+max_retries = 4
+base_retry_delay_seconds = 60
+retry_backoff_multiplier = 5
+
 [jobs.cleanup]
 interval_seconds = 3600
 completed_retention_seconds = 7200
 failed_retention_seconds = 172800
 batch_size = 1000
 
+# Explicit per-pool retry values are still honoured (they override defaults).
 [jobs.workers.default]
 jobs = []
 count = 1

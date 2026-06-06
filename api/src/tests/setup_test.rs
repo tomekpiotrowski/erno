@@ -180,6 +180,7 @@ pub async fn setup_test<AppMigrator: MigratorTrait>(
         metrics_collectors: std::sync::Arc::new(
             crate::metrics::collector::CollectorRegistry::default(),
         ),
+        job_failure_handler: None,
     };
 
     let test_router = router(app, app_router);
@@ -309,6 +310,7 @@ impl TestUtils {
             metrics_collectors: std::sync::Arc::new(
                 crate::metrics::collector::CollectorRegistry::default(),
             ),
+            job_failure_handler: None,
         };
 
         J::execute(&app, args).await

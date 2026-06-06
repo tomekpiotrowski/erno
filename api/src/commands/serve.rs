@@ -17,7 +17,8 @@ use crate::{
     database::setup_database,
     environment::Environment,
     jobs::{
-        job_registry::JobRegistry, job_supervisor::job_supervisor, scheduled_job::ScheduledJob,
+        failure_handler::JobFailureHandler, job_registry::JobRegistry,
+        job_supervisor::job_supervisor, scheduled_job::ScheduledJob,
     },
     metrics::{self, collector::CollectorRegistry},
     router::router,
@@ -32,6 +33,7 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
     job_registry: JobRegistry<ExtraConfig>,
     job_schedule: Vec<ScheduledJob>,
     sync_registry: SyncRegistry,
+    job_failure_handler: Option<Arc<dyn JobFailureHandler>>,
 ) where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
@@ -136,6 +138,7 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
         storage,
         metrics_collectors: metrics_collectors.clone(),
         prometheus_handle,
+        job_failure_handler,
     };
 
     // Spawn workers in the background

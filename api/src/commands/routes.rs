@@ -6,9 +6,15 @@ use std::time::Duration;
 use std::sync::Arc;
 
 use crate::{
-    app::App, config::Config, environment::Environment, job_queue::JobQueue, mailer::Mailer,
+    app::App,
+    config::Config,
+    environment::Environment,
+    job_queue::JobQueue,
+    mailer::Mailer,
     metrics::{self, collector::CollectorRegistry},
-    rate_limiting::RateLimitState, sync::queue::SyncQueue, sync::registry::SyncRegistry,
+    rate_limiting::RateLimitState,
+    sync::queue::SyncQueue,
+    sync::registry::SyncRegistry,
     websocket::connections::Connections,
 };
 
@@ -49,6 +55,7 @@ async fn create_app_for_routes<ExtraConfig>(config: Config<ExtraConfig>) -> App<
         sync_queue: SyncQueue::mock(),
         sync_registry: Arc::new(SyncRegistry::new()),
         websocket_connections: Connections::new(),
+        job_failure_handler: None,
     }
 }
 

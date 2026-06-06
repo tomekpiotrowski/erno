@@ -15,8 +15,7 @@ use crate::{
     config::Config,
     environment::Environment,
     jobs::{
-        job_registry::JobRegistry,
-        scheduled_job::ScheduledJob,
+        failure_handler::JobFailureHandler, job_registry::JobRegistry, scheduled_job::ScheduledJob,
         send_already_registered_email_job::SendAlreadyRegisteredEmailJob,
         send_password_reset_email_job::SendPasswordResetEmailJob,
         send_verification_email_job::SendVerificationEmailJob,
@@ -24,6 +23,7 @@ use crate::{
     setup_tracing::setup_tracing_for_command,
     sync::registry::SyncRegistry,
 };
+use std::sync::Arc;
 
 const ENVIRONMENT_VARIABLE: &str = "APP_ENVIRONMENT";
 
@@ -37,6 +37,7 @@ pub struct BootConfig<ExtraConfig = ()> {
     pub job_registry: JobRegistry<ExtraConfig>,
     pub job_schedule: Vec<ScheduledJob>,
     pub sync_registry: SyncRegistry,
+    pub job_failure_handler: Option<Arc<dyn JobFailureHandler>>,
 }
 
 impl<ExtraConfig> BootConfig<ExtraConfig> {
@@ -53,6 +54,7 @@ impl<ExtraConfig> BootConfig<ExtraConfig> {
             job_registry,
             job_schedule,
             sync_registry: SyncRegistry::new(),
+            job_failure_handler: None,
         }
     }
 
@@ -64,6 +66,13 @@ impl<ExtraConfig> BootConfig<ExtraConfig> {
         E::Model: serde::de::DeserializeOwned,
     {
         self.sync_registry = self.sync_registry.register::<E>();
+        self
+    }
+
+    /// Register an app-wide handler invoked whenever any job permanently fails.
+    #[must_use]
+    pub fn on_job_failure(mut self, handler: Arc<dyn JobFailureHandler>) -> Self {
+        self.job_failure_handler = Some(handler);
         self
     }
 }
@@ -101,6 +110,7 @@ where
         config.job_schedule,
         config.sync_registry,
         config.app_info,
+        config.job_failure_handler,
     )
     .await;
 }
@@ -139,6 +149,7 @@ where
         .expect("Failed to deserialize configuration")
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_command<AppMigrator: MigratorTrait, ExtraConfig>(
     environment: Environment,
     config: Config<ExtraConfig>,
@@ -148,6 +159,7 @@ pub async fn handle_command<AppMigrator: MigratorTrait, ExtraConfig>(
     job_schedule: Vec<ScheduledJob>,
     sync_registry: SyncRegistry,
     app_info: AppInfo,
+    job_failure_handler: Option<Arc<dyn JobFailureHandler>>,
 ) where
     ExtraConfig: Clone + Default + DeserializeOwned + Send + Sync + 'static,
 {
@@ -185,6 +197,7 @@ pub async fn handle_command<AppMigrator: MigratorTrait, ExtraConfig>(
                 job_registry,
                 job_schedule,
                 sync_registry,
+                job_failure_handler,
             )
             .await;
         }
