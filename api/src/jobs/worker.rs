@@ -17,12 +17,12 @@ use crate::{
         job_status::JobStatus,
     },
     {
-        config::WorkerQueueConfig,
+        config::{ResolvedRetryConfig, WorkerQueueConfig},
         jobs::{job_result::JobResult, JobError},
     },
 };
 
-use super::job_registry::JobRegistry;
+use super::job_registry::{JobRegistry, JobRetryOverrides};
 
 const POLL_INTERVAL_SECS: u64 = 30;
 
@@ -114,9 +114,17 @@ async fn execute_and_update_job<ExtraConfig>(
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
+    // Resolve effective retry/timeout settings: per-job override → worker-pool
+    // override → app-wide defaults.
+    let resolved = resolve_retry_config(
+        &app.config.jobs.defaults,
+        worker_config,
+        job_registry.retry_overrides(&job_model.r#type),
+    );
+
     // Execute the job and measure execution time
     let start_time = Instant::now();
-    let timeout_duration = Duration::from_secs(u64::from(worker_config.job_timeout));
+    let timeout_duration = Duration::from_secs(u64::from(resolved.job_timeout));
 
     let result = (timeout(timeout_duration, async {
         job_registry
@@ -145,17 +153,62 @@ where
     .record(execution_duration.as_secs_f64());
 
     // Update job status based on result
-    update_job_after_execution(
+    let permanently_failed = update_job_after_execution(
         job_model,
         &result,
         execution_duration,
-        worker_config,
+        &resolved,
         &app.db,
         worker_instance_name,
     )
     .await?;
 
+    // On permanent failure, run the per-job hook and the app-wide failure
+    // handler (in addition to the error log emitted above).
+    if permanently_failed {
+        let error_msg = match &result {
+            JobResult::Failed(e) => e.to_string(),
+            JobResult::TimedOut => "Job execution timed out".to_string(),
+            JobResult::Completed => String::new(),
+        };
+        job_registry
+            .run_permanent_failure_hook(app, &job_model.r#type, &job_model.arguments, &error_msg)
+            .await;
+        if let Some(handler) = &app.job_failure_handler {
+            handler
+                .on_permanent_failure(&job_model.r#type, &job_model.arguments, &error_msg)
+                .await;
+        }
+    }
+
     Ok(())
+}
+
+/// Merge per-job overrides, worker-pool overrides, and app-wide defaults into
+/// the effective settings for a single execution. Precedence: job → pool → default.
+fn resolve_retry_config(
+    defaults: &crate::config::JobRetryDefaults,
+    worker: &WorkerQueueConfig,
+    job: JobRetryOverrides,
+) -> ResolvedRetryConfig {
+    ResolvedRetryConfig {
+        job_timeout: job
+            .job_timeout
+            .or(worker.job_timeout)
+            .unwrap_or(defaults.job_timeout),
+        max_retries: job
+            .max_retries
+            .or(worker.max_retries)
+            .unwrap_or(defaults.max_retries),
+        base_retry_delay_seconds: job
+            .base_retry_delay_seconds
+            .or(worker.base_retry_delay_seconds)
+            .unwrap_or(defaults.base_retry_delay_seconds),
+        retry_backoff_multiplier: job
+            .retry_backoff_multiplier
+            .or(worker.retry_backoff_multiplier)
+            .unwrap_or(defaults.retry_backoff_multiplier),
+    }
 }
 
 async fn claim_oldest_viable_job(
@@ -165,11 +218,14 @@ async fn claim_oldest_viable_job(
     let txn = db.begin().await?;
     let now = chrono::Utc::now().naive_utc();
 
-    // Query for all viable jobs (pending jobs that are ready for execution)
+    // Query for all viable jobs (pending jobs that are ready for execution).
+    // Jobs that exhaust their retries are marked `Failed` (terminal) by the
+    // failure handler, so the status filter alone keeps them from being
+    // re-claimed — no need to filter on a fixed `max_retries` here, which would
+    // be wrong once per-job overrides allow a higher limit than the pool's.
     let job_option = JobEntity::find()
         .filter(job::Column::Type.is_in(worker_config.jobs.iter()))
         .filter(job::Column::Status.is_in([JobStatus::Pending, JobStatus::PendingRetry]))
-        .filter(job::Column::RetryCount.lt(worker_config.max_retries))
         .filter(
             job::Column::NextExecutionAt
                 .is_null()
@@ -195,14 +251,17 @@ async fn claim_oldest_viable_job(
     Ok(Some(job_model))
 }
 
+/// Records the execution attempt and updates job status. Returns `true` if the
+/// job permanently failed on this attempt (exhausted retries or failed
+/// permanently), so the caller can run failure hooks.
 async fn update_job_after_execution(
     job_model: &job::Model,
     execution_result: &JobResult,
     execution_duration: Duration,
-    worker_config: &WorkerQueueConfig,
+    resolved: &ResolvedRetryConfig,
     db: &DatabaseConnection,
     worker_instance_name: &str,
-) -> Result<(), DbErr> {
+) -> Result<bool, DbErr> {
     let now = chrono::Utc::now().naive_utc();
     #[allow(clippy::cast_possible_truncation)]
     let execution_time_ms = execution_duration.as_millis() as i64;
@@ -239,6 +298,7 @@ async fn update_job_after_execution(
             let mut active_job: job::ActiveModel = job_model.clone().into();
             active_job.status = sea_orm::Set(JobStatus::Completed);
             active_job.update(db).await?;
+            Ok(false)
         }
         result => {
             // Job failed - handle retry logic
@@ -247,31 +307,31 @@ async fn update_job_after_execution(
                 job_model,
                 result,
                 current_retry_count,
-                worker_config,
+                resolved,
                 db,
                 worker_instance_name,
                 execution_duration,
             )
-            .await?;
+            .await
         }
     }
-
-    Ok(())
 }
 
+/// Schedules a retry or marks the job permanently failed. Returns `true` when the
+/// job was marked permanently failed.
 async fn handle_job_failure(
     job_model: &job::Model,
     result: &JobResult,
     current_retry_count: i32,
-    worker_config: &WorkerQueueConfig,
+    resolved: &ResolvedRetryConfig,
     db: &DatabaseConnection,
     worker_instance_name: &str,
     execution_duration: Duration,
-) -> Result<(), DbErr> {
+) -> Result<bool, DbErr> {
     let should_retry = match result {
         JobResult::Failed(JobError::FailPermanently(_)) => false,
         JobResult::Failed(JobError::TryAgainLater(_)) | JobResult::TimedOut => {
-            current_retry_count < worker_config.max_retries
+            current_retry_count < resolved.max_retries
         }
         JobResult::Completed => false,
     };
@@ -288,9 +348,10 @@ async fn handle_job_failure(
         );
 
         // Schedule for retry
-        let next_execution_at = calculate_next_retry_time(current_retry_count, worker_config);
+        let next_execution_at = calculate_next_retry_time(current_retry_count, resolved);
 
-        update_job_for_retry(job_model, next_execution_at, current_retry_count + 1, db).await
+        update_job_for_retry(job_model, next_execution_at, current_retry_count + 1, db).await?;
+        Ok(false)
     } else {
         let msg = match result {
             JobResult::Failed(e) => format!("{e}"),
@@ -302,7 +363,8 @@ async fn handle_job_failure(
             job_model.r#type, job_model.id, execution_duration, msg
         );
 
-        update_job_as_permanently_failed(job_model, result, db).await
+        update_job_as_permanently_failed(job_model, result, db).await?;
+        Ok(true)
     }
 }
 
@@ -334,9 +396,9 @@ async fn update_job_as_permanently_failed(
     Ok(())
 }
 
-fn calculate_next_retry_time(retry_count: i32, worker_config: &WorkerQueueConfig) -> NaiveDateTime {
-    let delay_seconds = worker_config.base_retry_delay_seconds
-        * worker_config
+fn calculate_next_retry_time(retry_count: i32, resolved: &ResolvedRetryConfig) -> NaiveDateTime {
+    let delay_seconds = resolved.base_retry_delay_seconds
+        * resolved
             .retry_backoff_multiplier
             .pow(retry_count.try_into().unwrap_or(5));
 

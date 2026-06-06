@@ -193,8 +193,53 @@ pub struct ServerConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobsConfig {
+    /// App-wide default retry/failure settings. Worker pools and individual
+    /// jobs may override any of these; anything left unset inherits these values.
+    #[serde(default)]
+    pub defaults: JobRetryDefaults,
     pub cleanup: CleanupConfig,
     pub workers: WorkersConfig,
+}
+
+/// App-wide defaults for job execution timeout and retry behaviour.
+///
+/// Resolution precedence for any single setting is: per-job override →
+/// worker-pool override → these app-wide defaults.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct JobRetryDefaults {
+    /// Job execution timeout in seconds (default: 300)
+    #[serde(default = "default_job_timeout")]
+    pub job_timeout: u32,
+    /// Maximum number of retry attempts for failed jobs (default: 4)
+    #[serde(default = "default_max_retries")]
+    pub max_retries: i32,
+    /// Base delay in seconds before first retry (default: 60)
+    #[serde(default = "default_base_retry_delay")]
+    pub base_retry_delay_seconds: u64,
+    /// Exponential backoff multiplier (default: 5)
+    #[serde(default = "default_retry_multiplier")]
+    pub retry_backoff_multiplier: u64,
+}
+
+impl Default for JobRetryDefaults {
+    fn default() -> Self {
+        Self {
+            job_timeout: default_job_timeout(),
+            max_retries: default_max_retries(),
+            base_retry_delay_seconds: default_base_retry_delay(),
+            retry_backoff_multiplier: default_retry_multiplier(),
+        }
+    }
+}
+
+/// Fully resolved retry settings for a single job execution, after merging
+/// per-job overrides, worker-pool overrides, and app-wide defaults.
+#[derive(Debug, Clone, Copy)]
+pub struct ResolvedRetryConfig {
+    pub job_timeout: u32,
+    pub max_retries: i32,
+    pub base_retry_delay_seconds: u64,
+    pub retry_backoff_multiplier: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -234,18 +279,18 @@ pub struct WorkersConfig {
 pub struct WorkerQueueConfig {
     pub jobs: Vec<String>,
     pub count: u32,
-    /// Job execution timeout in seconds (default: 300)
-    #[serde(default = "default_job_timeout")]
-    pub job_timeout: u32,
-    /// Maximum number of retry attempts for failed jobs (default: 4)
-    #[serde(default = "default_max_retries")]
-    pub max_retries: i32,
-    /// Base delay in seconds before first retry (default: 60)
-    #[serde(default = "default_base_retry_delay")]
-    pub base_retry_delay_seconds: u64,
-    /// Exponential backoff multiplier (default: 5.0)
-    #[serde(default = "default_retry_multiplier")]
-    pub retry_backoff_multiplier: u64,
+    /// Job execution timeout in seconds. Unset inherits `jobs.defaults.job_timeout`.
+    #[serde(default)]
+    pub job_timeout: Option<u32>,
+    /// Maximum retry attempts for failed jobs. Unset inherits `jobs.defaults.max_retries`.
+    #[serde(default)]
+    pub max_retries: Option<i32>,
+    /// Base delay before first retry. Unset inherits `jobs.defaults.base_retry_delay_seconds`.
+    #[serde(default)]
+    pub base_retry_delay_seconds: Option<u64>,
+    /// Backoff multiplier. Unset inherits `jobs.defaults.retry_backoff_multiplier`.
+    #[serde(default)]
+    pub retry_backoff_multiplier: Option<u64>,
 }
 
 const fn default_max_retries() -> i32 {

@@ -49,6 +49,7 @@ async fn create_app_for_routes<ExtraConfig>(config: Config<ExtraConfig>) -> App<
         sync_queue: SyncQueue::mock(),
         sync_registry: Arc::new(SyncRegistry::new()),
         websocket_connections: Connections::new(),
+        job_failure_handler: None,
     }
 }
 
