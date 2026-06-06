@@ -377,6 +377,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_detach_all_for_record_removes_every_attachment() {
+        use sea_orm::{ColumnTrait, PaginatorTrait, QueryFilter};
+
+        let t = setup_test::<Migrator>(no_router, no_fixtures).await;
+        let storage = FileStorage::mock();
+        let user_id = Uuid::new_v4();
+
+        // Two differently-named attachments on the same user record.
+        let avatar = storage
+            .store(&t.db, "avatar.png", Some("image/png"), Bytes::from("a"))
+            .await
+            .unwrap();
+        let doc = storage
+            .store(&t.db, "doc.pdf", Some("application/pdf"), Bytes::from("d"))
+            .await
+            .unwrap();
+        storage
+            .attach(&t.db, avatar.id, "avatar", "user", user_id)
+            .await
+            .unwrap();
+        storage
+            .attach(&t.db, doc.id, "document", "user", user_id)
+            .await
+            .unwrap();
+
+        storage
+            .detach_all_for_record(&t.db, "user", user_id)
+            .await
+            .unwrap();
+
+        // All attachments for the user and both orphaned files are gone.
+        assert_eq!(
+            file_attachment::Entity::find()
+                .filter(file_attachment::Column::RecordId.eq(user_id))
+                .count(&t.db)
+                .await
+                .unwrap(),
+            0
+        );
+        assert!(file::Entity::find_by_id(avatar.id)
+            .one(&t.db)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(file::Entity::find_by_id(doc.id)
+            .one(&t.db)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
     async fn test_mock_download_roundtrip() {
         let storage = FileStorage::mock();
         let data = Bytes::from("roundtrip content");

@@ -120,8 +120,12 @@ Content-Type: application/json
 On success it returns `204 No Content`. In one transaction Erno deletes the `users` row — which
 cascades to `user_tokens` and the Stripe/trial/gift subscription tables — and then enqueues
 retryable background jobs to **cancel the Stripe subscription** and **delete the user's uploaded
-files**. (`ErnoAuthService.deleteAccount(password)` in `erno-angular` wraps this and clears the
-local session.)
+files**.
+
+`ErnoAuthService.deleteAccount(password)` in `erno-angular` wraps the call: on success it clears the
+local session and wipes the locally cached sync state in IndexedDB (sync cursors + queued offline
+mutations) so nothing remains on a shared device. If your app keeps its own IndexedDB stores for
+synced entities, clear those too in your deletion success handler.
 
 ### Deleting app-owned data
 

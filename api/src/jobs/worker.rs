@@ -540,6 +540,7 @@ mod tests {
             prometheus_handle: crate::metrics::setup_metrics(),
             metrics_collectors: Arc::new(crate::metrics::collector::CollectorRegistry::default()),
             job_failure_handler: handler,
+            user_data_deleter: None,
         }
     }
 

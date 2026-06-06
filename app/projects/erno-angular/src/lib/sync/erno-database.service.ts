@@ -35,4 +35,13 @@ export class ErnoDatabaseService extends Dexie {
   async setLastSyncSeq(entity: string, seq: number): Promise<void> {
     await this.syncMeta.put({ entity, lastSyncSeq: seq });
   }
+
+  /**
+   * Wipe all locally cached sync state — sync cursors and queued offline
+   * mutations. Used on account deletion so nothing leaks to the next user on a
+   * shared device. Apps with their own IndexedDB stores should clear those too.
+   */
+  async clear(): Promise<void> {
+    await Promise.all(this.tables.map((table) => table.clear()));
+  }
 }

@@ -82,3 +82,162 @@ pub async fn purge_user_account(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use chrono::Utc;
+    use sea_orm::{ActiveModelTrait, EntityTrait, Set, TransactionTrait};
+
+    use crate::{
+        billing::models::{stripe_subscription, subscription_status::SubscriptionStatus},
+        database::migrations::Migrator,
+        job_queue::JobQueue,
+        password::hash_password,
+        tests::setup_test::setup_test,
+    };
+
+    fn no_router(_app: crate::app::App) -> axum::Router {
+        axum::Router::new()
+    }
+    fn no_fixtures(
+        db: &sea_orm::DatabaseConnection,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
+        Box::pin(async move {
+            let _ = db;
+        })
+    }
+
+    async fn create_user(db: &sea_orm::DatabaseConnection, email: &str) -> user::Model {
+        user::ActiveModel {
+            email: Set(email.to_string()),
+            password_hash: Set(hash_password("password123").unwrap()),
+            email_verified_at: Set(Some(Utc::now().naive_utc())),
+            ..Default::default()
+        }
+        .insert(db)
+        .await
+        .unwrap()
+    }
+
+    struct RecordingDeleter(Arc<AtomicUsize>);
+    #[async_trait]
+    impl UserDataDeleter for RecordingDeleter {
+        async fn delete_user_data(
+            &self,
+            _txn: &DatabaseTransaction,
+            _user_id: Uuid,
+        ) -> Result<(), DbErr> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    struct FailingDeleter;
+    #[async_trait]
+    impl UserDataDeleter for FailingDeleter {
+        async fn delete_user_data(
+            &self,
+            _txn: &DatabaseTransaction,
+            _user_id: Uuid,
+        ) -> Result<(), DbErr> {
+            Err(DbErr::Custom("boom".to_string()))
+        }
+    }
+
+    #[tokio::test]
+    async fn purge_invokes_deleter_and_deletes_user() {
+        let t = setup_test::<Migrator>(no_router, no_fixtures).await;
+        let u = create_user(&t.db, "purge_ok@example.com").await;
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let deleter: Arc<dyn UserDataDeleter> = Arc::new(RecordingDeleter(calls.clone()));
+        let queue = JobQueue::mock();
+
+        let txn = t.db.begin().await.unwrap();
+        purge_user_account(&txn, &queue, Some(&deleter), u.id)
+            .await
+            .unwrap();
+        txn.commit().await.unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "deleter invoked");
+        assert!(user::Entity::find_by_id(u.id)
+            .one(&t.db)
+            .await
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            queue
+                .enqueued_jobs_of_type(delete_user_files_job::JOB_NAME)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn purge_aborts_when_deleter_errs() {
+        let t = setup_test::<Migrator>(no_router, no_fixtures).await;
+        let u = create_user(&t.db, "purge_abort@example.com").await;
+
+        let deleter: Arc<dyn UserDataDeleter> = Arc::new(FailingDeleter);
+        let queue = JobQueue::mock();
+
+        let txn = t.db.begin().await.unwrap();
+        let result = purge_user_account(&txn, &queue, Some(&deleter), u.id).await;
+        assert!(result.is_err());
+        // The deleter aborts before any write, so the user delete never runs.
+        // (In production the handler drops the txn here, rolling back; the test
+        // harness's outer transaction can't nest a rollback, so we commit and
+        // verify nothing was deleted — the same invariant.)
+        txn.commit().await.unwrap();
+
+        // User survives and nothing was enqueued.
+        assert!(user::Entity::find_by_id(u.id)
+            .one(&t.db)
+            .await
+            .unwrap()
+            .is_some());
+        assert!(queue.enqueued_jobs().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn purge_enqueues_stripe_cancel_when_subscription_exists() {
+        let t = setup_test::<Migrator>(no_router, no_fixtures).await;
+        let u = create_user(&t.db, "purge_stripe@example.com").await;
+
+        let now = Utc::now().naive_utc();
+        stripe_subscription::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            user_id: Set(u.id),
+            stripe_customer_id: Set("cus_123".to_string()),
+            stripe_subscription_id: Set("sub_123".to_string()),
+            plan: Set("pro".to_string()),
+            status: Set(SubscriptionStatus::Active),
+            current_period_start: Set(now),
+            current_period_end: Set(now),
+            cancel_at_period_end: Set(false),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(&t.db)
+        .await
+        .unwrap();
+
+        let queue = JobQueue::mock();
+        let txn = t.db.begin().await.unwrap();
+        purge_user_account(&txn, &queue, None, u.id).await.unwrap();
+        txn.commit().await.unwrap();
+
+        let cancel_jobs = queue
+            .enqueued_jobs_of_type(cancel_stripe_subscription_job::JOB_NAME)
+            .unwrap();
+        assert_eq!(cancel_jobs.len(), 1);
+        assert_eq!(
+            cancel_jobs[0].arguments["stripe_subscription_id"],
+            "sub_123"
+        );
+    }
+}

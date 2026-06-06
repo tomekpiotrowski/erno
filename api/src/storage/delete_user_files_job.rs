@@ -19,7 +19,9 @@ pub struct DeleteUserFilesArgs {
     pub user_id: Uuid,
 }
 
-impl<ExtraConfig: Clone + Send + Sync + 'static> Job<ExtraConfig> for DeleteUserFilesJob<ExtraConfig> {
+impl<ExtraConfig: Clone + Send + Sync + 'static> Job<ExtraConfig>
+    for DeleteUserFilesJob<ExtraConfig>
+{
     type Arguments = DeleteUserFilesArgs;
 
     fn name() -> &'static str {

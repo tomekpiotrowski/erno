@@ -61,3 +61,119 @@ where
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use axum::Router;
+    use chrono::Utc;
+    use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+    use serde_json::json;
+
+    use crate::{
+        app::App,
+        auth::jwt::generate_token,
+        database::{migrations::Migrator, models::user},
+        password::hash_password,
+        storage::delete_user_files_job,
+        tests::setup_test::setup_test,
+    };
+
+    fn test_router(_app: App) -> Router {
+        Router::new()
+    }
+
+    fn no_fixtures(
+        db: &sea_orm::DatabaseConnection,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
+        Box::pin(async move {
+            let _ = db;
+        })
+    }
+
+    async fn create_user(
+        db: &sea_orm::DatabaseConnection,
+        email: &str,
+        password: &str,
+    ) -> user::Model {
+        user::ActiveModel {
+            email: Set(email.to_string()),
+            password_hash: Set(hash_password(password).unwrap()),
+            email_verified_at: Set(Some(Utc::now().naive_utc())),
+            ..Default::default()
+        }
+        .insert(db)
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_delete_account_requires_auth() {
+        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let response = t
+            .server
+            .delete("/api/account")
+            .json(&json!({ "password": "whatever" }))
+            .await;
+        assert_eq!(response.status_code(), 401);
+    }
+
+    #[tokio::test]
+    async fn test_delete_account_wrong_password_returns_403() {
+        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let u = create_user(&t.db, "del_wrong@example.com", "correct-password").await;
+        let token = generate_token(&t.config, u.id, u.token_version).unwrap();
+
+        let response = t
+            .server
+            .delete("/api/account")
+            .add_header("Authorization", format!("Bearer {token}"))
+            .json(&json!({ "password": "wrong-password" }))
+            .await;
+        assert_eq!(response.status_code(), 403);
+
+        // User must still exist.
+        assert!(user::Entity::find_by_id(u.id)
+            .one(&t.db)
+            .await
+            .unwrap()
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn test_delete_account_deletes_user_and_enqueues_file_cleanup() {
+        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let u = create_user(&t.db, "del_ok@example.com", "my-password").await;
+        let token = generate_token(&t.config, u.id, u.token_version).unwrap();
+
+        let response = t
+            .server
+            .delete("/api/account")
+            .add_header("Authorization", format!("Bearer {token}"))
+            .json(&json!({ "password": "my-password" }))
+            .await;
+        assert_eq!(response.status_code(), 204);
+
+        // User row is gone.
+        assert!(user::Entity::find_by_id(u.id)
+            .one(&t.db)
+            .await
+            .unwrap()
+            .is_none());
+
+        // The file-cleanup job was enqueued; no Stripe sub, so no cancel job.
+        let file_jobs = t
+            .job_queue
+            .enqueued_jobs_of_type(delete_user_files_job::JOB_NAME)
+            .unwrap();
+        assert_eq!(file_jobs.len(), 1);
+        assert_eq!(file_jobs[0].arguments["user_id"], json!(u.id));
+
+        // The old access token is now rejected.
+        let after = t
+            .server
+            .post("/api/auth/logout")
+            .add_header("Authorization", format!("Bearer {token}"))
+            .await;
+        assert_eq!(after.status_code(), 401);
+    }
+}

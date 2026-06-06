@@ -42,7 +42,8 @@ impl<ExtraConfig: Clone + Send + Sync + 'static> Job<ExtraConfig>
 
         let client = Client::new(&stripe_config.secret_key);
 
-        match stripe::Subscription::cancel(&client, &subscription_id, CancelSubscription::new()).await
+        match stripe::Subscription::cancel(&client, &subscription_id, CancelSubscription::new())
+            .await
         {
             Ok(_) => Ok(()),
             // 404 = already cancelled/deleted on Stripe's side; treat as done.
@@ -52,7 +53,9 @@ impl<ExtraConfig: Clone + Send + Sync + 'static> Job<ExtraConfig>
                 );
                 Ok(())
             }
-            Err(e) => Err(JobError::TryAgainLater(format!("stripe cancel failed: {e}"))),
+            Err(e) => Err(JobError::TryAgainLater(format!(
+                "stripe cancel failed: {e}"
+            ))),
         }
     }
 

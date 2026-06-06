@@ -1,8 +1,9 @@
 import { Inject, Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, Observable } from 'rxjs';
-import { tap } from 'rxjs/operators';
+import { BehaviorSubject, Observable, from } from 'rxjs';
+import { switchMap, tap } from 'rxjs/operators';
 import { ERNO_CONFIG, ErnoConfig } from '../erno.config';
+import { ErnoDatabaseService } from '../sync/erno-database.service';
 
 export interface AuthUser {
   id: string;
@@ -20,6 +21,7 @@ export class ErnoAuthService {
   constructor(
     @Inject(ERNO_CONFIG) private config: ErnoConfig,
     private http: HttpClient,
+    private db: ErnoDatabaseService,
   ) {}
 
   private _currentUser = new BehaviorSubject<AuthUser | null>(null);
@@ -46,11 +48,22 @@ export class ErnoAuthService {
   }
 
   /** Permanently delete the current account and all its data. Requires the
-   * current password. Clears the local session on success. */
+   * current password. On success, clears the local session and wipes locally
+   * cached sync data (IndexedDB) so nothing remains on the device. */
   deleteAccount(password: string): Observable<void> {
     return this.http.request<void>('delete', `${this.config.baseUrl}/api/account`, { body: { password } }).pipe(
       tap(() => this.clearSession()),
+      // Best-effort local wipe; the account is already gone server-side.
+      switchMap(() => from(this.wipeLocalData())),
     );
+  }
+
+  private async wipeLocalData(): Promise<void> {
+    try {
+      await this.db.clear();
+    } catch {
+      // ignore — server-side deletion already succeeded
+    }
   }
 
   refresh(): Observable<LoginResponse> {
