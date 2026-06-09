@@ -15,6 +15,8 @@ mod m20260514_100003_add_subscription_cache_to_users;
 mod m20260514_200000_create_files;
 mod m20260514_200001_create_file_attachments;
 mod m20260515_000001_add_refresh_token_type;
+mod m20260608_000001_create_shares;
+mod m20260608_000002_create_share_grants;
 
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
@@ -35,6 +37,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20260514_200000_create_files::Migration),
             Box::new(m20260514_200001_create_file_attachments::Migration),
             Box::new(m20260515_000001_add_refresh_token_type::Migration),
+            Box::new(m20260608_000001_create_shares::Migration),
+            Box::new(m20260608_000002_create_share_grants::Migration),
         ]
     }
 }
