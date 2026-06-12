@@ -4,8 +4,14 @@
   "peerDependencies": {
     "@angular/common": "^20.3.0",
     "@angular/core": "^20.3.0",
+    "@capacitor/app": ">=6.0.0",
     "@ionic/angular": ">=7.0.0",
     "rxjs": "~7.8.0"
+  },
+  "peerDependenciesMeta": {
+    "@capacitor/app": {
+      "optional": true
+    }
   },
   "dependencies": {
     "dexie": "^4.4.2",

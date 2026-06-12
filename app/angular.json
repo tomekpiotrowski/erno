@@ -27,7 +27,8 @@
         "test": {
           "builder": "@angular/build:karma",
           "options": {
-            "tsConfig": "projects/erno-angular/tsconfig.spec.json"
+            "tsConfig": "projects/erno-angular/tsconfig.spec.json",
+            "polyfills": ["zone.js", "zone.js/testing"]
           }
         }
       }
