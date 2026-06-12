@@ -68,6 +68,8 @@ BootConfig::new(app_info, router, job_registry(), job_schedule())
 
 This registers the entity with the `SyncRegistry` and wires up the delta sync endpoint and WebSocket listener.
 
+To make a syncable entity reachable through [shares](../share), register it with `with_sync_shared` instead (its policy must implement `FromPrincipal`) and mount `sync_delta_shared` rather than `sync_delta`. Entities registered with plain `with_sync` are never visible to share holders.
+
 ## Soft delete
 
 Always soft-delete syncable entities so clients that were offline can pick up the tombstone on their next delta pull. Use `soft_delete_by_id` instead of SeaORM's `delete_by_id`:
@@ -95,5 +97,5 @@ The client sends the highest `sync_seq` it has seen (or `0` for a full sync). Th
 
 1. Any `INSERT`, `UPDATE`, or `DELETE` on a syncable table fires a PostgreSQL trigger.
 2. The trigger stamps `sync_seq` from a global sequence (`erno_sync_clock`) and writes a row to `sync_push_queue`.
-3. A NOTIFY fires on `sync_push_queue`; the sync listener picks it up and pushes a WebSocket message to every connected user whose policy includes the changed entity.
+3. A NOTIFY fires on `sync_push_queue`; the sync listener picks it up and evaluates each connected **principal** (the connection's user plus any active shares) against the entity's policy, pushing a WebSocket message to every connection allowed to read the change.
 4. Offline clients call the delta endpoint on reconnect and catch up from their last known `sync_seq`.

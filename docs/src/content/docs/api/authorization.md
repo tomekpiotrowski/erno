@@ -95,3 +95,7 @@ impl FromUser for PostPolicy {
     }
 }
 ```
+
+## Integration with sharing
+
+Entities that can be reached through [shares](../share) implement `FromPrincipal` instead of (or in addition to) `FromUser`. A `Principal` is an optional user plus the active shares carried by the request or WebSocket connection; the policy widens `readable`/`can_read` with `principal.shared_ids(...)` while keeping `can_update` owner-only (shares are read-only in v1, and `can_update` also gates share creation). See [Sharing](../share) for the full pattern, including implied access such as a shared post exposing its comments.

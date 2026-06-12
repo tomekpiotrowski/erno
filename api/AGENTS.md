@@ -28,6 +28,7 @@ Rate limiting and email sending are disabled in the test environment.
 |--------|---------------|
 | `auth` | JWT access + refresh tokens, registration, password reset, email verification |
 | `sync` | Offline-first delta sync engine (PostgreSQL LISTEN/NOTIFY) |
+| `share` | Share entities via secret links or direct grants (`Principal` + `FromPrincipal`), sync-integrated |
 | `jobs` | Background job queue (PostgreSQL advisory locks + worker pool) |
 | `billing` | Stripe integration, trial management |
 | `storage` | S3 / local file storage abstraction |
@@ -54,6 +55,7 @@ Narrative docs for each module live in `docs/src/content/docs/api/`:
 | `billing` | `billing.md` |
 | `storage` | `storage.md` |
 | `sync` | `sync.md` |
+| `share` | `share.md` |
 | `jobs` | `jobs.md` |
 | `rate_limiting` | `rate-limiting.md` |
 | `policy` | `authorization.md` |

@@ -22,6 +22,8 @@ ng serve                 # dev server on :4200 (demo app)
 | `ErnoSyncService` | `sync/erno-sync.service` | Delta sync between local IndexedDB and backend |
 | `ErnoStorageService` | `storage/erno-storage.service` | File upload/download against backend S3/local storage |
 | `ErnoBillingService` | `billing/erno-billing.service` | Stripe checkout and customer portal redirects |
+| `ErnoShareService` | `share/erno-share.service` | Create/list/revoke shares and grants; fragment-based share URLs |
+| `ErnoSharedViewService` | `share/erno-shared-view.service` | Online-only in-memory view of shared data (delta + live push) |
 | `ErnoDevtoolsComponent` | `devtools/erno-devtools.component` | Dev overlay for local development |
 | `ErnoDevMailService` | `devtools/erno-dev-mail.service` | Preview outbound emails in dev without SMTP |
 
