@@ -9,9 +9,13 @@ pub enum Request {
     /// Attach an active share to this connection. The raw link token is sent
     /// here — post-connect, over the socket — rather than in the upgrade URL,
     /// so it never lands in access logs or browser history.
-    SubscribeShare { token: String },
+    SubscribeShare {
+        token: String,
+    },
     /// Detach a share from this connection (e.g. the shared view was closed).
-    UnsubscribeShare { share_id: Uuid },
+    UnsubscribeShare {
+        share_id: Uuid,
+    },
     /// Application-specific requests
     /// The Value should be an object with a "type" field for routing
     Application(Value),

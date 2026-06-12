@@ -1,5 +1,8 @@
 use chrono::Utc;
-use sea_orm::{ColumnTrait, DatabaseConnection, DbErr, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait};
+use sea_orm::{
+    ColumnTrait, DatabaseConnection, DbErr, EntityTrait, JoinType, QueryFilter, QuerySelect,
+    RelationTrait,
+};
 use uuid::Uuid;
 
 use crate::database::models::user;

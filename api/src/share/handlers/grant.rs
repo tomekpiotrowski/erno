@@ -104,7 +104,11 @@ where
     }
 
     if !share.is_active(Utc::now().naive_utc()) {
-        return (StatusCode::UNPROCESSABLE_ENTITY, "Share is no longer active").into_response();
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Share is no longer active",
+        )
+            .into_response();
     }
 
     let recipient = match crate::database::models::user::Entity::find_by_id(req.user_id)

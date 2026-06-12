@@ -110,12 +110,7 @@ where
     let db = app.db.clone();
     let share_validator: ShareTokenValidator = Arc::new(move |raw_token: String| {
         let db = db.clone();
-        Box::pin(async move {
-            resolve_share_token(&db, &raw_token)
-                .await
-                .ok()
-                .flatten()
-        })
+        Box::pin(async move { resolve_share_token(&db, &raw_token).await.ok().flatten() })
     });
 
     ws.on_upgrade(move |socket| async move {

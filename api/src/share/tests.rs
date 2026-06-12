@@ -14,7 +14,9 @@ use crate::{
     policy::Policy,
     share::extractor::SHARE_TOKEN_HEADER,
     share::models::{share, share_grant},
-    share::principal::{resolve_principal, resolve_share_token, ActiveShare, FromPrincipal, Principal},
+    share::principal::{
+        resolve_principal, resolve_share_token, ActiveShare, FromPrincipal, Principal,
+    },
     share::router::share_router,
     sync::delta::sync_delta_shared,
     sync::registry::SyncRegistry,
@@ -356,18 +358,26 @@ async fn resolve_share_token_rejects_expired_and_revoked() {
     let owner = create_user(&t.db, "owner").await;
     let note = create_note(&t.db, &owner, "hello", 1).await;
 
-    let expired = create_share_row(&t.db, &owner, "share_test_notes", note.id, Some("tok-exp")).await;
+    let expired =
+        create_share_row(&t.db, &owner, "share_test_notes", note.id, Some("tok-exp")).await;
     let mut active: share::ActiveModel = expired.into();
     active.expires_at = Set(Some((Utc::now() - chrono::Duration::hours(1)).naive_utc()));
     active.update(&t.db).await.unwrap();
 
-    let revoked = create_share_row(&t.db, &owner, "share_test_notes", note.id, Some("tok-rev")).await;
+    let revoked =
+        create_share_row(&t.db, &owner, "share_test_notes", note.id, Some("tok-rev")).await;
     let mut active: share::ActiveModel = revoked.into();
     active.revoked_at = Set(Some(Utc::now().naive_utc()));
     active.update(&t.db).await.unwrap();
 
-    assert!(resolve_share_token(&t.db, "tok-exp").await.unwrap().is_none());
-    assert!(resolve_share_token(&t.db, "tok-rev").await.unwrap().is_none());
+    assert!(resolve_share_token(&t.db, "tok-exp")
+        .await
+        .unwrap()
+        .is_none());
+    assert!(resolve_share_token(&t.db, "tok-rev")
+        .await
+        .unwrap()
+        .is_none());
 }
 
 #[tokio::test]
@@ -397,7 +407,9 @@ async fn resolve_principal_loads_account_grants() {
     active.revoked_at = Set(Some(Utc::now().naive_utc()));
     active.update(&t.db).await.unwrap();
 
-    let principal = resolve_principal(&t.db, Some(recipient), &[]).await.unwrap();
+    let principal = resolve_principal(&t.db, Some(recipient), &[])
+        .await
+        .unwrap();
     assert!(principal.shares.is_empty());
 }
 
@@ -489,7 +501,14 @@ async fn delta_anonymous_share_header_scopes_results() {
     let owner = create_user(&t.db, "owner").await;
     let shared_note = create_note(&t.db, &owner, "shared", 1).await;
     create_note(&t.db, &owner, "private", 2).await;
-    create_share_row(&t.db, &owner, "share_test_notes", shared_note.id, Some("tok-d1")).await;
+    create_share_row(
+        &t.db,
+        &owner,
+        "share_test_notes",
+        shared_note.id,
+        Some("tok-d1"),
+    )
+    .await;
 
     // Anonymous without the header: nothing.
     let response = t.server.get("/api/notes/sync").await;
@@ -516,7 +535,14 @@ async fn delta_share_implies_comments() {
     let other_note = create_note(&t.db, &owner, "private", 2).await;
     let on_shared = create_comment(&t.db, &shared_note, &owner, "visible", 3).await;
     create_comment(&t.db, &other_note, &owner, "hidden", 4).await;
-    create_share_row(&t.db, &owner, "share_test_notes", shared_note.id, Some("tok-d2")).await;
+    create_share_row(
+        &t.db,
+        &owner,
+        "share_test_notes",
+        shared_note.id,
+        Some("tok-d2"),
+    )
+    .await;
 
     let response = t
         .server
@@ -559,8 +585,14 @@ async fn delta_revoked_share_returns_nothing() {
     let t = setup().await;
     let owner = create_user(&t.db, "owner").await;
     let shared_note = create_note(&t.db, &owner, "shared", 1).await;
-    let share =
-        create_share_row(&t.db, &owner, "share_test_notes", shared_note.id, Some("tok-d3")).await;
+    let share = create_share_row(
+        &t.db,
+        &owner,
+        "share_test_notes",
+        shared_note.id,
+        Some("tok-d3"),
+    )
+    .await;
 
     let mut active: share::ActiveModel = share.into();
     active.revoked_at = Set(Some(Utc::now().naive_utc()));
@@ -608,7 +640,10 @@ async fn create_share_with_link_returns_raw_token_once() {
         .await;
     assert_eq!(response.status_code(), 201);
     let body = response.json::<serde_json::Value>();
-    let raw_token = body["token"].as_str().expect("raw token returned").to_string();
+    let raw_token = body["token"]
+        .as_str()
+        .expect("raw token returned")
+        .to_string();
     assert_eq!(body["permission"], "read");
 
     // Only the hash is stored, and the raw token resolves.
