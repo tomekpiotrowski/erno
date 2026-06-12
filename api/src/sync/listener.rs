@@ -7,14 +7,14 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::database::models::sync_push_queue::{self, Entity as SyncPushQueue};
-use crate::database::models::user::{self, Entity as User};
 use crate::sync::registry::SyncRegistry;
 use crate::websocket::connections::Connections;
 use crate::websocket::message::{Broadcast, Message};
 
 /// Start the sync push listener. Wakes on NOTIFY from the `sync_push_queue`
-/// trigger, evaluates which connected users may read each changed entity via
-/// the `SyncRegistry`, fans out targeted WebSocket messages, then deletes
+/// trigger, evaluates which connections may read each changed entity via the
+/// `SyncRegistry` (each connection's `Principal` carries its user and any
+/// active shares), fans out targeted WebSocket messages, then deletes
 /// processed rows from the queue.
 pub async fn start_sync_listener(
     db: DatabaseConnection,
@@ -63,16 +63,10 @@ async fn listen_loop(
             continue;
         }
 
-        // Load user models for all currently connected users in one batch query.
-        let connected_ids = connections.connected_user_ids().await;
-        let users: Vec<user::Model> = if connected_ids.is_empty() {
-            vec![]
-        } else {
-            User::find()
-                .filter(user::Column::Id.is_in(connected_ids))
-                .all(db)
-                .await?
-        };
+        // Snapshot connections once per batch. Each entry carries its
+        // Principal (user + pre-resolved active shares), so the per-event
+        // policy evaluation below is entirely in-memory.
+        let conns = connections.snapshot().await;
 
         let mut processed_ids: Vec<Uuid> = Vec::with_capacity(events.len());
 
@@ -98,14 +92,15 @@ async fn listen_loop(
                 continue;
             };
 
-            // Send only to users whose policy permits reading this entity.
-            for user in &users {
-                if registry.can_user_read(&event.entity_type, &event.snapshot, user) {
+            // Send only to connections whose principal's policy permits
+            // reading this entity (ownership or an active share).
+            for (connection_id, principal, sender) in &conns {
+                if registry.can_principal_read(&event.entity_type, &event.snapshot, principal) {
                     debug!(
-                        "Pushing sync event seq={} to user {} (policy allowed)",
-                        seq, user.id
+                        "Pushing sync event seq={} to connection {} (policy allowed)",
+                        seq, connection_id
                     );
-                    connections.send_to_user(user.id, serialized.clone()).await;
+                    let _ = sender.send(serialized.clone());
                 }
             }
 

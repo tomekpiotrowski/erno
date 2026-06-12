@@ -1,7 +1,7 @@
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, DbErr, Statement};
 use uuid::Uuid;
 
-use crate::{policy::Policy, sync::from_user::FromUser};
+use crate::policy::Policy;
 
 /// Builder returned by `Syncable::soft_delete_by_id`, mirroring SeaORM's
 /// `delete_by_id` / `DeleteOne` pattern.
@@ -53,8 +53,12 @@ impl SoftDeleteStatement {
 /// ```
 pub trait Syncable: sea_orm::EntityTrait {
     /// The policy that controls read access to this entity.
-    /// Must implement `FromUser` so the sync worker can instantiate it per connected user.
-    type Policy: Policy<Self> + FromUser + Send + Sync;
+    ///
+    /// Must implement `FromUser` for user-scoped sync (`SyncRegistry::register`,
+    /// `sync_delta`), or `FromPrincipal` for share-aware sync
+    /// (`SyncRegistry::register_shareable`, `sync_delta_shared`) — or both.
+    /// The bound is enforced at those use sites.
+    type Policy: Policy<Self> + Send + Sync;
 
     /// The table name, used to key the `SyncRegistry`.
     fn entity_type() -> &'static str;

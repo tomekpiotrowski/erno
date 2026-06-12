@@ -8,7 +8,11 @@ use sea_orm::{ColumnTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    app::App, auth::current_user::CurrentUser, policy::Policy, sync::from_user::FromUser,
+    app::App,
+    auth::current_user::CurrentUser,
+    policy::Policy,
+    share::principal::{FromPrincipal, Principal},
+    sync::from_user::FromUser,
     sync::syncable::Syncable,
 };
 
@@ -43,14 +47,51 @@ pub async fn sync_delta<E, ExtraConfig>(
 ) -> impl IntoResponse
 where
     E: Syncable,
+    E::Policy: FromUser,
     E::Model: serde::Serialize + serde::de::DeserializeOwned,
     ExtraConfig: Clone + Send + Sync + 'static,
 {
     let policy = E::Policy::from_user(&user);
+    run_delta::<E>(&app.db, policy, params).await
+}
 
+/// Share-aware variant of [`sync_delta`]. Mount one per shareable entity:
+///
+/// ```rust,ignore
+/// .route("/posts/sync", get(sync_delta_shared::<post::Entity, _>))
+/// ```
+///
+/// The policy is built from a [`Principal`] — an optional authenticated user
+/// plus any active shares carried by the request (`X-Erno-Share` header tokens
+/// or account grants) — so anonymous link visitors and grant recipients receive
+/// the rows their shares cover in addition to (for users) their own data.
+pub async fn sync_delta_shared<E, ExtraConfig>(
+    State(app): State<App<ExtraConfig>>,
+    principal: Principal,
+    Query(params): Query<SyncDeltaQuery>,
+) -> impl IntoResponse
+where
+    E: Syncable,
+    E::Policy: FromPrincipal,
+    E::Model: serde::Serialize + serde::de::DeserializeOwned,
+    ExtraConfig: Clone + Send + Sync + 'static,
+{
+    let policy = E::Policy::from_principal(&principal);
+    run_delta::<E>(&app.db, policy, params).await
+}
+
+async fn run_delta<E>(
+    db: &sea_orm::DatabaseConnection,
+    policy: E::Policy,
+    params: SyncDeltaQuery,
+) -> axum::response::Response
+where
+    E: Syncable,
+    E::Model: serde::Serialize + serde::de::DeserializeOwned,
+{
     let base_query = E::find().filter(E::sync_seq_column().gt(params.since));
 
-    let items = match policy.readable(base_query).all(&app.db).await {
+    let items = match policy.readable(base_query).all(db).await {
         Ok(items) => items,
         Err(e) => {
             tracing::error!("sync_delta error for {}: {:?}", E::entity_type(), e);

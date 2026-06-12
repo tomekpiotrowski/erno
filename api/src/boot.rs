@@ -71,9 +71,27 @@ impl<ExtraConfig> BootConfig<ExtraConfig> {
     pub fn with_sync<E>(mut self) -> Self
     where
         E: crate::sync::syncable::Syncable,
+        E::Policy: crate::sync::from_user::FromUser,
         E::Model: serde::de::DeserializeOwned,
     {
         self.sync_registry = self.sync_registry.register::<E>();
+        self
+    }
+
+    /// Register a shareable syncable entity in the sync registry.
+    ///
+    /// The entity's policy must implement `FromPrincipal`; active shares held
+    /// by a request or connection then widen read access, and shares may be
+    /// created for this entity type via the share endpoints.
+    #[must_use]
+    pub fn with_sync_shared<E>(mut self) -> Self
+    where
+        E: crate::sync::syncable::Syncable,
+        E::Policy: crate::share::principal::FromPrincipal,
+        E::Model: serde::de::DeserializeOwned,
+        <E::PrimaryKey as sea_orm::PrimaryKeyTrait>::ValueType: From<uuid::Uuid>,
+    {
+        self.sync_registry = self.sync_registry.register_shareable::<E>();
         self
     }
 
