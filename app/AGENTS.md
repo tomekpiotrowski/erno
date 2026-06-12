@@ -16,7 +16,8 @@ ng serve                 # dev server on :4200 (demo app)
 |---------|------|---------------|
 | `ErnoAuthService` | `auth/erno-auth.service` | Login, registration, JWT access + refresh token management |
 | `ErnoHttpInterceptor` | `http/erno-http.interceptor` | Attaches JWT access token to every outbound HTTP request; handles 401 refresh |
-| `ErnoRealtimeService` | `realtime/erno-realtime.service` | WebSocket connection to backend push events |
+| `ErnoRealtimeService` | `realtime/erno-realtime.service` | WebSocket connection to backend push events; suspends on background, reconnects on foreground |
+| `ErnoAppStateService` | `app-state/erno-app-state.service` | Foreground/background state via `@capacitor/app` (optional) with `visibilitychange` web fallback |
 | `ErnoDatabaseService` | `sync/erno-database.service` | Local IndexedDB via Dexie for offline-first storage |
 | `ErnoSyncService` | `sync/erno-sync.service` | Delta sync between local IndexedDB and backend |
 | `ErnoStorageService` | `storage/erno-storage.service` | File upload/download against backend S3/local storage |
@@ -40,7 +41,7 @@ Narrative docs for each service live in `docs/src/content/docs/app/`:
 |---------|---------|
 | `ErnoAuthService` | `authentication.md` |
 | `ErnoSyncService` / `ErnoDatabaseService` | `sync.md` |
-| `ErnoRealtimeService` | `realtime.md` |
+| `ErnoRealtimeService` / `ErnoAppStateService` | `realtime.md` |
 | `ErnoStorageService` | `storage.md` |
 | `ErnoBillingService` | `billing.md` |
 
