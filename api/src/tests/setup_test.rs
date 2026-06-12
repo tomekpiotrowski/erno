@@ -95,6 +95,22 @@ pub async fn setup_test<AppMigrator: MigratorTrait>(
     app_router: fn(App) -> Router,
     fixture_loader: FixtureLoader,
 ) -> TestUtils {
+    setup_test_with_registry::<AppMigrator>(
+        app_router,
+        fixture_loader,
+        crate::sync::registry::SyncRegistry::new(),
+    )
+    .await
+}
+
+/// Like [`setup_test`], but with a populated sync registry — needed by tests
+/// exercising share creation (`is_shareable` / `can_user_share`) or
+/// principal-based push filtering.
+pub async fn setup_test_with_registry<AppMigrator: MigratorTrait>(
+    app_router: fn(App) -> Router,
+    fixture_loader: FixtureLoader,
+    sync_registry: crate::sync::registry::SyncRegistry,
+) -> TestUtils {
     // Initialize tracing for test output
     init_tracing();
 
@@ -165,6 +181,8 @@ pub async fn setup_test<AppMigrator: MigratorTrait>(
         crate::rate_limiting::rate_limit_state::RateLimitConfig::default(),
     );
 
+    let websocket_connections = Connections::new();
+
     let app = App {
         config: app_config.clone(),
         environment,
@@ -172,9 +190,9 @@ pub async fn setup_test<AppMigrator: MigratorTrait>(
         mailer: mailer.clone(),
         job_queue: job_queue.clone(),
         sync_queue: crate::sync::queue::SyncQueue::mock(),
-        sync_registry: std::sync::Arc::new(crate::sync::registry::SyncRegistry::new()),
+        sync_registry: std::sync::Arc::new(sync_registry),
         rate_limit_state,
-        websocket_connections: Connections::new(),
+        websocket_connections: websocket_connections.clone(),
         storage: crate::storage::FileStorage::mock(),
         prometheus_handle: crate::metrics::setup_metrics(),
         metrics_collectors: std::sync::Arc::new(
@@ -194,6 +212,7 @@ pub async fn setup_test<AppMigrator: MigratorTrait>(
         db,
         mailer,
         job_queue,
+        websocket_connections,
         config: app_config,
         environment,
     }
@@ -215,6 +234,9 @@ pub struct TestUtils {
     pub db: sea_orm::DatabaseConnection,
     pub mailer: Mailer,
     pub job_queue: crate::job_queue::JobQueue,
+    /// The same `Connections` instance the app uses — lets tests observe
+    /// live share fan-in/fan-out triggered by handlers.
+    pub websocket_connections: Connections,
     pub config: crate::config::Config,
     pub environment: crate::environment::Environment,
 }
