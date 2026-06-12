@@ -10,6 +10,8 @@ import { ErnoDatabaseService } from './sync/erno-database.service';
 import { ErnoSyncService } from './sync/erno-sync.service';
 import { ErnoStorageService } from './storage/erno-storage.service';
 import { ErnoBillingService } from './billing/erno-billing.service';
+import { ErnoShareService } from './share/erno-share.service';
+import { ErnoSharedViewService } from './share/erno-shared-view.service';
 import { ErnoDevtoolsComponent } from './devtools/erno-devtools.component';
 import { ErnoDevMailService } from './devtools/erno-dev-mail.service';
 import { ErnoDevJobsService } from './devtools/erno-dev-jobs.service';
@@ -37,6 +39,8 @@ export class ErnoModule {
         ErnoSyncService,
         ErnoStorageService,
         ErnoBillingService,
+        ErnoShareService,
+        ErnoSharedViewService,
         ErnoDevMailService,
         ErnoDevJobsService,
         ErnoAlertsService,

@@ -13,6 +13,8 @@ export * from './lib/sync/erno-database.service';
 export * from './lib/sync/erno-sync.service';
 export * from './lib/storage/erno-storage.service';
 export * from './lib/billing/erno-billing.service';
+export * from './lib/share/erno-share.service';
+export * from './lib/share/erno-shared-view.service';
 export * from './lib/devtools/erno-devtools.component';
 export * from './lib/devtools/erno-dev-mail.service';
 export * from './lib/alerts/erno-alerts.service';
