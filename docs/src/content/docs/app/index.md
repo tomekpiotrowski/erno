@@ -57,6 +57,7 @@ export const appConfig: ApplicationConfig = {
 | `ErnoAuthService` | `erno-angular` | Login, registration, JWT access + refresh token management |
 | `ErnoHttpInterceptor` | auto-registered | Attaches JWT to requests; handles 401 silent refresh |
 | `ErnoRealtimeService` | `erno-angular` | WebSocket connection to backend push events |
+| `ErnoAppStateService` | `erno-angular` | Tracks foreground/background state (Capacitor + web fallback) |
 | `ErnoDatabaseService` | `erno-angular` | Local IndexedDB via Dexie for offline storage |
 | `ErnoSyncService` | `erno-angular` | Delta sync between local Dexie store and backend |
 | `ErnoStorageService` | `erno-angular` | File upload/download against backend S3/local storage |

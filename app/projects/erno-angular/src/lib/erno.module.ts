@@ -15,6 +15,7 @@ import { ErnoDevMailService } from './devtools/erno-dev-mail.service';
 import { ErnoDevJobsService } from './devtools/erno-dev-jobs.service';
 import { ErnoAlertsService } from './alerts/erno-alerts.service';
 import { ErnoHttpService } from './http/erno-http.service';
+import { ErnoAppStateService } from './app-state/erno-app-state.service';
 
 @NgModule({
   imports: [CommonModule, HttpClientModule],
@@ -30,6 +31,7 @@ export class ErnoModule {
         { provide: HTTP_INTERCEPTORS, useClass: ErnoHttpInterceptor, multi: true },
         ErnoHttpService,
         ErnoAuthService,
+        ErnoAppStateService,
         ErnoRealtimeService,
         ErnoDatabaseService,
         ErnoSyncService,

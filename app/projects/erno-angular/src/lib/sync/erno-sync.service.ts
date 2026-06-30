@@ -1,9 +1,10 @@
-import { Inject, Injectable } from '@angular/core';
+import { Inject, Injectable, OnDestroy } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject } from 'rxjs';
+import { BehaviorSubject, Subscription } from 'rxjs';
 import { ERNO_CONFIG, ErnoConfig } from '../erno.config';
 import { ErnoDatabaseService } from './erno-database.service';
 import { ErnoRealtimeService, SyncPushEvent } from '../realtime/erno-realtime.service';
+import { ErnoAppStateService } from '../app-state/erno-app-state.service';
 
 export type SyncStatus = 'idle' | 'syncing' | 'synced' | 'offline' | 'error';
 
@@ -16,30 +17,56 @@ export interface SyncDeltaItem {
 }
 
 @Injectable()
-export class ErnoSyncService {
+export class ErnoSyncService implements OnDestroy {
   private _status = new BehaviorSubject<SyncStatus>('idle');
   readonly status$ = this._status.asObservable();
 
   private entityHandlers = new Map<string, (item: SyncDeltaItem) => Promise<void>>();
+  private started = false;
+  private pullInFlight: Promise<void> | null = null;
+  private subscriptions = new Subscription();
 
   constructor(
     @Inject(ERNO_CONFIG) private config: ErnoConfig,
     private http: HttpClient,
     private db: ErnoDatabaseService,
     private realtime: ErnoRealtimeService,
-  ) {}
+    private appState: ErnoAppStateService,
+  ) {
+    // On foreground resume the realtime socket reconnects on its own; pull a
+    // delta to catch up on anything missed while the app was backgrounded.
+    this.subscriptions.add(
+      this.appState.resumed$.subscribe(() => {
+        if (this.started) void this.pullDelta();
+      }),
+    );
+  }
 
   register<T>(entity: string, handler: (item: SyncDeltaItem) => Promise<void>): void {
     this.entityHandlers.set(entity, handler);
   }
 
   async start(): Promise<void> {
-    this.realtime.events$.subscribe(event => this.applyPush(event));
+    if (this.started) return;
+    this.started = true;
+    this.subscriptions.add(this.realtime.events$.subscribe(event => this.applyPush(event)));
     this.realtime.connect();
     await this.pullDelta();
   }
 
-  async pullDelta(): Promise<void> {
+  ngOnDestroy(): void {
+    this.subscriptions.unsubscribe();
+  }
+
+  pullDelta(): Promise<void> {
+    if (this.pullInFlight) return this.pullInFlight;
+    this.pullInFlight = this.doPullDelta().finally(() => {
+      this.pullInFlight = null;
+    });
+    return this.pullInFlight;
+  }
+
+  private async doPullDelta(): Promise<void> {
     this._status.next('syncing');
     try {
       for (const [entity, handler] of this.entityHandlers) {
