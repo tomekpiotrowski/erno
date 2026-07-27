@@ -1,11 +1,10 @@
-use axum::{
-    routing::post,
-    Router,
-};
+use axum::{routing::post, Router};
 
 use crate::{
     app::App,
-    billing::handlers::{admin_gift::admin_gift, checkout::checkout, portal::portal, webhooks::webhooks},
+    billing::handlers::{
+        admin_gift::admin_gift, checkout::checkout, portal::portal, webhooks::webhooks,
+    },
 };
 
 /// Mount all billing routes.
@@ -20,9 +19,7 @@ use crate::{
 /// - `POST /portal`        — create Stripe Customer Portal session (requires JWT)
 /// - `POST /webhooks`      — receive Stripe webhook events (no auth, HMAC-validated)
 /// - `POST /admin/gift`    — gift a subscription to a user (admin bearer token)
-pub fn billing_router<ExtraConfig: Clone + Send + Sync + 'static>(
-    app: App<ExtraConfig>,
-) -> Router {
+pub fn billing_router<ExtraConfig: Clone + Send + Sync + 'static>(app: App<ExtraConfig>) -> Router {
     Router::new()
         .route("/checkout", post(checkout::<ExtraConfig>))
         .route("/portal", post(portal::<ExtraConfig>))

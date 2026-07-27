@@ -5,11 +5,7 @@ use stripe::{
     CreateCheckoutSessionLineItems, CreateCustomer, Customer,
 };
 
-use crate::{
-    app::App,
-    auth::current_user::CurrentUser,
-    billing::models::stripe_subscription,
-};
+use crate::{app::App, auth::current_user::CurrentUser, billing::models::stripe_subscription};
 
 #[derive(Debug, Deserialize)]
 pub struct CheckoutRequest {

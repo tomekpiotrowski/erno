@@ -2,7 +2,10 @@ use chrono::Utc;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use serde::{Deserialize, Serialize};
 
-use crate::{app::App, jobs::{Job, JobError}};
+use crate::{
+    app::App,
+    jobs::{Job, JobError},
+};
 
 pub struct ExpireSubscriptionsJob<ExtraConfig = ()>(std::marker::PhantomData<ExtraConfig>);
 

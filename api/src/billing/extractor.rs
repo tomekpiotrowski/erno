@@ -48,7 +48,10 @@ where
             .await
             .map_err(IntoResponse::into_response)?;
 
-        match (&current_user.subscription_plan, &current_user.subscription_type) {
+        match (
+            &current_user.subscription_plan,
+            &current_user.subscription_type,
+        ) {
             (Some(plan), Some(sub_type)) => Ok(ActiveSubscription {
                 plan: plan.clone(),
                 subscription_type: sub_type.clone(),

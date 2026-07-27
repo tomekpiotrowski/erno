@@ -2,11 +2,7 @@ use axum::{extract::State, response::IntoResponse, Json};
 use serde::Serialize;
 use stripe::{BillingPortalSession, Client, CreateBillingPortalSession};
 
-use crate::{
-    app::App,
-    auth::current_user::CurrentUser,
-    billing::models::stripe_subscription,
-};
+use crate::{app::App, auth::current_user::CurrentUser, billing::models::stripe_subscription};
 
 #[derive(Debug, Serialize)]
 pub struct PortalResponse {
@@ -54,16 +50,10 @@ pub async fn portal<ExtraConfig: Clone + Send + Sync + 'static>(
         }
     };
 
-    Json(PortalResponse {
-        url: session.url,
-    })
-    .into_response()
+    Json(PortalResponse { url: session.url }).into_response()
 }
 
-async fn find_customer_id(
-    db: &sea_orm::DatabaseConnection,
-    user_id: uuid::Uuid,
-) -> Option<String> {
+async fn find_customer_id(db: &sea_orm::DatabaseConnection, user_id: uuid::Uuid) -> Option<String> {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
     stripe_subscription::Entity::find()
         .filter(stripe_subscription::Column::UserId.eq(user_id))

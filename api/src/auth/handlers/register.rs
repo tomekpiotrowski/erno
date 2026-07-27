@@ -62,9 +62,13 @@ where
                 email: existing.email,
                 raw_token,
             };
-            let _ = app.run_job::<SendVerificationEmailJob<ExtraConfig>>(args).await;
+            let _ = app
+                .run_job::<SendVerificationEmailJob<ExtraConfig>>(args)
+                .await;
         } else {
-            let args = SendAlreadyRegisteredEmailArgs { email: existing.email };
+            let args = SendAlreadyRegisteredEmailArgs {
+                email: existing.email,
+            };
             let _ = app
                 .run_job::<SendAlreadyRegisteredEmailJob<ExtraConfig>>(args)
                 .await;
@@ -119,11 +123,7 @@ mod tests {
     use axum::Router;
     use serde_json::json;
 
-    use crate::{
-        app::App,
-        database::migrations::Migrator,
-        tests::setup_test::setup_test,
-    };
+    use crate::{app::App, database::migrations::Migrator, tests::setup_test::setup_test};
 
     fn test_router(_app: App) -> Router {
         Router::new()
@@ -170,7 +170,8 @@ mod tests {
         assert_eq!(response.status_code(), 201);
         assert_eq!(t.enqueued_jobs_of_type("send_verification_email").len(), 1);
         assert_eq!(
-            t.enqueued_jobs_of_type("send_already_registered_email").len(),
+            t.enqueued_jobs_of_type("send_already_registered_email")
+                .len(),
             0
         );
     }
@@ -202,7 +203,8 @@ mod tests {
 
         assert_eq!(response.status_code(), 201);
         assert_eq!(
-            t.enqueued_jobs_of_type("send_already_registered_email").len(),
+            t.enqueued_jobs_of_type("send_already_registered_email")
+                .len(),
             1
         );
         assert_eq!(t.enqueued_jobs_of_type("send_verification_email").len(), 0);

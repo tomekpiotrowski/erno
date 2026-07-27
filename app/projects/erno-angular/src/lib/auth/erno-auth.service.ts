@@ -48,10 +48,13 @@ export class ErnoAuthService {
   }
 
   /** Permanently delete the current account and all its data. Requires the
-   * current password. On success, clears the local session and wipes locally
-   * cached sync data (IndexedDB) so nothing remains on the device. */
+   * current password, sent in the `X-Confirm-Password` header (some proxies
+   * strip bodies on DELETE). On success, clears the local session and wipes
+   * locally cached sync data (IndexedDB) so nothing remains on the device. */
   deleteAccount(password: string): Observable<void> {
-    return this.http.request<void>('delete', `${this.config.baseUrl}/api/account`, { body: { password } }).pipe(
+    return this.http.delete<void>(`${this.config.baseUrl}/api/account`, {
+      headers: { 'X-Confirm-Password': password },
+    }).pipe(
       tap(() => this.clearSession()),
       // Best-effort local wipe; the account is already gone server-side.
       switchMap(() => from(this.wipeLocalData())),

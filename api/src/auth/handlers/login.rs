@@ -4,11 +4,8 @@ use serde::Deserialize;
 use validator::Validate;
 
 use crate::{
-    api::validated_json::ValidatedJson,
-    app::App,
-    auth::handlers::issue_token_pair,
-    database::models::user,
-    password::verify_password,
+    api::validated_json::ValidatedJson, app::App, auth::handlers::issue_token_pair,
+    database::models::user, password::verify_password,
 };
 
 #[derive(Debug, Deserialize, Validate)]
@@ -17,7 +14,6 @@ pub struct LoginRequest {
     pub email: String,
     pub password: String,
 }
-
 
 pub async fn login<ExtraConfig>(
     State(app): State<App<ExtraConfig>>,

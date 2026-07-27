@@ -120,6 +120,15 @@ count = 2
 
 The retry delay before attempt *n* is `base_retry_delay_seconds * retry_backoff_multiplier^n`.
 
+### Worker coverage check
+
+Every registered job type must be claimed by at least one worker pool's `jobs` list, or jobs of
+that type sit pending forever. Erno therefore **panics at boot** if a registered job type has no
+worker pool — this typically happens after a framework upgrade adds new built-in jobs, and the
+panic message names the uncovered types. Note the supervisor runs in a background task, so the
+API process itself stays up while job processing is down; treat a boot-time job-system crash as
+a config error to fix (add the types to a pool) and redeploy.
+
 ### Per-job overrides
 
 Override any setting for a specific job by implementing the optional `Job` methods (each defaults to `None` = inherit):

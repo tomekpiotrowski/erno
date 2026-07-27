@@ -5,7 +5,11 @@ use strum::{EnumIter, EnumString};
 #[derive(
     Debug, Clone, PartialEq, Eq, DeriveActiveEnum, Serialize, Deserialize, EnumIter, EnumString,
 )]
-#[sea_orm(rs_type = "String", db_type = "Enum", enum_name = "subscription_status")]
+#[sea_orm(
+    rs_type = "String",
+    db_type = "Enum",
+    enum_name = "subscription_status"
+)]
 pub enum SubscriptionStatus {
     #[sea_orm(string_value = "active")]
     Active,

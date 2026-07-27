@@ -120,7 +120,10 @@ impl ClientState {
         }
 
         self.requests.push(now);
-        trace!(total_requests = self.requests.len(), "Request recorded within all rate limit tiers");
+        trace!(
+            total_requests = self.requests.len(),
+            "Request recorded within all rate limit tiers"
+        );
         None
     }
 }
@@ -170,7 +173,10 @@ impl RateLimitBackend for InMemoryBackend {
         limit: &ActionRateLimit,
         backoff_multiplier: f64,
     ) -> Result<(), Duration> {
-        let mut entry = self.clients.entry(key.to_string()).or_insert_with(ClientState::new);
+        let mut entry = self
+            .clients
+            .entry(key.to_string())
+            .or_insert_with(ClientState::new);
         let client = entry.value_mut();
 
         if let Some(remaining) = client.is_blocked() {
@@ -192,13 +198,22 @@ mod tests {
 
     fn make_limit(window_secs: u64, max_requests: u32) -> ActionRateLimit {
         ActionRateLimit {
-            tiers: vec![RateLimitTier { window_secs, max_requests }],
+            tiers: vec![RateLimitTier {
+                window_secs,
+                max_requests,
+            }],
         }
     }
 
     fn make_multi_tier(tiers: Vec<(u64, u32)>) -> ActionRateLimit {
         ActionRateLimit {
-            tiers: tiers.into_iter().map(|(w, m)| RateLimitTier { window_secs: w, max_requests: m }).collect(),
+            tiers: tiers
+                .into_iter()
+                .map(|(w, m)| RateLimitTier {
+                    window_secs: w,
+                    max_requests: m,
+                })
+                .collect(),
         }
     }
 
@@ -207,7 +222,10 @@ mod tests {
         let backend = InMemoryBackend::new();
         let limit = make_limit(60, 5);
         for _ in 0..5 {
-            assert!(backend.check_rate_limit("ip/action", &limit, 2.0).await.is_ok());
+            assert!(backend
+                .check_rate_limit("ip/action", &limit, 2.0)
+                .await
+                .is_ok());
         }
     }
 
@@ -216,18 +234,33 @@ mod tests {
         let backend = InMemoryBackend::new();
         let limit = make_limit(60, 3);
         for _ in 0..3 {
-            assert!(backend.check_rate_limit("ip/action", &limit, 2.0).await.is_ok());
+            assert!(backend
+                .check_rate_limit("ip/action", &limit, 2.0)
+                .await
+                .is_ok());
         }
-        assert!(backend.check_rate_limit("ip/action", &limit, 2.0).await.is_err());
+        assert!(backend
+            .check_rate_limit("ip/action", &limit, 2.0)
+            .await
+            .is_err());
     }
 
     #[tokio::test]
     async fn test_multi_tier_catches_fast_burst() {
         let backend = InMemoryBackend::new();
         let limit = make_multi_tier(vec![(5, 2), (60, 100)]);
-        assert!(backend.check_rate_limit("ip/action", &limit, 2.0).await.is_ok());
-        assert!(backend.check_rate_limit("ip/action", &limit, 2.0).await.is_ok());
-        assert!(backend.check_rate_limit("ip/action", &limit, 2.0).await.is_err());
+        assert!(backend
+            .check_rate_limit("ip/action", &limit, 2.0)
+            .await
+            .is_ok());
+        assert!(backend
+            .check_rate_limit("ip/action", &limit, 2.0)
+            .await
+            .is_ok());
+        assert!(backend
+            .check_rate_limit("ip/action", &limit, 2.0)
+            .await
+            .is_err());
     }
 
     #[tokio::test]
@@ -235,7 +268,10 @@ mod tests {
         let backend = InMemoryBackend::new();
         let limit = make_multi_tier(vec![(5, 100), (60, 200)]);
         for _ in 0..50 {
-            assert!(backend.check_rate_limit("ip/action", &limit, 2.0).await.is_ok());
+            assert!(backend
+                .check_rate_limit("ip/action", &limit, 2.0)
+                .await
+                .is_ok());
         }
     }
 
@@ -247,20 +283,41 @@ mod tests {
         let limit = make_limit(1, 2); // 1s window, max 2
 
         // Hit the limit → violations = 1, penalty = 1s
-        assert!(backend.check_rate_limit("ip/test", &limit, 2.0).await.is_ok());
-        assert!(backend.check_rate_limit("ip/test", &limit, 2.0).await.is_ok());
-        assert!(backend.check_rate_limit("ip/test", &limit, 2.0).await.is_err());
+        assert!(backend
+            .check_rate_limit("ip/test", &limit, 2.0)
+            .await
+            .is_ok());
+        assert!(backend
+            .check_rate_limit("ip/test", &limit, 2.0)
+            .await
+            .is_ok());
+        assert!(backend
+            .check_rate_limit("ip/test", &limit, 2.0)
+            .await
+            .is_err());
 
         // Wait for block to expire
         thread::sleep(Duration::from_millis(1100));
 
         // First request after expiry should succeed and reset violations
-        assert!(backend.check_rate_limit("ip/test", &limit, 2.0).await.is_ok(), "First request after block should succeed");
+        assert!(
+            backend
+                .check_rate_limit("ip/test", &limit, 2.0)
+                .await
+                .is_ok(),
+            "First request after block should succeed"
+        );
 
         // Hit the limit again — penalty should be back to 1s (violations reset to 0)
-        assert!(backend.check_rate_limit("ip/test", &limit, 2.0).await.is_ok());
+        assert!(backend
+            .check_rate_limit("ip/test", &limit, 2.0)
+            .await
+            .is_ok());
         let err = backend.check_rate_limit("ip/test", &limit, 2.0).await;
         assert!(err.is_err());
-        assert!(err.unwrap_err().as_secs() <= 1, "Penalty should be base window, not doubled");
+        assert!(
+            err.unwrap_err().as_secs() <= 1,
+            "Penalty should be base window, not doubled"
+        );
     }
 }

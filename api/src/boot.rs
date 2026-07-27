@@ -11,7 +11,10 @@ use crate::{
     account::UserDataDeleter,
     app::App,
     app_info::AppInfo,
-    billing::jobs::cancel_stripe_subscription_job::CancelStripeSubscriptionJob,
+    billing::jobs::{
+        cancel_stripe_subscription_job::CancelStripeSubscriptionJob,
+        delete_stripe_customer_job::DeleteStripeCustomerJob,
+    },
     cli::{Cli, Commands},
     commands::{db, db_reset, migrate, routes, serve, version},
     config::Config,
@@ -137,7 +140,10 @@ where
     job_registry.register_job::<SendAlreadyRegisteredEmailJob<ExtraConfig>>();
     // Account-deletion cleanup jobs.
     job_registry.register_job::<CancelStripeSubscriptionJob<ExtraConfig>>();
+    job_registry.register_job::<DeleteStripeCustomerJob<ExtraConfig>>();
     job_registry.register_job::<DeleteUserFilesJob<ExtraConfig>>();
+    job_registry
+        .register_job::<crate::storage::delete_record_attachments_job::DeleteRecordAttachmentsJob<ExtraConfig>>();
 }
 
 #[must_use]
@@ -204,7 +210,8 @@ pub async fn handle_command<AppMigrator: MigratorTrait, ExtraConfig>(
         #[cfg(feature = "admin")]
         Some(Commands::Admin) => {
             let db = crate::database::setup_database_connection(&config.database).await;
-            crate::commands::admin::handle_admin_command(db, config.stripe, user_data_deleter).await;
+            crate::commands::admin::handle_admin_command(db, config.stripe, user_data_deleter)
+                .await;
         }
         Some(Commands::Serve) | None => {
             serve::handle_serve_command::<AppMigrator, ExtraConfig>(

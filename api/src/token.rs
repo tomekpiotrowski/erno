@@ -1,5 +1,5 @@
-use rand::Rng;
 use rand::rngs::OsRng;
+use rand::Rng;
 use sha2::{Digest, Sha256};
 
 /// Generate a cryptographically secure random token.

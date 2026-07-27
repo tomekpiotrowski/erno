@@ -1,33 +1,49 @@
-use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
+use axum::{
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    response::IntoResponse,
+    Json,
+};
 use sea_orm::TransactionTrait;
-use serde::Deserialize;
 
 use crate::{account::purge_user_account, app::App, auth::current_user::CurrentUser, password};
 
-#[derive(Debug, Deserialize)]
-pub struct DeleteAccountRequest {
-    pub password: String,
-}
+/// Header carrying the user's current password for confirmation. A header
+/// (not a JSON body) because some proxies/CDNs strip bodies on DELETE.
+pub const CONFIRM_PASSWORD_HEADER: &str = "x-confirm-password";
 
 /// `DELETE /api/account` — permanently delete the authenticated user and all of
 /// their data.
 ///
-/// Requires the current password in the body. Framework-owned data (the user
-/// row plus cascading `user_tokens` and subscription rows) is deleted
-/// synchronously; the Stripe subscription and uploaded files are cleaned up by
-/// retryable background jobs. Any registered
-/// [`UserDataDeleter`](crate::account::UserDataDeleter) runs in the same
-/// transaction.
+/// Requires the current password in the `X-Confirm-Password` header.
+/// Framework-owned data (the user row plus cascading `user_tokens` and
+/// subscription rows) is deleted synchronously; Stripe subscriptions, the
+/// Stripe customer, and uploaded files are cleaned up by retryable background
+/// jobs. Any registered [`UserDataDeleter`](crate::account::UserDataDeleter)
+/// runs in the same transaction.
 pub async fn delete_account<ExtraConfig>(
     State(app): State<App<ExtraConfig>>,
     current_user: CurrentUser,
-    Json(body): Json<DeleteAccountRequest>,
+    headers: HeaderMap,
 ) -> impl IntoResponse
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
+    let Some(password) = headers
+        .get(CONFIRM_PASSWORD_HEADER)
+        .and_then(|v| v.to_str().ok())
+    else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": format!("Missing {CONFIRM_PASSWORD_HEADER} header")
+            })),
+        )
+            .into_response();
+    };
+
     // Re-verify identity for this destructive action.
-    match password::verify_password(&body.password, &current_user.user.password_hash) {
+    match password::verify_password(password, &current_user.user.password_hash) {
         Ok(true) => {}
         Ok(false) => {
             return (
@@ -36,30 +52,44 @@ where
             )
                 .into_response()
         }
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        Err(e) => {
+            tracing::error!("Account deletion: password verification failed: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
     }
+
+    let user_id = current_user.user.id;
 
     let txn = match app.db.begin().await {
         Ok(txn) => txn,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        Err(e) => {
+            tracing::error!("Account deletion: failed to begin transaction: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
     };
 
-    if purge_user_account(
+    if let Err(e) = purge_user_account(
         &txn,
         &app.job_queue,
         app.user_data_deleter.as_ref(),
-        current_user.user.id,
+        user_id,
     )
     .await
-    .is_err()
     {
+        tracing::error!("Account deletion: purge failed for user {user_id}: {e}");
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
-    match txn.commit().await {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    if let Err(e) = txn.commit().await {
+        tracing::error!("Account deletion: commit failed for user {user_id}: {e}");
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
+
+    // Close any live WebSocket connections so the deleted user's sockets don't
+    // linger receiving sync pushes.
+    app.websocket_connections.disconnect_user(user_id).await;
+
+    StatusCode::NO_CONTENT.into_response()
 }
 
 #[cfg(test)]
@@ -112,9 +142,30 @@ mod tests {
         let response = t
             .server
             .delete("/api/account")
-            .json(&json!({ "password": "whatever" }))
+            .add_header("X-Confirm-Password", "whatever")
             .await;
         assert_eq!(response.status_code(), 401);
+    }
+
+    #[tokio::test]
+    async fn test_delete_account_missing_password_header_returns_400() {
+        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let u = create_user(&t.db, "del_noheader@example.com", "correct-password").await;
+        let token = generate_token(&t.config, u.id, u.token_version).unwrap();
+
+        let response = t
+            .server
+            .delete("/api/account")
+            .add_header("Authorization", format!("Bearer {token}"))
+            .await;
+        assert_eq!(response.status_code(), 400);
+
+        // User must still exist.
+        assert!(user::Entity::find_by_id(u.id)
+            .one(&t.db)
+            .await
+            .unwrap()
+            .is_some());
     }
 
     #[tokio::test]
@@ -127,7 +178,7 @@ mod tests {
             .server
             .delete("/api/account")
             .add_header("Authorization", format!("Bearer {token}"))
-            .json(&json!({ "password": "wrong-password" }))
+            .add_header("X-Confirm-Password", "wrong-password")
             .await;
         assert_eq!(response.status_code(), 403);
 
@@ -149,7 +200,7 @@ mod tests {
             .server
             .delete("/api/account")
             .add_header("Authorization", format!("Bearer {token}"))
-            .json(&json!({ "password": "my-password" }))
+            .add_header("X-Confirm-Password", "my-password")
             .await;
         assert_eq!(response.status_code(), 204);
 

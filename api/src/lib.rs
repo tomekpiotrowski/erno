@@ -9,19 +9,19 @@
 // Modules will be added as we migrate functionality
 
 pub mod account;
-pub mod api;
 #[cfg(feature = "admin")]
 pub mod admin;
+pub mod api;
 pub mod app;
-pub mod billing;
-pub mod dev;
 pub mod app_info;
 pub mod auth;
+pub mod billing;
 pub mod boot;
 pub mod cli;
 pub mod commands;
 pub mod config;
 pub mod database;
+pub mod dev;
 pub mod emails;
 pub mod environment;
 pub mod job_queue;
@@ -32,9 +32,9 @@ pub mod password;
 pub mod policy;
 pub mod rate_limiting;
 pub mod router;
+pub mod setup_tracing;
 pub mod storage;
 pub mod sync;
-pub mod setup_tracing;
 pub mod token;
 pub mod websocket;
 

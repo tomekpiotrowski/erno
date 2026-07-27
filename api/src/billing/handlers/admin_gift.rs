@@ -11,10 +11,7 @@ use uuid::Uuid;
 
 use crate::{
     app::App,
-    billing::{
-        handlers::webhooks::update_user_subscription_cache,
-        models::gift_subscription,
-    },
+    billing::{handlers::webhooks::update_user_subscription_cache, models::gift_subscription},
 };
 
 #[derive(Debug, Deserialize)]
@@ -47,8 +44,7 @@ pub async fn admin_gift<ExtraConfig: Clone + Send + Sync + 'static>(
         return StatusCode::UNAUTHORIZED.into_response();
     }
 
-    let active_until = Utc::now().naive_utc()
-        + chrono::Duration::days(req.duration_days as i64);
+    let active_until = Utc::now().naive_utc() + chrono::Duration::days(req.duration_days as i64);
     let now = Utc::now().naive_utc();
 
     let row = gift_subscription::ActiveModel {

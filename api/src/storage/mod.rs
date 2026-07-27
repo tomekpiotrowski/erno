@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 use crate::config::{StorageBackend, StorageConfig};
 
+pub mod delete_record_attachments_job;
 pub mod delete_user_files_job;
 pub mod error;
 pub mod local;
@@ -171,6 +172,12 @@ impl FileStorage {
     }
 
     /// Delete the given attachment rows and any files left with no attachments.
+    ///
+    /// The stored bytes are deleted **before** any metadata, and a storage
+    /// failure aborts with `Err`. That keeps the operation retryable: if the
+    /// backend delete fails, the `file_attachments`/`files` rows are still
+    /// there, so a retry (e.g. `DeleteUserFilesJob`) can find them again.
+    /// Deleting metadata first would orphan the blob with no way to locate it.
     async fn remove_attachments(
         &self,
         db: &DatabaseConnection,
@@ -179,21 +186,24 @@ impl FileStorage {
         for attachment in attachments {
             let file_id = attachment.file_id;
 
-            file_attachment::Entity::delete_by_id(attachment.id)
-                .exec(db)
-                .await?;
-
-            let remaining = file_attachment::Entity::find()
+            let other_attachments = file_attachment::Entity::find()
                 .filter(file_attachment::Column::FileId.eq(file_id))
+                .filter(file_attachment::Column::Id.ne(attachment.id))
                 .count(db)
                 .await?;
 
-            if remaining == 0 {
+            if other_attachments == 0 {
+                // Last attachment: remove the blob first — a failure here must
+                // abort before we lose the metadata that locates the blob.
                 if let Some(file) = file::Entity::find_by_id(file_id).one(db).await? {
-                    let _ = self.delete(&file.key).await;
+                    self.delete(&file.key).await?;
                     file::Entity::delete_by_id(file_id).exec(db).await?;
                 }
             }
+
+            file_attachment::Entity::delete_by_id(attachment.id)
+                .exec(db)
+                .await?;
         }
 
         Ok(())
@@ -276,7 +286,12 @@ mod tests {
         let storage = FileStorage::mock();
 
         let file = storage
-            .store(&t.db, "hello.txt", Some("text/plain"), Bytes::from("hello world"))
+            .store(
+                &t.db,
+                "hello.txt",
+                Some("text/plain"),
+                Bytes::from("hello world"),
+            )
             .await
             .unwrap();
 
@@ -295,7 +310,12 @@ mod tests {
         let storage = FileStorage::mock();
 
         let file = storage
-            .store(&t.db, "photo.jpg", Some("image/jpeg"), Bytes::from("fake image"))
+            .store(
+                &t.db,
+                "photo.jpg",
+                Some("image/jpeg"),
+                Bytes::from("fake image"),
+            )
             .await
             .unwrap();
 
@@ -317,7 +337,12 @@ mod tests {
         let storage = FileStorage::mock();
 
         let file = storage
-            .store(&t.db, "doc.pdf", Some("application/pdf"), Bytes::from("pdf content"))
+            .store(
+                &t.db,
+                "doc.pdf",
+                Some("application/pdf"),
+                Bytes::from("pdf content"),
+            )
             .await
             .unwrap();
         let file_id = file.id;
@@ -332,10 +357,7 @@ mod tests {
             .await
             .unwrap();
 
-        let remaining_attachment = file_attachment::Entity::find()
-            .one(&t.db)
-            .await
-            .unwrap();
+        let remaining_attachment = file_attachment::Entity::find().one(&t.db).await.unwrap();
         assert!(remaining_attachment.is_none());
 
         let remaining_file = file::Entity::find_by_id(file_id).one(&t.db).await.unwrap();
@@ -348,7 +370,12 @@ mod tests {
         let storage = FileStorage::mock();
 
         let file = storage
-            .store(&t.db, "shared.png", Some("image/png"), Bytes::from("image data"))
+            .store(
+                &t.db,
+                "shared.png",
+                Some("image/png"),
+                Bytes::from("image data"),
+            )
             .await
             .unwrap();
         let file_id = file.id;

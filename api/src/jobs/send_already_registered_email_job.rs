@@ -1,6 +1,10 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{app::App, emails::send_html_email, jobs::{Job, JobError}};
+use crate::{
+    app::App,
+    emails::send_html_email,
+    jobs::{Job, JobError},
+};
 
 pub struct SendAlreadyRegisteredEmailJob<ExtraConfig = ()>(std::marker::PhantomData<ExtraConfig>);
 
@@ -28,8 +32,13 @@ impl<ExtraConfig: Clone + Send + Sync + 'static> Job<ExtraConfig>
             url = login_url
         );
 
-        send_html_email(app, &args.email, "Someone tried to register your account", body)
-            .await
-            .map_err(|e| JobError::TryAgainLater(e.to_string()))
+        send_html_email(
+            app,
+            &args.email,
+            "Someone tried to register your account",
+            body,
+        )
+        .await
+        .map_err(|e| JobError::TryAgainLater(e.to_string()))
     }
 }

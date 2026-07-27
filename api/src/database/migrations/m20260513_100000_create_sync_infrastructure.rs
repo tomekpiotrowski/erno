@@ -12,8 +12,10 @@ impl MigrationTrait for Migration {
         let conn = manager.get_connection();
 
         // Global monotonic sequence for all syncable entities
-        conn.execute_unprepared("CREATE SEQUENCE IF NOT EXISTS erno_sync_clock START 1 INCREMENT 1")
-            .await?;
+        conn.execute_unprepared(
+            "CREATE SEQUENCE IF NOT EXISTS erno_sync_clock START 1 INCREMENT 1",
+        )
+        .await?;
 
         // Event log table — never deleted, used for both WS push and delta sync
         manager
@@ -28,7 +30,11 @@ impl MigrationTrait for Migration {
                     )
                     .col(string(SyncPushQueue::EntityType).not_null())
                     .col(uuid(SyncPushQueue::EntityId).not_null())
-                    .col(ColumnDef::new(SyncPushQueue::SyncSeq).big_integer().not_null())
+                    .col(
+                        ColumnDef::new(SyncPushQueue::SyncSeq)
+                            .big_integer()
+                            .not_null(),
+                    )
                     .col(string(SyncPushQueue::Operation).not_null())
                     .col(json_binary(SyncPushQueue::Snapshot).not_null())
                     // NULL user_id = broadcast to all connected users

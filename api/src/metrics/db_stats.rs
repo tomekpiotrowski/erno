@@ -41,8 +41,7 @@ async fn collect_table_counts(db: &DatabaseConnection, config: &MetricsConfig) {
         match sqlx::query(&query).fetch_one(pool).await {
             Ok(row) => {
                 let count: i64 = row.try_get(0).unwrap_or(0);
-                metrics::gauge!("db_table_count", "table" => table.clone())
-                    .set(count as f64);
+                metrics::gauge!("db_table_count", "table" => table.clone()).set(count as f64);
             }
             Err(e) => {
                 warn!("Failed to count table '{table}': {e}");
@@ -52,7 +51,11 @@ async fn collect_table_counts(db: &DatabaseConnection, config: &MetricsConfig) {
 }
 
 async fn collect_job_queue_stats(db: &DatabaseConnection) {
-    let pending_statuses = [JobStatus::Pending, JobStatus::PendingRetry, JobStatus::Running];
+    let pending_statuses = [
+        JobStatus::Pending,
+        JobStatus::PendingRetry,
+        JobStatus::Running,
+    ];
 
     for status in &pending_statuses {
         let status_label = format!("{status}");

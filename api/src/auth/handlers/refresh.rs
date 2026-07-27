@@ -139,7 +139,10 @@ mod tests {
         let body: serde_json::Value = response.json();
         assert!(body["access_token"].is_string());
         assert!(body["refresh_token"].is_string());
-        assert_ne!(body["refresh_token"].as_str().unwrap(), "valid_refresh_token");
+        assert_ne!(
+            body["refresh_token"].as_str().unwrap(),
+            "valid_refresh_token"
+        );
     }
 
     #[tokio::test]

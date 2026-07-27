@@ -41,6 +41,7 @@ Erno pre-configures conservative limits for sensitive auth endpoints:
 | `password_reset_request` | 2 | 5 | 10 |
 | `password_reset_confirm` | 5 | 10 | 20 |
 | `resend_verification` | 2 | 5 | 10 |
+| `account_delete` | 3 | 5 | 10 |
 
 Any action not explicitly configured falls back to the global `default_window_secs` / `default_max_requests`.
 

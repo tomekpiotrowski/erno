@@ -108,9 +108,18 @@ impl RateLimitConfig {
             "user_create".to_string(),
             ActionRateLimit {
                 tiers: vec![
-                    RateLimitTier { window_secs: 5, max_requests: 2 },
-                    RateLimitTier { window_secs: 60, max_requests: 5 },
-                    RateLimitTier { window_secs: 3600, max_requests: 20 },
+                    RateLimitTier {
+                        window_secs: 5,
+                        max_requests: 2,
+                    },
+                    RateLimitTier {
+                        window_secs: 60,
+                        max_requests: 5,
+                    },
+                    RateLimitTier {
+                        window_secs: 3600,
+                        max_requests: 20,
+                    },
                 ],
             },
         );
@@ -119,10 +128,22 @@ impl RateLimitConfig {
             "user_verify".to_string(),
             ActionRateLimit {
                 tiers: vec![
-                    RateLimitTier { window_secs: 5, max_requests: 15 },
-                    RateLimitTier { window_secs: 20, max_requests: 30 },
-                    RateLimitTier { window_secs: 60, max_requests: 60 },
-                    RateLimitTier { window_secs: 300, max_requests: 150 },
+                    RateLimitTier {
+                        window_secs: 5,
+                        max_requests: 15,
+                    },
+                    RateLimitTier {
+                        window_secs: 20,
+                        max_requests: 30,
+                    },
+                    RateLimitTier {
+                        window_secs: 60,
+                        max_requests: 60,
+                    },
+                    RateLimitTier {
+                        window_secs: 300,
+                        max_requests: 150,
+                    },
                 ],
             },
         );
@@ -131,9 +152,18 @@ impl RateLimitConfig {
             "user_login".to_string(),
             ActionRateLimit {
                 tiers: vec![
-                    RateLimitTier { window_secs: 5, max_requests: 5 },
-                    RateLimitTier { window_secs: 60, max_requests: 10 },
-                    RateLimitTier { window_secs: 3600, max_requests: 30 },
+                    RateLimitTier {
+                        window_secs: 5,
+                        max_requests: 5,
+                    },
+                    RateLimitTier {
+                        window_secs: 60,
+                        max_requests: 10,
+                    },
+                    RateLimitTier {
+                        window_secs: 3600,
+                        max_requests: 30,
+                    },
                 ],
             },
         );
@@ -142,9 +172,18 @@ impl RateLimitConfig {
             "password_reset_request".to_string(),
             ActionRateLimit {
                 tiers: vec![
-                    RateLimitTier { window_secs: 5, max_requests: 2 },
-                    RateLimitTier { window_secs: 60, max_requests: 5 },
-                    RateLimitTier { window_secs: 3600, max_requests: 10 },
+                    RateLimitTier {
+                        window_secs: 5,
+                        max_requests: 2,
+                    },
+                    RateLimitTier {
+                        window_secs: 60,
+                        max_requests: 5,
+                    },
+                    RateLimitTier {
+                        window_secs: 3600,
+                        max_requests: 10,
+                    },
                 ],
             },
         );
@@ -153,9 +192,40 @@ impl RateLimitConfig {
             "password_reset_confirm".to_string(),
             ActionRateLimit {
                 tiers: vec![
-                    RateLimitTier { window_secs: 5, max_requests: 5 },
-                    RateLimitTier { window_secs: 60, max_requests: 10 },
-                    RateLimitTier { window_secs: 3600, max_requests: 20 },
+                    RateLimitTier {
+                        window_secs: 5,
+                        max_requests: 5,
+                    },
+                    RateLimitTier {
+                        window_secs: 60,
+                        max_requests: 10,
+                    },
+                    RateLimitTier {
+                        window_secs: 3600,
+                        max_requests: 20,
+                    },
+                ],
+            },
+        );
+
+        // Strict: the endpoint verifies the password (403 on mismatch), so a
+        // lax limit would make it a password-guessing oracle.
+        actions.insert(
+            "account_delete".to_string(),
+            ActionRateLimit {
+                tiers: vec![
+                    RateLimitTier {
+                        window_secs: 5,
+                        max_requests: 3,
+                    },
+                    RateLimitTier {
+                        window_secs: 60,
+                        max_requests: 5,
+                    },
+                    RateLimitTier {
+                        window_secs: 3600,
+                        max_requests: 10,
+                    },
                 ],
             },
         );
@@ -164,9 +234,18 @@ impl RateLimitConfig {
             "resend_verification".to_string(),
             ActionRateLimit {
                 tiers: vec![
-                    RateLimitTier { window_secs: 5, max_requests: 2 },
-                    RateLimitTier { window_secs: 60, max_requests: 5 },
-                    RateLimitTier { window_secs: 3600, max_requests: 10 },
+                    RateLimitTier {
+                        window_secs: 5,
+                        max_requests: 2,
+                    },
+                    RateLimitTier {
+                        window_secs: 60,
+                        max_requests: 5,
+                    },
+                    RateLimitTier {
+                        window_secs: 3600,
+                        max_requests: 10,
+                    },
                 ],
             },
         );
@@ -252,13 +331,19 @@ impl RateLimitState {
     /// Check if a request from `ip` for `action` is within the rate limit.
     ///
     /// Returns `Ok(())` if allowed, or `Err(retry_after)` if blocked.
-    pub async fn check_rate_limit(&self, ip: IpAddr, action: &RateLimitAction) -> Result<(), Duration> {
+    pub async fn check_rate_limit(
+        &self,
+        ip: IpAddr,
+        action: &RateLimitAction,
+    ) -> Result<(), Duration> {
         if !self.config.enabled {
             return Ok(());
         }
         let limit = self.config.get_limit(action);
         let key = format!("{}/{}", ip, action.as_str());
-        self.backend.check_rate_limit(&key, &limit, self.config.backoff_multiplier).await
+        self.backend
+            .check_rate_limit(&key, &limit, self.config.backoff_multiplier)
+            .await
     }
 
     /// Remove stale in-memory entries. No-op for non-in-memory backends.
@@ -275,7 +360,11 @@ impl RateLimitState {
 mod tests {
     use super::*;
 
-    fn make_state(enabled: bool, actions: HashMap<String, ActionRateLimit>, default_max: u32) -> RateLimitState {
+    fn make_state(
+        enabled: bool,
+        actions: HashMap<String, ActionRateLimit>,
+        default_max: u32,
+    ) -> RateLimitState {
         RateLimitState::new(RateLimitConfig {
             enabled,
             trust_proxy: false,
@@ -287,7 +376,12 @@ mod tests {
     }
 
     fn action_limit(window_secs: u64, max_requests: u32) -> ActionRateLimit {
-        ActionRateLimit { tiers: vec![RateLimitTier { window_secs, max_requests }] }
+        ActionRateLimit {
+            tiers: vec![RateLimitTier {
+                window_secs,
+                max_requests,
+            }],
+        }
     }
 
     #[tokio::test]
@@ -318,12 +412,21 @@ mod tests {
     #[tokio::test]
     async fn test_multi_tier_catches_fast_burst() {
         let mut actions = HashMap::new();
-        actions.insert("test".to_string(), ActionRateLimit {
-            tiers: vec![
-                RateLimitTier { window_secs: 5, max_requests: 2 },
-                RateLimitTier { window_secs: 60, max_requests: 100 },
-            ],
-        });
+        actions.insert(
+            "test".to_string(),
+            ActionRateLimit {
+                tiers: vec![
+                    RateLimitTier {
+                        window_secs: 5,
+                        max_requests: 2,
+                    },
+                    RateLimitTier {
+                        window_secs: 60,
+                        max_requests: 100,
+                    },
+                ],
+            },
+        );
         let state = make_state(true, actions, 100);
         let ip = "127.0.0.1".parse().unwrap();
         let action = RateLimitAction::new("test");
@@ -335,17 +438,29 @@ mod tests {
     #[tokio::test]
     async fn test_multi_tier_allows_normal_rate() {
         let mut actions = HashMap::new();
-        actions.insert("test".to_string(), ActionRateLimit {
-            tiers: vec![
-                RateLimitTier { window_secs: 5, max_requests: 100 },
-                RateLimitTier { window_secs: 60, max_requests: 200 },
-            ],
-        });
+        actions.insert(
+            "test".to_string(),
+            ActionRateLimit {
+                tiers: vec![
+                    RateLimitTier {
+                        window_secs: 5,
+                        max_requests: 100,
+                    },
+                    RateLimitTier {
+                        window_secs: 60,
+                        max_requests: 200,
+                    },
+                ],
+            },
+        );
         let state = make_state(true, actions, 100);
         let ip = "127.0.0.1".parse().unwrap();
         let action = RateLimitAction::new("test");
         for _ in 0..50 {
-            assert!(state.check_rate_limit(ip, &action).await.is_ok(), "Request should succeed");
+            assert!(
+                state.check_rate_limit(ip, &action).await.is_ok(),
+                "Request should succeed"
+            );
         }
     }
 
@@ -387,13 +502,22 @@ mod tests {
 
         #[async_trait]
         impl RateLimitBackend for AlwaysAllow {
-            async fn check_rate_limit(&self, _key: &str, _limit: &ActionRateLimit, _backoff: f64) -> Result<(), Duration> {
+            async fn check_rate_limit(
+                &self,
+                _key: &str,
+                _limit: &ActionRateLimit,
+                _backoff: f64,
+            ) -> Result<(), Duration> {
                 Ok(())
             }
         }
 
         let state = RateLimitState::with_backend(
-            RateLimitConfig { enabled: true, default_max_requests: 1, ..Default::default() },
+            RateLimitConfig {
+                enabled: true,
+                default_max_requests: 1,
+                ..Default::default()
+            },
             Arc::new(AlwaysAllow),
         );
         let ip = "127.0.0.1".parse().unwrap();

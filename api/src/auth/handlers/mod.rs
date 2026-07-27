@@ -42,8 +42,8 @@ where
     let access_token = generate_token(&app.config, user.id, user.token_version).map_err(|_| ())?;
 
     let raw_refresh = generate_secure_token(64);
-    let expires_at = Utc::now().naive_utc()
-        + chrono::Duration::days(app.config.auth.refresh_token_days as i64);
+    let expires_at =
+        Utc::now().naive_utc() + chrono::Duration::days(app.config.auth.refresh_token_days as i64);
 
     user_token::ActiveModel {
         user_id: Set(user.id),
@@ -59,6 +59,9 @@ where
     Ok(TokenPair {
         access_token,
         refresh_token: raw_refresh,
-        user: UserInfo { id: user.id, email: user.email.clone() },
+        user: UserInfo {
+            id: user.id,
+            email: user.email.clone(),
+        },
     })
 }

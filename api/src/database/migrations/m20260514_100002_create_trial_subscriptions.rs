@@ -19,11 +19,7 @@ impl MigrationTrait for Migration {
                             .primary_key()
                             .default(Expr::cust("gen_random_uuid()")),
                     )
-                    .col(
-                        uuid(TrialSubscriptions::UserId)
-                            .not_null()
-                            .unique_key(),
-                    )
+                    .col(uuid(TrialSubscriptions::UserId).not_null().unique_key())
                     .col(string(TrialSubscriptions::Plan).not_null())
                     .col(timestamp(TrialSubscriptions::ActiveUntil).not_null())
                     .col(

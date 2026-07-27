@@ -11,10 +11,7 @@ use uuid::Uuid;
 
 use crate::{
     app::App,
-    billing::models::{
-        stripe_subscription,
-        subscription_status::SubscriptionStatus,
-    },
+    billing::models::{stripe_subscription, subscription_status::SubscriptionStatus},
     database::models::user,
 };
 
@@ -97,8 +94,13 @@ async fn handle_checkout_completed<ExtraConfig: Clone + Send + Sync + 'static>(
     session: stripe::CheckoutSession,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let metadata = session.metadata.unwrap_or_default();
-    let user_id_str = metadata.get("user_id").ok_or("missing user_id in metadata")?;
-    let plan = metadata.get("plan").ok_or("missing plan in metadata")?.clone();
+    let user_id_str = metadata
+        .get("user_id")
+        .ok_or("missing user_id in metadata")?;
+    let plan = metadata
+        .get("plan")
+        .ok_or("missing plan in metadata")?
+        .clone();
     let user_id = Uuid::parse_str(user_id_str)?;
 
     let stripe_subscription_id = match &session.subscription {
@@ -163,10 +165,8 @@ async fn handle_subscription_updated<ExtraConfig: Clone + Send + Sync + 'static>
     };
 
     let status = stripe_status_to_ours(&subscription.status);
-    let period_start =
-        timestamp_to_naive(subscription.current_period_start);
-    let period_end =
-        timestamp_to_naive(subscription.current_period_end);
+    let period_start = timestamp_to_naive(subscription.current_period_start);
+    let period_end = timestamp_to_naive(subscription.current_period_end);
     let cancel_at_period_end = subscription.cancel_at_period_end;
 
     let mut active_model: stripe_subscription::ActiveModel = existing.clone().into();

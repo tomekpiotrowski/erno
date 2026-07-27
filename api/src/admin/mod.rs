@@ -13,9 +13,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{
-        Block, Borders, Cell, List, ListItem, Paragraph, Row, Table, TableState,
-    },
+    widgets::{Block, Borders, Cell, List, ListItem, Paragraph, Row, Table, TableState},
     Frame, Terminal,
 };
 use sea_orm::{
@@ -251,8 +249,21 @@ impl<'a> AdminApp<'a> {
         });
 
         match result {
-            Ok((total, stripe, gift, trial, no_sub, pending, running, failed,
-                completed_1h, failed_1h, timed_out_1h, avg_ms, email_stats)) => {
+            Ok((
+                total,
+                stripe,
+                gift,
+                trial,
+                no_sub,
+                pending,
+                running,
+                failed,
+                completed_1h,
+                failed_1h,
+                timed_out_1h,
+                avg_ms,
+                email_stats,
+            )) => {
                 self.dashboard = DashboardData {
                     total_users: total,
                     stripe_active: stripe,
@@ -283,9 +294,7 @@ impl<'a> AdminApp<'a> {
         let result = self.handle.block_on(async {
             let mut q = user::Entity::find().order_by_asc(UserColumn::Email);
             if !query.is_empty() {
-                q = q.filter(
-                    UserColumn::Email.like(format!("%{}%", query.to_lowercase())),
-                );
+                q = q.filter(UserColumn::Email.like(format!("%{}%", query.to_lowercase())));
             }
             q.limit(200).all(db).await
         });
@@ -307,9 +316,9 @@ impl<'a> AdminApp<'a> {
 
     fn load_user_detail(&mut self, u: user::Model) {
         let db = self.db;
-        let sub_info = self.handle.block_on(async {
-            load_current_subscription(db, &u).await
-        });
+        let sub_info = self
+            .handle
+            .block_on(async { load_current_subscription(db, &u).await });
 
         let subscription = sub_info.map(|s| match s {
             CurrentSubscription::Stripe(m) => SubInfo {
@@ -731,7 +740,10 @@ impl<'a> AdminApp<'a> {
                     let user_id = user.id;
                     self.do_delete_user(user_id);
                 } else {
-                    self.message = Some(("Email does not match. Deletion cancelled.".to_string(), true));
+                    self.message = Some((
+                        "Email does not match. Deletion cancelled.".to_string(),
+                        true,
+                    ));
                     let u = user.clone();
                     self.load_user_detail(u);
                 }
@@ -803,7 +815,8 @@ impl<'a> AdminApp<'a> {
                     if let Some(idx) = self.jobs.top_state.selected() {
                         if let Some((t, ..)) = self.jobs.stats.get(idx) {
                             let t = t.clone();
-                            self.jobs.type_filter = if self.jobs.type_filter.as_deref() == Some(&t) {
+                            self.jobs.type_filter = if self.jobs.type_filter.as_deref() == Some(&t)
+                            {
                                 None
                             } else {
                                 Some(t)
@@ -878,7 +891,11 @@ impl<'a> AdminApp<'a> {
 
         let outer = Block::default()
             .title(title_time)
-            .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+            .title_style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Cyan));
         let inner = outer.inner(area);
@@ -897,7 +914,9 @@ impl<'a> AdminApp<'a> {
             ])
             .split(inner);
 
-        let section_label_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+        let section_label_style = Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD);
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(" USERS", section_label_style))),
             sections[0],
@@ -918,19 +937,55 @@ impl<'a> AdminApp<'a> {
             .split(sections[1]);
 
         if d.loaded {
-            render_tile(f, user_cols[0], "Total Users", &d.total_users.to_string(),
-                Style::default().fg(Color::Cyan), Style::default().add_modifier(Modifier::BOLD));
-            render_tile(f, user_cols[1], "Stripe", &d.stripe_active.to_string(),
-                Style::default().fg(Color::Cyan), Style::default().fg(Color::Cyan));
-            render_tile(f, user_cols[2], "Gift", &d.gift_active.to_string(),
-                Style::default().fg(Color::Magenta), Style::default().fg(Color::Magenta));
-            render_tile(f, user_cols[3], "Trial", &d.trial_active.to_string(),
-                Style::default().fg(Color::Yellow), Style::default().fg(Color::Yellow));
-            render_tile(f, user_cols[4], "No Sub", &d.no_sub.to_string(),
-                Style::default().fg(Color::DarkGray), Style::default().fg(Color::DarkGray));
+            render_tile(
+                f,
+                user_cols[0],
+                "Total Users",
+                &d.total_users.to_string(),
+                Style::default().fg(Color::Cyan),
+                Style::default().add_modifier(Modifier::BOLD),
+            );
+            render_tile(
+                f,
+                user_cols[1],
+                "Stripe",
+                &d.stripe_active.to_string(),
+                Style::default().fg(Color::Cyan),
+                Style::default().fg(Color::Cyan),
+            );
+            render_tile(
+                f,
+                user_cols[2],
+                "Gift",
+                &d.gift_active.to_string(),
+                Style::default().fg(Color::Magenta),
+                Style::default().fg(Color::Magenta),
+            );
+            render_tile(
+                f,
+                user_cols[3],
+                "Trial",
+                &d.trial_active.to_string(),
+                Style::default().fg(Color::Yellow),
+                Style::default().fg(Color::Yellow),
+            );
+            render_tile(
+                f,
+                user_cols[4],
+                "No Sub",
+                &d.no_sub.to_string(),
+                Style::default().fg(Color::DarkGray),
+                Style::default().fg(Color::DarkGray),
+            );
         } else {
-            render_tile(f, user_cols[0], "Users", "Loading…",
-                Style::default().fg(Color::DarkGray), Style::default().fg(Color::DarkGray));
+            render_tile(
+                f,
+                user_cols[0],
+                "Users",
+                "Loading…",
+                Style::default().fg(Color::DarkGray),
+                Style::default().fg(Color::DarkGray),
+            );
         }
 
         // ── Row 2: job queue + last-hour execution tiles ──────────────────────
@@ -946,25 +1001,76 @@ impl<'a> AdminApp<'a> {
             .split(sections[3]);
 
         if d.loaded {
-            render_tile(f, job_cols[0], "Pending", &d.pending_jobs.to_string(),
-                Style::default().fg(Color::Cyan), Style::default());
-            render_tile(f, job_cols[1], "Running", &d.running_jobs.to_string(),
+            render_tile(
+                f,
+                job_cols[0],
+                "Pending",
+                &d.pending_jobs.to_string(),
                 Style::default().fg(Color::Cyan),
-                if d.running_jobs > 0 { Style::default().fg(Color::Yellow) } else { Style::default() });
-            render_tile(f, job_cols[2], "Failed", &d.failed_jobs.to_string(),
+                Style::default(),
+            );
+            render_tile(
+                f,
+                job_cols[1],
+                "Running",
+                &d.running_jobs.to_string(),
                 Style::default().fg(Color::Cyan),
-                if d.failed_jobs > 0 { Style::default().fg(Color::Red) } else { Style::default().fg(Color::Green) });
-            render_tile(f, job_cols[3], "Done /1h", &d.completed_jobs_1h.to_string(),
-                Style::default().fg(Color::Cyan), Style::default().fg(Color::Green));
+                if d.running_jobs > 0 {
+                    Style::default().fg(Color::Yellow)
+                } else {
+                    Style::default()
+                },
+            );
+            render_tile(
+                f,
+                job_cols[2],
+                "Failed",
+                &d.failed_jobs.to_string(),
+                Style::default().fg(Color::Cyan),
+                if d.failed_jobs > 0 {
+                    Style::default().fg(Color::Red)
+                } else {
+                    Style::default().fg(Color::Green)
+                },
+            );
+            render_tile(
+                f,
+                job_cols[3],
+                "Done /1h",
+                &d.completed_jobs_1h.to_string(),
+                Style::default().fg(Color::Cyan),
+                Style::default().fg(Color::Green),
+            );
             let errors_1h = d.failed_executions_1h + d.timed_out_1h;
-            render_tile(f, job_cols[4], "Errors /1h", &errors_1h.to_string(),
+            render_tile(
+                f,
+                job_cols[4],
+                "Errors /1h",
+                &errors_1h.to_string(),
                 Style::default().fg(Color::Cyan),
-                if errors_1h > 0 { Style::default().fg(Color::Red) } else { Style::default() });
-            render_tile(f, job_cols[5], "Avg Time", &avg_label,
-                Style::default().fg(Color::Cyan), Style::default().fg(Color::DarkGray));
+                if errors_1h > 0 {
+                    Style::default().fg(Color::Red)
+                } else {
+                    Style::default()
+                },
+            );
+            render_tile(
+                f,
+                job_cols[5],
+                "Avg Time",
+                &avg_label,
+                Style::default().fg(Color::Cyan),
+                Style::default().fg(Color::DarkGray),
+            );
         } else {
-            render_tile(f, job_cols[0], "Jobs", "Loading…",
-                Style::default().fg(Color::DarkGray), Style::default().fg(Color::DarkGray));
+            render_tile(
+                f,
+                job_cols[0],
+                "Jobs",
+                "Loading…",
+                Style::default().fg(Color::DarkGray),
+                Style::default().fg(Color::DarkGray),
+            );
         }
 
         // ── Email stats section ───────────────────────────────────────────────
@@ -981,23 +1087,36 @@ impl<'a> AdminApp<'a> {
                         Line::from(vec![
                             Span::raw(format!("  {:<24}", name)),
                             Span::raw(format!("sent {:>4}   ", total)),
-                            Span::styled(format!("✓ {:>4}", comp), Style::default().fg(Color::Green)),
+                            Span::styled(
+                                format!("✓ {:>4}", comp),
+                                Style::default().fg(Color::Green),
+                            ),
                             Span::raw("   "),
                             Span::styled(
                                 format!("✗ {:>4}", fail),
-                                if *fail > 0 { Style::default().fg(Color::Red) } else { Style::default().fg(Color::DarkGray) },
+                                if *fail > 0 {
+                                    Style::default().fg(Color::Red)
+                                } else {
+                                    Style::default().fg(Color::DarkGray)
+                                },
                             ),
                         ])
                     })
                     .collect()
             }
         } else {
-            vec![Line::from(Span::styled("  Loading...", Style::default().fg(Color::DarkGray)))]
+            vec![Line::from(Span::styled(
+                "  Loading...",
+                Style::default().fg(Color::DarkGray),
+            ))]
         };
         f.render_widget(
-            Paragraph::new(email_text)
-                .block(Block::default().title(" Email Jobs (available) ").borders(Borders::ALL)
-                    .title_style(Style::default().fg(Color::Cyan))),
+            Paragraph::new(email_text).block(
+                Block::default()
+                    .title(" Email Jobs (available) ")
+                    .borders(Borders::ALL)
+                    .title_style(Style::default().fg(Color::Cyan)),
+            ),
             sections[5],
         );
 
@@ -1014,17 +1133,20 @@ impl<'a> AdminApp<'a> {
     fn render_users(&mut self, f: &mut Frame, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(0), Constraint::Length(2)])
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Min(0),
+                Constraint::Length(2),
+            ])
             .split(area);
 
         // Search bar
-        let search = Paragraph::new(self.users.query.clone())
-            .block(
-                Block::default()
-                    .title(" Search by email — type to filter ")
-                    .borders(Borders::ALL)
-                    .title_style(Style::default().fg(Color::Cyan)),
-            );
+        let search = Paragraph::new(self.users.query.clone()).block(
+            Block::default()
+                .title(" Search by email — type to filter ")
+                .borders(Borders::ALL)
+                .title_style(Style::default().fg(Color::Cyan)),
+        );
         f.render_widget(search, chunks[0]);
 
         // User table
@@ -1086,7 +1208,11 @@ impl<'a> AdminApp<'a> {
     }
 
     fn render_user_detail(&self, f: &mut Frame, area: Rect) {
-        let Screen::UserDetail { user: u, subscription } = &self.screen else {
+        let Screen::UserDetail {
+            user: u,
+            subscription,
+        } = &self.screen
+        else {
             return;
         };
 
@@ -1109,7 +1235,10 @@ impl<'a> AdminApp<'a> {
 
         // User info
         let (verified_str, verified_style) = if let Some(d) = u.email_verified_at {
-            (d.format("%Y-%m-%d %H:%M").to_string(), Style::default().fg(Color::Green))
+            (
+                d.format("%Y-%m-%d %H:%M").to_string(),
+                Style::default().fg(Color::Green),
+            )
         } else {
             ("Not verified".to_string(), Style::default().fg(Color::Red))
         };
@@ -1124,7 +1253,9 @@ impl<'a> AdminApp<'a> {
         ];
         f.render_widget(
             Paragraph::new(user_text).block(
-                Block::default().title(" Info ").borders(Borders::ALL)
+                Block::default()
+                    .title(" Info ")
+                    .borders(Borders::ALL)
                     .title_style(Style::default().fg(Color::Cyan)),
             ),
             chunks[0],
@@ -1139,7 +1270,10 @@ impl<'a> AdminApp<'a> {
                 _ => Style::default(),
             };
             let mut lines = vec![
-                Line::from(vec![Span::raw("  Type:   "), Span::styled(s.sub_type.clone(), type_style)]),
+                Line::from(vec![
+                    Span::raw("  Type:   "),
+                    Span::styled(s.sub_type.clone(), type_style),
+                ]),
                 Line::from(format!("  Plan:   {}", s.plan)),
                 Line::from(format!("  Status: {}", s.status)),
                 Line::from(format!("  Expiry: {}", s.expiry)),
@@ -1161,9 +1295,12 @@ impl<'a> AdminApp<'a> {
             vec![Line::from("  No active subscription.")]
         };
         f.render_widget(
-            Paragraph::new(sub_text)
-                .block(Block::default().title(" Subscription ").borders(Borders::ALL)
-                    .title_style(Style::default().fg(Color::Cyan))),
+            Paragraph::new(sub_text).block(
+                Block::default()
+                    .title(" Subscription ")
+                    .borders(Borders::ALL)
+                    .title_style(Style::default().fg(Color::Cyan)),
+            ),
             chunks[1],
         );
 
@@ -1226,8 +1363,11 @@ impl<'a> AdminApp<'a> {
         } else {
             " Plan "
         };
-        let plan_list =
-            List::new(plan_items).block(Block::default().title(plan_block_title).borders(Borders::ALL));
+        let plan_list = List::new(plan_items).block(
+            Block::default()
+                .title(plan_block_title)
+                .borders(Borders::ALL),
+        );
         f.render_widget(plan_list, chunks[0]);
 
         // Days input
@@ -1236,8 +1376,11 @@ impl<'a> AdminApp<'a> {
         } else {
             " Duration in days (Tab to edit) "
         };
-        let days_widget = Paragraph::new(days_input.clone())
-            .block(Block::default().title(days_block_title).borders(Borders::ALL));
+        let days_widget = Paragraph::new(days_input.clone()).block(
+            Block::default()
+                .title(days_block_title)
+                .borders(Borders::ALL),
+        );
         f.render_widget(days_widget, chunks[1]);
 
         let help = Paragraph::new(Line::from(Span::styled(
@@ -1248,7 +1391,11 @@ impl<'a> AdminApp<'a> {
     }
 
     fn render_delete_confirm(&self, f: &mut Frame, area: Rect) {
-        let Screen::DeleteConfirm { user: u, email_input } = &self.screen else {
+        let Screen::DeleteConfirm {
+            user: u,
+            email_input,
+        } = &self.screen
+        else {
             return;
         };
 
@@ -1294,7 +1441,11 @@ impl<'a> AdminApp<'a> {
     fn render_jobs(&mut self, f: &mut Frame, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(35), Constraint::Min(0), Constraint::Length(2)])
+            .constraints([
+                Constraint::Percentage(35),
+                Constraint::Min(0),
+                Constraint::Length(2),
+            ])
             .split(area);
 
         // Top: stats per job type
@@ -1337,8 +1488,12 @@ impl<'a> AdminApp<'a> {
             ],
         )
         .header(stat_header)
-        .block(Block::default().title(top_title).borders(Borders::ALL)
-            .title_style(Style::default().fg(Color::Cyan)))
+        .block(
+            Block::default()
+                .title(top_title)
+                .borders(Borders::ALL)
+                .title_style(Style::default().fg(Color::Cyan)),
+        )
         .row_highlight_style(Style::default().bg(Color::Blue).fg(Color::White));
 
         f.render_stateful_widget(stat_table, chunks[0], &mut self.jobs.top_state);
@@ -1348,11 +1503,7 @@ impl<'a> AdminApp<'a> {
             Some(s) => format!("{s}"),
             None => "All".to_string(),
         };
-        let type_label = self
-            .jobs
-            .type_filter
-            .as_deref()
-            .unwrap_or("all types");
+        let type_label = self.jobs.type_filter.as_deref().unwrap_or("all types");
 
         let job_header = Row::new(vec!["Type", "Status", "Retries", "Next run", "Created"])
             .style(Style::default().add_modifier(Modifier::BOLD));
@@ -1408,8 +1559,12 @@ impl<'a> AdminApp<'a> {
             ],
         )
         .header(job_header)
-        .block(Block::default().title(bottom_title).borders(Borders::ALL)
-            .title_style(Style::default().fg(Color::Cyan)))
+        .block(
+            Block::default()
+                .title(bottom_title)
+                .borders(Borders::ALL)
+                .title_style(Style::default().fg(Color::Cyan)),
+        )
         .row_highlight_style(Style::default().bg(Color::Blue).fg(Color::White));
 
         f.render_stateful_widget(job_table, chunks[1], &mut self.jobs.bottom_state);
@@ -1424,7 +1579,14 @@ impl<'a> AdminApp<'a> {
 
 // ── Tile helper ───────────────────────────────────────────────────────────────
 
-fn render_tile(f: &mut Frame, area: Rect, title: &str, value: &str, title_style: Style, value_style: Style) {
+fn render_tile(
+    f: &mut Frame,
+    area: Rect,
+    title: &str,
+    value: &str,
+    title_style: Style,
+    value_style: Style,
+) {
     let block = Block::default()
         .title(format!(" {title} "))
         .borders(Borders::ALL)
@@ -1434,11 +1596,17 @@ fn render_tile(f: &mut Frame, area: Rect, title: &str, value: &str, title_style:
 
     let vchunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(1), Constraint::Min(0)])
+        .constraints([
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
         .split(inner);
 
     f.render_widget(
-        Paragraph::new(value).style(value_style).alignment(Alignment::Center),
+        Paragraph::new(value)
+            .style(value_style)
+            .alignment(Alignment::Center),
         vchunks[1],
     );
 }

@@ -20,7 +20,12 @@ impl LocalStorage {
 
 #[async_trait]
 impl StorageService for LocalStorage {
-    async fn upload(&self, key: &str, data: Bytes, _content_type: Option<&str>) -> Result<(), StorageError> {
+    async fn upload(
+        &self,
+        key: &str,
+        data: Bytes,
+        _content_type: Option<&str>,
+    ) -> Result<(), StorageError> {
         let path = self.root.join(key);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).await?;
@@ -31,14 +36,16 @@ impl StorageService for LocalStorage {
 
     async fn download(&self, key: &str) -> Result<Bytes, StorageError> {
         let path = self.root.join(key);
-        let data = fs::read(&path).await
+        let data = fs::read(&path)
+            .await
             .map_err(|_| StorageError::NotFound(key.to_string()))?;
         Ok(Bytes::from(data))
     }
 
     async fn delete(&self, key: &str) -> Result<(), StorageError> {
         let path = self.root.join(key);
-        fs::remove_file(&path).await
+        fs::remove_file(&path)
+            .await
             .map_err(|_| StorageError::DeleteFailed(key.to_string()))?;
         Ok(())
     }

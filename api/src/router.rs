@@ -1,16 +1,19 @@
-use axum::{extract::Request, http::HeaderValue, middleware::Next, response::Response, routing::get, Router};
+use axum::{
+    extract::Request, http::HeaderValue, middleware::Next, response::Response, routing::get, Router,
+};
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 use crate::{
-    api, app::App,
+    api,
+    app::App,
     auth::router::auth_router,
     config::EmailConfig,
     dev,
     environment::Environment,
-    metrics::{self, MetricsEndpointState, http::metrics_middleware},
-    rate_limiting::middleware::{rate_limit_middleware, RateLimitActionExt},
+    metrics::{self, http::metrics_middleware, MetricsEndpointState},
     rate_limiting::action::RateLimitAction,
+    rate_limiting::middleware::{rate_limit_middleware, RateLimitActionExt},
     websocket::auth::authenticated_ws_handler,
 };
 
@@ -44,7 +47,11 @@ where
     let rate_limit_state = app.rate_limit_state.clone();
     let rate_limiting_enabled = app.config.rate_limiting.enabled;
     let metrics_enabled = app.config.metrics.enabled;
-    let cors_origins: Vec<HeaderValue> = app.config.cors.allowed_origins.iter()
+    let cors_origins: Vec<HeaderValue> = app
+        .config
+        .cors
+        .allowed_origins
+        .iter()
         .filter_map(|o| o.parse().ok())
         .collect();
     let metrics_state = MetricsEndpointState {
@@ -67,8 +74,7 @@ where
         .merge(ws_router);
 
     if metrics_enabled {
-        rate_limited = rate_limited
-            .layer(axum::middleware::from_fn(metrics_middleware));
+        rate_limited = rate_limited.layer(axum::middleware::from_fn(metrics_middleware));
     }
 
     // Apply rate limiting to all API and WebSocket routes.

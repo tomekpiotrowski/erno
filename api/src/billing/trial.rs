@@ -1,9 +1,10 @@
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter, Set};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter, Set,
+};
 
 use crate::billing::{
-    handlers::webhooks::update_user_subscription_cache,
-    models::trial_subscription,
+    handlers::webhooks::update_user_subscription_cache, models::trial_subscription,
 };
 
 /// Create a trial subscription for a user if they don't already have one.

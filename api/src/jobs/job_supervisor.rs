@@ -26,16 +26,16 @@ use super::{job_registry::JobRegistry, scheduled_job::ScheduledJob};
 
 /// Verify that all job types have at least one worker pool configured to handle them.
 ///
-/// This function ensures that every variant of the `JobType` enum has a corresponding
-/// worker pool configured in the `WorkersConfig`. This is critical for preventing
-/// jobs from being permanently stuck in the queue due to missing worker coverage.
-///
-/// # Arguments
-/// * `workers_config` - The workers configuration mapping pool names to queue configurations
+/// Jobs of an uncovered type would sit in the queue forever, so a missing pool
+/// is almost certainly a configuration mistake — typically after a framework
+/// upgrade added new built-in jobs. This panics at boot so the mistake is
+/// caught immediately in dev/staging rather than surfacing as silently-stuck
+/// jobs in production. Note the supervisor runs in a detached task: the panic
+/// kills the job system while the API stays up, so treat a boot-time crash of
+/// job processing as a config error to fix, not to deploy around.
 ///
 /// # Panics
-/// Panics if any job type lacks worker coverage, as this is a critical configuration error
-/// that would prevent the job system from functioning correctly.
+/// Panics if any registered job type lacks worker pool coverage.
 fn verify_job_types_have_workers<ExtraConfig>(
     workers_config: &WorkersConfig,
     job_registry: &JobRegistry<ExtraConfig>,
@@ -67,7 +67,7 @@ pub async fn job_supervisor<ExtraConfig>(
 ) where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    // Verify that all JobTypes have corresponding worker pools
+    // Verify that all registered job types have corresponding worker pools
     verify_job_types_have_workers(&jobs_config.workers, &job_registry);
     // Start all worker pools
     start_worker_pools(&jobs_config.workers, &app, &job_registry);

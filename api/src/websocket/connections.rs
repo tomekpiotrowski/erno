@@ -103,6 +103,25 @@ impl Connections {
             .sum()
     }
 
+    /// Forcibly close all of a user's WebSocket connections — e.g. on account
+    /// deletion, so a deleted user's live sockets don't linger. Dropping the
+    /// per-connection senders ends each connection's outgoing task, which
+    /// closes the socket.
+    pub async fn disconnect_user(&self, user_id: UserId) {
+        let removed = {
+            let mut connections = self.connections.lock().await;
+            connections.remove(&user_id)
+        };
+        if let Some(user_connections) = removed {
+            info!(
+                "Disconnecting {} WebSocket connection(s) for user {}",
+                user_connections.len(),
+                user_id
+            );
+            drop(user_connections);
+        }
+    }
+
     pub async fn handle_socket(&self, user_id: UserId, socket: WebSocket) {
         let connection_id = Uuid::new_v4();
         info!(

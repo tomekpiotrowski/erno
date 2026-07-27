@@ -26,7 +26,7 @@ export class HomePage {
   async confirmDeleteAccount() {
     const alert = await this.alertController.create({
       header: 'Delete account',
-      message: 'This permanently deletes your account and all your data. This cannot be undone. Enter your password to confirm.',
+      message: 'This permanently deletes your account and all your data. Any active subscription is cancelled immediately. This cannot be undone. Enter your password to confirm.',
       inputs: [{ name: 'password', type: 'password', placeholder: 'Current password' }],
       buttons: [
         { text: 'Cancel', role: 'cancel' },

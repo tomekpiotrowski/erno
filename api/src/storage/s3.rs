@@ -48,8 +48,14 @@ impl S3Storage {
 
 #[async_trait]
 impl StorageService for S3Storage {
-    async fn upload(&self, key: &str, data: Bytes, content_type: Option<&str>) -> Result<(), StorageError> {
-        let mut request = self.client
+    async fn upload(
+        &self,
+        key: &str,
+        data: Bytes,
+        content_type: Option<&str>,
+    ) -> Result<(), StorageError> {
+        let mut request = self
+            .client
             .put_object()
             .bucket(&self.bucket)
             .key(key)
@@ -59,13 +65,16 @@ impl StorageService for S3Storage {
             request = request.content_type(ct);
         }
 
-        request.send().await
+        request
+            .send()
+            .await
             .map_err(|e| StorageError::UploadFailed(e.to_string()))?;
         Ok(())
     }
 
     async fn download(&self, key: &str) -> Result<Bytes, StorageError> {
-        let response = self.client
+        let response = self
+            .client
             .get_object()
             .bucket(&self.bucket)
             .key(key)
@@ -80,7 +89,10 @@ impl StorageService for S3Storage {
                 }
             })?;
 
-        let data = response.body.collect().await
+        let data = response
+            .body
+            .collect()
+            .await
             .map_err(|e| StorageError::DownloadFailed(e.to_string()))?;
         Ok(data.into_bytes())
     }
@@ -104,7 +116,8 @@ impl StorageService for S3Storage {
         let presigning_config = PresigningConfig::expires_in(expires_in)
             .map_err(|e| StorageError::UrlGenerationFailed(e.to_string()))?;
 
-        let presigned = self.client
+        let presigned = self
+            .client
             .get_object()
             .bucket(&self.bucket)
             .key(key)
