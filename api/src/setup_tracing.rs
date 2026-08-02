@@ -1,4 +1,4 @@
-use time::format_description::parse;
+use time::format_description::parse_borrowed;
 use tracing_subscriber::fmt::time::OffsetTime;
 
 use crate::cli::Commands;
@@ -31,7 +31,7 @@ pub fn setup_tracing_for_command(command: &Option<Commands>, server_log_level: &
         .with_ansi(true) // Enable colors
         .with_timer(OffsetTime::new(
             time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC),
-            parse("[hour]:[minute]:[second].[subsecond digits:2]").unwrap(),
+            parse_borrowed::<2>("[hour]:[minute]:[second].[subsecond digits:2]").unwrap(),
         ))
         .compact() // Use compact format
         .init();

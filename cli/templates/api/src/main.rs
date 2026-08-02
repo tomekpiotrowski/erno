@@ -5,7 +5,6 @@ use erno::{
     app_info::AppInfo,
     boot::{boot, BootConfig},
     jobs::job_registry::JobRegistry,
-    jobs::scheduled_job::ScheduledJob,
 };
 use axum::{routing::get, Router};
 use migrations::Migrator;
