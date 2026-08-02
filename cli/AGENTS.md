@@ -17,6 +17,8 @@ cargo install --path .                   # install globally as `erno`
 | `erno setup` | Interactive wizard — writes `~/.erno/config.toml` with PostgreSQL admin credentials |
 | `erno doctor` | Checks the local environment: Rust, Node, Angular CLI, PostgreSQL, `~/.erno/config.toml`, admin DB access |
 | `erno new <name>` | Scaffolds a full-stack Erno project (Rust API + Angular app) |
+| `erno admin` | Operator TUI — talks to the running API's `/admin/api` over HTTP (Basic auth) |
+| `erno deploy init` | Scaffolds Docker/Helm deploy files; generates admin password hash for production |
 
 ### `erno new` options
 
@@ -65,7 +67,7 @@ ALTER USER erno CREATEDB;
 
 ## Architecture notes
 
-- **No dependency on `api/`**: the CLI uses only `std`, `clap`, `tokio-postgres`, `rand`, `base64`, `config`, and `dirs`. Keeping it decoupled lets it compile fast and avoids circular concerns.
+- **No dependency on `api/`**: the CLI does not depend on the `erno` library crate. Admin uses `reqwest` + `ratatui` as an HTTP client. Keeping it decoupled avoids version skew and circular concerns.
 - **Templates are inline strings**: `new.rs` holds all scaffold templates as Rust string constants/functions. `{{name}}` is substituted via `.replace()` — no template engine dependency.
 - **`erno_migrations()` helper**: scaffolded apps call `erno::database::migrations::erno_migrations()` in their `Migrator` to include all built-in framework migrations (users, jobs, sync, billing, storage) before their own.
 - **Database creation**: `erno new` connects with the admin URL from `~/.erno/config.toml` and issues `CREATE DATABASE` for `<name>_development` and `<name>_test`.

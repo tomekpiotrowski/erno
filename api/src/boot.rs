@@ -225,12 +225,6 @@ pub async fn handle_command<AppMigrator: MigratorTrait, ExtraConfig>(
         Some(Commands::Routes) => {
             routes::handle_routes_command::<ExtraConfig>(config, app_router).await;
         }
-        #[cfg(feature = "admin")]
-        Some(Commands::Admin) => {
-            let db = crate::database::setup_database_connection(&config.database).await;
-            crate::commands::admin::handle_admin_command(db, config.stripe, user_data_deleter)
-                .await;
-        }
         Some(Commands::Serve) | None => {
             serve::handle_serve_command::<AppMigrator, ExtraConfig>(
                 environment,

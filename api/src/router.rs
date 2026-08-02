@@ -5,6 +5,7 @@ use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 use crate::{
+    admin::admin_router,
     api,
     app::App,
     auth::router::auth_router,
@@ -22,15 +23,20 @@ use crate::{
 /// outermost layer (before rate limiting) so the extension is available when
 /// `rate_limit_middleware` inspects it.
 async fn tag_rate_limit_action(mut req: Request, next: Next) -> Response {
-    let action = match req.uri().path() {
-        "/api/auth/login" => "user_login",
-        "/api/auth/register" => "user_create",
-        "/api/auth/email/verify" => "user_verify",
-        "/api/auth/email/resend-verification" => "resend_verification",
-        "/api/auth/password-reset/request" => "password_reset_request",
-        "/api/auth/password-reset/confirm" => "password_reset_confirm",
-        "/api/account" => "account_delete",
-        _ => "default",
+    let path = req.uri().path();
+    let action = if path.starts_with("/admin/api") {
+        "admin"
+    } else {
+        match path {
+            "/api/auth/login" => "user_login",
+            "/api/auth/register" => "user_create",
+            "/api/auth/email/verify" => "user_verify",
+            "/api/auth/email/resend-verification" => "resend_verification",
+            "/api/auth/password-reset/request" => "password_reset_request",
+            "/api/auth/password-reset/confirm" => "password_reset_confirm",
+            "/api/account" => "account_delete",
+            _ => "default",
+        }
     };
     req.extensions_mut()
         .insert(RateLimitActionExt(RateLimitAction::new(action)));
@@ -68,10 +74,15 @@ where
         .with_state(app.clone());
 
     let app_for_dev = app.clone();
+    let admin = admin_router(app.clone());
     // Auth routes are auto-mounted alongside user routes under /api.
     let mut rate_limited = Router::new()
         .nest("/api", auth_router(app.clone()).merge(app_router(app)))
         .merge(ws_router);
+
+    if let Some(admin_router) = admin {
+        rate_limited = rate_limited.nest("/admin/api", admin_router);
+    }
 
     if metrics_enabled {
         rate_limited = rate_limited.layer(axum::middleware::from_fn(metrics_middleware));

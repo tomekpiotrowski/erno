@@ -106,19 +106,27 @@ fn resolve_erno_deps(erno_path: Option<&str>) -> (String, String) {
                 std::process::exit(1);
             }
             (
-                format!(r#"{{ path = "{}", features = ["admin"] }}"#, api_path.display()),
+                format!(r#"{{ path = "{}" }}"#, api_path.display()),
                 format!("file:{}", angular_dist.display()),
             )
         }
         None => (
-            format!(r#"{{ git = "{ERNO_GIT}", features = ["admin"] }}"#),
+            format!(r#"{{ git = "{ERNO_GIT}" }}"#),
             "^0.0.1".to_string(),
         ),
     }
 }
 
 fn resolve_local_erno_paths(path: &str) -> (PathBuf, PathBuf) {
-    let input = Path::new(path);
+    // Both dependency strings are written into files under the generated
+    // project, so a relative --erno-path would be resolved against the wrong
+    // directory by cargo and npm. Make it absolute before anything else.
+    let input = fs::canonicalize(path).unwrap_or_else(|e| {
+        eprintln!("❌  Invalid --erno-path '{path}': {e}.");
+        std::process::exit(1);
+    });
+    let input = input.as_path();
+
     let is_api_path = input
         .file_name()
         .and_then(|name| name.to_str())

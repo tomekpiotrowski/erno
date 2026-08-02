@@ -16,7 +16,6 @@ rust-version = "1.88.0"
 [features]
 default = []
 test-utils = ["dep:axum-test", "dep:lets_expect"]
-admin = ["dep:ratatui"]
 
 [dependencies]
 axum = { version = "0.8.4", features = ["ws", "multipart"] }
@@ -57,7 +56,6 @@ aws-config = "1"
 bytes = "1"
 axum-test = { version = "18.5", optional = true }
 lets_expect = { version = "0.5.1", optional = true }
-ratatui = { version = "0.29", optional = true }
 metrics = "0.24"
 metrics-exporter-prometheus = "0.16"
 

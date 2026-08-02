@@ -214,7 +214,7 @@ pool, Erno panics at boot naming the uncovered types (see
 [jobs docs](/api/jobs/#worker-coverage-check)) — existing apps upgrading Erno must add the new
 job types to a pool.
 
-Admin operators can run the same purge from the console TUI (select a user → `x` → confirm).
+Admin operators can run the same purge from `erno admin` (select a user → `x` → confirm), which calls `DELETE /admin/api/users/{id}` on the server.
 
 ### App Store review notes
 

@@ -22,6 +22,21 @@ cargo install erno-cli
 | [`erno setup`](#setup) | Configure `~/.erno/config.toml` (PostgreSQL admin credentials) |
 | [`erno doctor`](#doctor) | Verify that your environment is ready to develop Erno apps |
 | [`erno new <name>`](#new) | Scaffold a new full-stack Erno project |
+| [`erno admin`](#admin) | Operator TUI against the running API (`/admin/api`) |
+| `erno deploy init` | Scaffold Docker/Helm deploy files (generates admin password hash) |
+
+---
+
+## admin
+
+```sh
+erno admin
+erno admin --url https://api.example.com
+```
+
+Interactive TUI for users, gifts, and jobs. Talks to the API over HTTP with Basic auth — see [Admin console](/api/console).
+
+Against localhost, the password defaults to `admin` (no prompt). Production password is generated once by `erno deploy init` (hash only stored in the cluster).
 
 ---
 

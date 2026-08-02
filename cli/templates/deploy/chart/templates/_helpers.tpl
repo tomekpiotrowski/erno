@@ -7,6 +7,12 @@
   value: {{ .Values.api.api_url | quote }}
 - name: APP__AUTH__SECRET
   value: {{ .Values.api.jwt_secret | quote }}
+{{- if .Values.api.admin_password_hash }}
+- name: APP__ADMIN__PASSWORD_HASH
+  value: {{ .Values.api.admin_password_hash | quote }}
+- name: APP__ADMIN__USERNAME
+  value: "admin"
+{{- end }}
 - name: APP__TRACING__LOG_LEVEL
   value: {{ .Values.api.log_level | default "info" | quote }}
 - name: APP__EMAIL__TYPE

@@ -1,5 +1,3 @@
-#[cfg(feature = "admin")]
-pub mod admin;
 pub mod db;
 pub mod db_reset;
 pub mod generate_secret;

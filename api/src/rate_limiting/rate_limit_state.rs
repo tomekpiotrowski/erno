@@ -250,6 +250,27 @@ impl RateLimitConfig {
             },
         );
 
+        // Strict: admin Basic auth verifies a password hash; limit online guessing.
+        actions.insert(
+            "admin".to_string(),
+            ActionRateLimit {
+                tiers: vec![
+                    RateLimitTier {
+                        window_secs: 5,
+                        max_requests: 10,
+                    },
+                    RateLimitTier {
+                        window_secs: 60,
+                        max_requests: 30,
+                    },
+                    RateLimitTier {
+                        window_secs: 3600,
+                        max_requests: 200,
+                    },
+                ],
+            },
+        );
+
         actions
     }
 

@@ -127,11 +127,16 @@ fn app_router(_app: App) -> Router {
 }
 
 fn job_registry() -> JobRegistry {
-    JobRegistry::new()
+    let mut registry = JobRegistry::new();
+    // Opt in to the daily business-metrics snapshot job. Requires
+    // "business_stats_snapshot" to also be listed in a worker pool's `jobs` in
+    // config/*.toml — see docs/src/content/docs/api/business-stats.md.
+    registry.register_job::<erno::business_stats::BusinessStatsSnapshotJob>();
+    registry
 }
 
 fn job_schedule() -> Vec<ScheduledJob> {
-    vec![]
+    vec![erno::business_stats::business_stats_scheduled_job()]
 }
 
 fn boot_config() -> BootConfig {

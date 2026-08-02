@@ -11,6 +11,20 @@ Rust/Axum SaaS infrastructure library — batteries-included auth, jobs, billing
 | `cli/`    | `erno` CLI binary — scaffolding, environment checks — see `cli/AGENTS.md` |
 | `docs/`   | Astro documentation site |
 
+## Building everything
+
+There is no cargo workspace — `api/` and `cli/` are independent crates, and `app/` and `docs/` are npm projects. `./build.sh` is the single entry point across all four:
+
+```sh
+./build.sh              # build api, cli, app, and docs
+./build.sh api cli      # build only those parts
+./build.sh test         # Rust test suites (api tests require PostgreSQL)
+./build.sh check        # cargo fmt --check + clippy -D warnings, both crates
+./build.sh help         # list every target
+```
+
+Per-directory instructions below still apply when working inside one part.
+
 ## API (Rust)
 
 `api/` is the Rust library crate — auth, jobs, billing, sync, storage, and more. See `api/AGENTS.md` for build instructions, module reference, and architecture notes.

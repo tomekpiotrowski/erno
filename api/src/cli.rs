@@ -28,9 +28,6 @@ pub enum Commands {
     Version,
     /// List all application routes
     Routes,
-    /// Open the admin text user interface
-    #[cfg(feature = "admin")]
-    Admin,
 }
 
 #[derive(Subcommand)]

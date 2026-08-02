@@ -1,3 +1,4 @@
+pub mod admin;
 pub mod deploy;
 pub mod dev;
 pub mod doctor;

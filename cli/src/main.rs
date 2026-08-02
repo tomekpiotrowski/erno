@@ -1,3 +1,4 @@
+mod admin;
 mod commands;
 mod global_config;
 mod ng;
@@ -33,6 +34,21 @@ enum Commands {
     Setup,
     /// Start the api and app dev servers
     Dev,
+    /// Open the admin TUI (talks to the running API over HTTP)
+    Admin {
+        /// API base URL (default: api_url from development.toml or http://localhost:3000)
+        #[arg(long)]
+        url: Option<String>,
+        /// Basic-auth username (default: admin)
+        #[arg(long, default_value = "admin")]
+        user: String,
+        /// Admin password (prefer prompt or --password-env / ERNO_ADMIN_PASSWORD)
+        #[arg(long)]
+        password: Option<String>,
+        /// Read password from this environment variable
+        #[arg(long, value_name = "VAR")]
+        password_env: Option<String>,
+    },
     /// Set up and manage production deployment
     Deploy(DeployArgs),
 }
@@ -71,6 +87,12 @@ async fn main() {
         } => commands::new::handle_new(&name, path.as_deref(), erno_path.as_deref(), bundle_id.as_deref()).await,
         Commands::Setup => commands::setup::handle_setup().await,
         Commands::Dev => commands::dev::handle_dev(None).await,
+        Commands::Admin {
+            url,
+            user,
+            password,
+            password_env,
+        } => commands::admin::handle_admin(url, user, password, password_env).await,
         Commands::Deploy(args) => match args.command {
             DeployCommands::Init => commands::deploy::handle_deploy_init().await,
             DeployCommands::Install { version, env } => {

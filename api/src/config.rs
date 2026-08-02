@@ -106,8 +106,33 @@ pub struct Config<ExtraConfig = ()> {
     pub metrics: MetricsConfig,
     #[serde(default)]
     pub cors: CorsConfig,
+    /// Operator admin API (`/admin/api/*`). Disabled when absent or when
+    /// `password_hash` is empty.
+    #[serde(default)]
+    pub admin: Option<AdminConfig>,
     #[serde(flatten, default)]
     pub extra: ExtraConfig,
+}
+
+/// Configuration for the HTTP admin API used by `erno admin`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminConfig {
+    /// Basic-auth username. Defaults to `"admin"`.
+    #[serde(default = "default_admin_username")]
+    pub username: String,
+    /// Argon2 PHC password hash. Required to enable the admin API.
+    pub password_hash: String,
+}
+
+impl AdminConfig {
+    /// Whether the admin API should be mounted.
+    pub fn is_enabled(&self) -> bool {
+        !self.password_hash.is_empty()
+    }
+}
+
+fn default_admin_username() -> String {
+    "admin".to_string()
 }
 
 impl<ExtraConfig> Config<ExtraConfig> {

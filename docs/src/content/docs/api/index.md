@@ -19,7 +19,8 @@ Erno is a Rust library that provides shared infrastructure for building REST API
 | [Rate Limiting](./rate-limiting) | Per-action request rate limiting middleware |
 | [WebSocket](./websocket) | WebSocket connection management |
 | [Telemetry](./telemetry) | Distributed tracing and Prometheus metrics |
-| [Admin TUI](./console) | Interactive terminal UI for user and job administration |
+| [Admin console](./console) | HTTP admin API + `erno admin` TUI for user and job administration |
+| [Business stats](./business-stats) | Daily SaaS metric snapshots (growth, subs, activity, storage) |
 | [Billing](./billing) | Stripe, gift, and trial subscription management |
 | [File Storage](./storage) | Local and S3 file storage with polymorphic attachments |
 | [Authorization](./authorization) | Policy-based authorization for SeaORM entities |

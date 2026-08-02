@@ -50,10 +50,13 @@ pub async fn handle_deploy_init() {
 
     println!("\n📦  Generating deployment files for '{name}'...\n");
 
+    let (admin_password, admin_password_hash) = generate_admin_password();
+
     let vars: &[(&str, &str)] = &[
         ("{{name}}", &name),
         ("{{github_repo}}", &github_repo),
         ("{{kubernetes_context}}", &k8s_context),
+        ("{{admin_password_hash}}", &admin_password_hash),
     ];
 
     write_file("api/Dockerfile", render(TEMPLATE_API_DOCKERFILE, vars));
@@ -78,7 +81,40 @@ pub async fn handle_deploy_init() {
 
     setup_sops(&name, &github_repo).await;
 
+    print_admin_password_once(&admin_password);
     print_next_steps(&name, &github_repo);
+}
+
+/// Generate a high-entropy admin password and its Argon2 hash.
+/// Only the hash is written to secrets; the plaintext is shown once.
+fn generate_admin_password() -> (String, String) {
+    use argon2::{
+        password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
+        Argon2,
+    };
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    use rand::RngCore;
+
+    let mut bytes = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    let password = URL_SAFE_NO_PAD.encode(bytes);
+
+    let salt = SaltString::generate(&mut OsRng);
+    let hash = Argon2::default()
+        .hash_password(password.as_bytes(), &salt)
+        .expect("argon2 hash")
+        .to_string();
+
+    (password, hash)
+}
+
+fn print_admin_password_once(password: &str) {
+    println!("\n🔐  Admin password (store in your password manager — shown only once):\n");
+    println!("    {password}\n");
+    println!("    Login:  erno admin --url https://api.example.com");
+    println!("    Username: admin");
+    println!("    Only the Argon2 hash was written to chart/secrets.example.yaml.");
+    println!("    The plaintext is NOT stored in the cluster or in git.\n");
 }
 
 pub async fn handle_deploy_install(version: &str, env: &str) {
@@ -424,8 +460,9 @@ fn run_command(program: &str, args: &[&str]) {
 fn print_next_steps(name: &str, github_repo: &str) {
     println!("\n✅  Deployment scaffold complete.\n");
     println!("Next steps:\n");
-    println!("  1. Fill in chart/secrets.production.yaml (copy from chart/secrets.example.yaml)");
-    println!("     then encrypt it:  sops --encrypt --in-place chart/secrets.production.yaml");
+    println!("  1. Copy chart/secrets.example.yaml → chart/secrets.production.yaml,");
+    println!("     fill remaining secrets (DB, JWT, SMTP), keep admin_password_hash as generated,");
+    println!("     then encrypt:  sops --encrypt --in-place chart/secrets.production.yaml");
     println!();
     println!("  2. Install prerequisites on your cluster (first time only):");
     println!("     helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx");

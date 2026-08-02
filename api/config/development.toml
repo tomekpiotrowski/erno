@@ -45,3 +45,8 @@ enabled = true
 default_window_secs = 60
 default_max_requests = 100
 backoff_multiplier = 2.0
+
+# Operator admin API (`erno admin`). Dev password: admin
+[admin]
+username = "admin"
+password_hash = "$argon2id$v=19$m=19456,t=2,p=1$5B2ECOLqakkxkiD5EjKyDQ$PBe29N0j5lou/OHFWQuxjKEnL7fv4GE9MhniBui9rYc"

@@ -13,6 +13,8 @@ pub struct Model {
     pub subscription_id: Option<Uuid>,
     pub subscription_type: Option<String>,
     pub subscription_plan: Option<String>,
+    /// Last time the user made an authenticated request (throttled updates).
+    pub last_active_at: Option<NaiveDateTime>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }

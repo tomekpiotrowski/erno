@@ -9,7 +9,6 @@
 // Modules will be added as we migrate functionality
 
 pub mod account;
-#[cfg(feature = "admin")]
 pub mod admin;
 pub mod api;
 pub mod app;
@@ -17,6 +16,7 @@ pub mod app_info;
 pub mod auth;
 pub mod billing;
 pub mod boot;
+pub mod business_stats;
 pub mod cli;
 pub mod commands;
 pub mod config;

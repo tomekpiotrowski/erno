@@ -4,7 +4,8 @@ use axum::{
     http::{request::Parts, StatusCode},
     response::{IntoResponse, Response},
 };
-use sea_orm::{DatabaseConnection, EntityTrait};
+use chrono::{Duration, Utc};
+use sea_orm::{DatabaseConnection, EntityTrait, Set};
 use uuid::Uuid;
 
 use crate::app::App;
@@ -112,8 +113,36 @@ where
             return Err(AuthError::Unauthorized);
         }
 
+        touch_last_active(&state.db, &user).await;
+
         let profile = P::load_for_user(user_id, &state.db).await?;
 
         Ok(CurrentUser { user, profile })
     }
+}
+
+/// How stale `last_active_at` must be before a request bothers rewriting it —
+/// keeps this to roughly one write per user per window instead of one per request.
+fn last_active_throttle() -> Duration {
+    Duration::minutes(15)
+}
+
+/// Best-effort activity timestamp update; a failure here must never fail
+/// an otherwise-valid authenticated request.
+async fn touch_last_active(db: &DatabaseConnection, user: &user::Model) {
+    let now = Utc::now().naive_utc();
+    let stale = user
+        .last_active_at
+        .is_none_or(|t| now - t > last_active_throttle());
+    if !stale {
+        return;
+    }
+
+    let _ = user::Entity::update(user::ActiveModel {
+        id: Set(user.id),
+        last_active_at: Set(Some(now)),
+        ..Default::default()
+    })
+    .exec(db)
+    .await;
 }
