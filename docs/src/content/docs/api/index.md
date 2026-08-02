@@ -9,23 +9,46 @@ Erno is a Rust library that provides shared infrastructure for building REST API
 
 ## Modules
 
+### Core
+
 | Module | Description |
 |--------|-------------|
-| [Getting Started](./getting-started) | Installation and minimal working example |
+| [Manual API setup](./getting-started) | Install the library without the full-stack CLI |
 | [Boot & Configuration](./boot) | Application bootstrap, routing, and environment config |
-| [Authentication](./authentication) | JWT-based auth and the `CurrentUser` extractor |
 | [Database](./database) | SeaORM integration with migrations |
-| [Jobs](./jobs) | Background job scheduling with cron and advisory locks |
-| [Rate Limiting](./rate-limiting) | Per-action request rate limiting middleware |
-| [WebSocket](./websocket) | WebSocket connection management |
-| [Telemetry](./telemetry) | Distributed tracing and Prometheus metrics |
-| [Admin console](./console) | HTTP admin API + `erno admin` TUI for user and job administration |
-| [Business stats](./business-stats) | Daily SaaS metric snapshots (growth, subs, activity, storage) |
-| [Billing](./billing) | Stripe, gift, and trial subscription management |
-| [File Storage](./storage) | Local and S3 file storage with polymorphic attachments |
+
+### Security
+
+| Module | Description |
+|--------|-------------|
+| [Authentication](./authentication) | JWT-based auth and the `CurrentUser` extractor |
 | [Authorization](./authorization) | Policy-based authorization for SeaORM entities |
-| [Email](./email) | Sending HTML and multipart emails via SMTP |
+| [Rate limiting](./rate-limiting) | Per-action request rate limiting middleware |
+
+### Data & realtime
+
+| Module | Description |
+|--------|-------------|
 | [Sync](./sync) | Offline-first delta synchronization over WebSocket |
+| [Sharing](./share) | Secret links and grants, integrated with sync |
+| [File storage](./storage) | Local and S3 file storage with polymorphic attachments |
+| [WebSocket](./websocket) | WebSocket connection management |
+
+### Product
+
+| Module | Description |
+|--------|-------------|
+| [Billing](./billing) | Stripe, gift, and trial subscription management |
+
+### Background & ops
+
+| Module | Description |
+|--------|-------------|
+| [Jobs](./jobs) | Background job scheduling with cron and advisory locks |
+| [Email](./email) | Sending HTML and multipart emails via SMTP |
+| [Telemetry](./telemetry) | Distributed tracing and Prometheus metrics |
+| [Admin console](./console) | HTTP admin API + `erno admin` TUI |
+| [Business stats](./business-stats) | Daily SaaS metric snapshots |
 
 ## Installation
 
@@ -35,3 +58,5 @@ Add Erno to your `Cargo.toml`:
 [dependencies]
 erno = { git = "https://github.com/tomekpiotrowski/erno" }
 ```
+
+New full-stack projects should use [`erno new`](/getting-started/) instead of wiring the crate by hand.

@@ -9,6 +9,8 @@ sidebar:
 
 `FileStorage` supports three backends: local disk, S3-compatible object stores (AWS S3, Digital Ocean Spaces, MinIO), and an in-memory mock for tests. The active instance is available on `app.storage`.
 
+> **Client counterpart**: [File storage (App)](/app/storage/)
+
 ## Storing a file
 
 `store` uploads bytes to the configured backend, computes a SHA-256 checksum, and inserts a row in the `files` table. If the database insert fails the uploaded bytes are deleted automatically to avoid orphans.

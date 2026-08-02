@@ -1,36 +1,17 @@
 ---
-title: Getting Started
-description: Create a new Erno project and build your first API
+title: Manual API setup
+description: Add the Erno Rust library without the CLI scaffold
 sidebar:
   order: 1
 ---
 
-## Quick start with the CLI
+> Prefer the full-stack path? See **[Getting started](/getting-started/)** — `erno new` scaffolds API + app + databases for you.
 
-The fastest way to create a new Erno project is with the `erno` CLI:
+This page covers using the Erno Rust library on its own.
 
-```sh
-# 1. Verify your environment
-erno doctor
+## Installation
 
-# 2. Scaffold a new project
-erno new my_app
-cd my_app/api
-
-# 3. Run migrations and start the server
-cargo run -- migrate up
-cargo run
-```
-
-The scaffolded project includes a health endpoint at `http://localhost:3000/health`, all framework migrations (users, jobs, sync, billing, storage), and matching development/test databases.
-
-See the [CLI guide](/cli/) for installation instructions and all `erno new` options.
-
----
-
-## Manual setup
-
-If you prefer to set up manually, add Erno to your `Cargo.toml`:
+Add Erno to your `Cargo.toml`:
 
 ```toml
 [dependencies]
@@ -43,7 +24,7 @@ axum = "0.8"
 
 Erno requires Rust **1.88.0** or later.
 
-### Minimal application
+## Minimal application
 
 ```rust
 mod migrations;
@@ -78,7 +59,7 @@ async fn main() {
 }
 ```
 
-### Migrator
+## Migrator
 
 Your `Migrator` runs all framework migrations first, then your own:
 
@@ -98,7 +79,7 @@ impl MigratorTrait for Migrator {
 }
 ```
 
-### Configuration
+## Configuration
 
 Erno reads `config/{environment}.toml`. The active environment defaults to `development` and can be changed with `APP_ENVIRONMENT`.
 
@@ -127,7 +108,7 @@ refresh_token_days = 30
 
 Environment variables prefixed `APP_` override any TOML value; use `__` for nesting (`APP_DATABASE__URL`).
 
-See [Boot & Configuration](../boot) for the full option reference.
+See [Boot & Configuration](/api/boot/) for the full option reference.
 
 ## Built-in CLI commands
 
@@ -148,7 +129,7 @@ Every Erno application exposes these commands via `cargo run --`:
 
 ## Next steps
 
-- [Boot & Configuration](../boot) — full `BootConfig` and `AppState` reference
-- [Authentication](../authentication) — protect routes with JWT
-- [Jobs](../jobs) — run background tasks
-- [Sync](../sync) — offline-first delta synchronization
+- [Boot & Configuration](/api/boot/) — full `BootConfig` and `AppState` reference
+- [Authentication](/api/authentication/) — protect routes with JWT
+- [Jobs](/api/jobs/) — run background tasks
+- [Sync](/api/sync/) — offline-first delta synchronization

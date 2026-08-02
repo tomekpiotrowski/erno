@@ -22,7 +22,7 @@ one_time_token_expiry_hours = 24
 Generate a suitable secret:
 
 ```bash
-cargo run -- generate-secret
+cargo run -- generate-jwt-secret
 ```
 
 ## Protecting routes
@@ -76,6 +76,8 @@ impl LoadForUser for Profile {
 ```
 
 ## Built-in auth routes
+
+> **Client counterpart**: [Authentication (App)](/app/authentication/)
 
 Mount the built-in auth router to get registration, login, and password reset endpoints:
 

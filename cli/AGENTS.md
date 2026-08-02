@@ -19,6 +19,9 @@ cargo install --path .                   # install globally as `erno`
 | `erno new <name>` | Scaffolds a full-stack Erno project (Rust API + Angular app) |
 | `erno admin` | Operator TUI — talks to the running API's `/admin/api` over HTTP (Basic auth) |
 | `erno deploy init` | Scaffolds Docker/Helm deploy files; generates admin password hash for production |
+| `erno deploy install` | Installs a chart version to the cluster (`helm secrets upgrade --install`) |
+
+Narrative docs for the CLI live in `docs/src/content/docs/cli/` (`index.md`, `deploy.md`).
 
 ### `erno new` options
 

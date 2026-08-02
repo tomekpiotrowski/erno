@@ -41,10 +41,14 @@ Narrative docs for each service live in `docs/src/content/docs/app/`:
 
 | Service | Doc page |
 |---------|---------|
-| `ErnoAuthService` | `authentication.md` |
+| `ErnoAuthService` / `ErnoHttpInterceptor` | `authentication.md` |
 | `ErnoSyncService` / `ErnoDatabaseService` | `sync.md` |
 | `ErnoRealtimeService` / `ErnoAppStateService` | `realtime.md` |
 | `ErnoStorageService` | `storage.md` |
 | `ErnoBillingService` | `billing.md` |
+| `ErnoShareService` / `ErnoSharedViewService` | `share.md` |
+| `ErnoDevtoolsComponent` / `ErnoDevMailService` / `ErnoAlertsService` | `devtools.md` |
+
+Cross-cutting guides: `docs/src/content/docs/guides/` (e.g. sync end-to-end, billing gates).
 
 **If you change a service's public API, configuration, or observable behaviour, update the corresponding doc page.**

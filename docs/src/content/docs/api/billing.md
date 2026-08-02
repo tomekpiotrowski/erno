@@ -9,6 +9,8 @@ sidebar:
 
 Erno ships three subscription types — Stripe (recurring payments), Gift (admin-assigned), and Trial (time-limited free access). All three are modelled through a shared extractor so route handlers don't need to branch on subscription source.
 
+> **Client counterpart**: [Billing (App)](/app/billing/) · **Recipe**: [Gate features with billing](/guides/billing-gates/)
+
 ## Protecting routes
 
 Add `ActiveSubscription` as a handler argument to require an active subscription. It reads cached columns on the user row — no extra database query in the happy path — and returns `402 Payment Required` if the user has no active subscription.

@@ -1,0 +1,79 @@
+---
+title: Devtools
+description: Dev overlay, mock email preview, job inspector, and toast alerts
+sidebar:
+  order: 8
+---
+
+Local development helpers ship with `erno-angular`: a floating overlay for sync/mail/jobs, services that hit the API’s `/dev/*` routes, and an optional toast queue.
+
+## Devtools overlay
+
+Add the component once in a root template (development builds only):
+
+```html
+<erno-devtools></erno-devtools>
+```
+
+The overlay is fixed to the bottom-right and exposes three tabs:
+
+| Tab | What it shows |
+|-----|----------------|
+| **Status** | WebSocket and sync status; button to force a re-sync |
+| **Emails** | Mock emails captured when the API uses `email.type = "mock"` |
+| **Jobs** | Recent background jobs (type, status, arguments, retries) |
+
+Visibility is gated by Angular’s `isDevMode()` so production builds do not show the panel even if the tag remains in a template.
+
+### Related services
+
+| Service | Endpoints | Role |
+|---------|-----------|------|
+| `ErnoDevMailService` | `GET/DELETE /dev/emails` | List, delete one, or clear mock emails |
+| `ErnoDevJobsService` | `GET/DELETE /dev/jobs` | List/clear jobs for the Jobs tab |
+
+```typescript
+import { ErnoDevMailService } from 'erno-angular';
+
+constructor(private mail: ErnoDevMailService) {}
+
+refresh() {
+  this.mail.list().subscribe(emails => console.log(emails));
+}
+```
+
+Configure the API with mock transport in development:
+
+```toml
+[email]
+type = "mock"
+```
+
+See [Email (API)](/api/email/).
+
+## Alerts (`ErnoAlertsService`)
+
+`ErnoAlertsService` queues Ionic toasts so concurrent messages play one after another:
+
+```typescript
+import { ErnoAlertsService } from 'erno-angular';
+
+constructor(private alerts: ErnoAlertsService) {}
+
+onSaved() {
+  this.alerts.success('Saved');
+}
+
+onFail(err: unknown) {
+  this.alerts.error('Something went wrong');
+}
+```
+
+| Method | Default duration | Ionic color |
+|--------|------------------|-------------|
+| `success(message, duration?)` | 3000 ms | `success` |
+| `info(message, duration?)` | 3000 ms | `primary` |
+| `warn(message, duration?)` | 4000 ms | `warning` |
+| `error(message, duration?)` | 5000 ms | `danger` |
+
+Requires Ionic’s `ToastController` (present in apps scaffolded with `erno new`). Toasts appear at the top of the viewport.

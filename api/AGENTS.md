@@ -51,6 +51,8 @@ Narrative docs for each module live in `docs/src/content/docs/api/`:
 
 | Module | Doc page |
 |--------|---------|
+| (boot / config) | `boot.md` |
+| (manual setup) | `getting-started.md` (API-only; full-stack is `docs/.../getting-started.md`) |
 | `auth` | `authentication.md` |
 | `billing` | `billing.md` |
 | `storage` | `storage.md` |
@@ -61,5 +63,11 @@ Narrative docs for each module live in `docs/src/content/docs/api/`:
 | `policy` | `authorization.md` |
 | `metrics` | `telemetry.md` |
 | `admin` | `console.md` |
+| `business_stats` | `business-stats.md` |
+| `websocket` | `websocket.md` |
+| `emails` / mailer | `email.md` |
+| `database` | `database.md` |
+
+Cross-cutting guides: `docs/src/content/docs/guides/` (e.g. sync end-to-end, billing gates). Architecture overview: `docs/src/content/docs/architecture.md`.
 
 **If you change a module's public API, configuration keys, or observable behaviour, update the corresponding doc page.**

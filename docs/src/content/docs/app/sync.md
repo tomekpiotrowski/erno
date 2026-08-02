@@ -39,3 +39,8 @@ async ngOnInit() {
 When the app returns to the foreground (see [`ErnoAppStateService`](/app/realtime/#app-state)), `ErnoSyncService` automatically calls `pullDelta()` to pick up anything that changed while the app was suspended and the WebSocket was closed. The realtime socket itself is reconnected by [`ErnoRealtimeService`](/app/realtime/).
 
 `pullDelta()` is guarded against overlap, so a resume that lands during an in-flight pull reuses the existing request rather than issuing a second one.
+
+## See also
+
+- [Sync (API)](/api/sync/) — migrations, `Syncable`, soft delete
+- [Sync an entity end-to-end](/guides/sync-an-entity/) — full walkthrough

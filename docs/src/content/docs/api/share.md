@@ -7,7 +7,9 @@ sidebar:
 
 > **Source**: `api/src/share/`
 
-The share module lets a user grant others access to entities they own — via a secret link (no account required) or by granting specific users directly. Shares integrate with [authorization](../authorization) policies and the [sync](../sync) engine: share holders receive both delta pulls and real-time WebSocket push for the shared data.
+The share module lets a user grant others access to entities they own — via a secret link (no account required) or by granting specific users directly. Shares integrate with [authorization](/api/authorization/) policies and the [sync](/api/sync/) engine: share holders receive both delta pulls and real-time WebSocket push for the shared data.
+
+> **Client counterpart**: [Sharing (App)](/app/share/)
 
 ## Concepts
 

@@ -23,7 +23,7 @@ cargo install erno-cli
 | [`erno doctor`](#doctor) | Verify that your environment is ready to develop Erno apps |
 | [`erno new <name>`](#new) | Scaffold a new full-stack Erno project |
 | [`erno admin`](#admin) | Operator TUI against the running API (`/admin/api`) |
-| `erno deploy init` | Scaffold Docker/Helm deploy files (generates admin password hash) |
+| [`erno deploy`](/cli/deploy/) | Scaffold Docker/Helm files and install releases |
 
 ---
 
