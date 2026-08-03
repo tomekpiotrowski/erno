@@ -33,6 +33,14 @@ const VERIFY_EMAIL_COMPONENT_HTML: &str = include_str!("../../templates/app/src/
 const HOME_PAGE_TS: &str = include_str!("../../templates/app/src/app/home/home.page.ts");
 const HOME_PAGE_HTML: &str = include_str!("../../templates/app/src/app/home/home.page.html");
 const APP_CAPACITOR_CONFIG_TS: &str = include_str!("../../templates/app/capacitor.config.ts");
+const WWW_PACKAGE_JSON: &str = include_str!("../../templates/www/package.json");
+const WWW_ASTRO_CONFIG: &str = include_str!("../../templates/www/astro.config.mjs");
+const WWW_TSCONFIG: &str = include_str!("../../templates/www/tsconfig.json");
+const WWW_ENV_D_TS: &str = include_str!("../../templates/www/src/env.d.ts");
+const WWW_LAYOUT: &str = include_str!("../../templates/www/src/layouts/Layout.astro");
+const WWW_INDEX: &str = include_str!("../../templates/www/src/pages/index.astro");
+const WWW_GLOBAL_CSS: &str = include_str!("../../templates/www/src/styles/global.css");
+const WWW_FAVICON: &str = include_str!("../../templates/www/public/favicon.svg");
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -75,6 +83,8 @@ pub async fn handle_new(name: &str, path: Option<&str>, erno_path: Option<&str>,
     // ionic start installs base deps before we patch package.json, so
     // erno-angular and other additions are not yet in node_modules.
     install_app_deps(&dest, erno_angular_dep.starts_with("file:"));
+    create_www(&dest, name);
+    install_www_deps(&dest);
 
     let config = GlobalConfig::load().ok();
     if let Some(config) = config {
@@ -272,6 +282,45 @@ fn install_app_deps(dest: &Path, use_install_links: bool) {
     });
     if !status.success() {
         eprintln!("❌  npm install failed");
+        std::process::exit(1);
+    }
+}
+
+// ── Marketing site (Astro static) ─────────────────────────────────────────────
+
+fn create_www(dest: &Path, name: &str) {
+    let www = dest.join("www");
+    println!("  Scaffolding marketing site (www/)...");
+
+    write(
+        &www.join("package.json"),
+        &render(WWW_PACKAGE_JSON, &[("name", name)]),
+    );
+    write(&www.join("astro.config.mjs"), WWW_ASTRO_CONFIG);
+    write(&www.join("tsconfig.json"), WWW_TSCONFIG);
+    write(&www.join("src/env.d.ts"), WWW_ENV_D_TS);
+    write(&www.join("src/layouts/Layout.astro"), WWW_LAYOUT);
+    write(
+        &www.join("src/pages/index.astro"),
+        &render(WWW_INDEX, &[("name", name)]),
+    );
+    write(&www.join("src/styles/global.css"), WWW_GLOBAL_CSS);
+    write(&www.join("public/favicon.svg"), WWW_FAVICON);
+}
+
+fn install_www_deps(dest: &Path) {
+    let www = dest.join("www");
+    println!("  Installing www dependencies...");
+    let status = std::process::Command::new("npm")
+        .arg("install")
+        .current_dir(&www)
+        .status()
+        .unwrap_or_else(|e| {
+            eprintln!("❌  Failed to run npm install in www/: {e}");
+            std::process::exit(1);
+        });
+    if !status.success() {
+        eprintln!("❌  npm install failed in www/");
         std::process::exit(1);
     }
 }
@@ -563,10 +612,17 @@ fn print_next_steps(name: &str, dest: &Path) {
         r#"
 ✅  Created {name}/
 
+  api/  Rust API
+  app/  Ionic product app (app.example.com in production)
+  www/  Astro marketing site (example.com in production)
+
 Before the API connects, run migrations once:
   cd {dest}/api && cargo run -- migrate up
 
 Starting dev servers now (Ctrl+C to stop)...
+  www  → http://localhost:4321
+  app  → http://localhost:4200
+  api  → http://localhost:3000
 "#,
         dest = dest.display(),
     );

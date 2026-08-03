@@ -18,10 +18,11 @@ Consuming apps are **not** this monorepo: `erno new` generates a separate projec
 
 ```
   erno CLI  ──scaffolds / deploys──►  your project
-                                        ├── api/   (Axum + erno)
-                                        └── app/   (Ionic + erno-angular)
+                                        ├── api/   (Axum + erno)           → api.product.com
+                                        ├── app/   (Ionic + erno-angular)  → app.product.com
+                                        └── www/   (Astro static landing)  → product.com
                                               │
-                                              │  HTTPS + WebSocket
+                    app ── HTTPS + WebSocket ─┘
                                               ▼
                                            Erno API
                                               │
@@ -29,6 +30,8 @@ Consuming apps are **not** this monorepo: `erno new` generates a separate projec
                          ▼                    ▼                    ▼
                    PostgreSQL          S3 or local disk     SMTP or mock mail
 ```
+
+Marketing (`www/`) is a separate static site for SEO. It does not talk to the API directly; CTAs send users to the product app host for auth and the rest of the product.
 
 ## Boot path (API)
 

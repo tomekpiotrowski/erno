@@ -1,0 +1,98 @@
+---
+import Layout from '../layouts/Layout.astro';
+import '../styles/global.css';
+
+const productName = '{{name}}';
+// PUBLIC_APP_URL is set at build time in production Docker images to the
+// placeholder __APP_URL__, then rewritten at container start from APP_URL.
+// Locally, default to the Ionic/Angular dev server.
+const appUrl = import.meta.env.PUBLIC_APP_URL || 'http://localhost:4200';
+const loginUrl = `${appUrl}/login`;
+const registerUrl = `${appUrl}/register`;
+const title = `${productName} — Get started`;
+const description = `${productName} helps you ship faster. Sign up free and start building.`;
+---
+
+<Layout title={title} description={description}>
+  <header class="site-header">
+    <div class="container inner">
+      <a class="logo" href="/">{productName}</a>
+      <nav class="nav" aria-label="Primary">
+        <a class="btn btn-ghost" href={loginUrl}>Sign in</a>
+        <a class="btn btn-primary" href={registerUrl}>Get started</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container hero-grid">
+        <div>
+          <span class="eyebrow">Welcome</span>
+          <h1>Ship your product without rebuilding the boring parts.</h1>
+          <p class="lead">
+            {productName} is ready for auth, accounts, and the rest of your SaaS stack.
+            This marketing site is static for SEO — the product app lives on a separate host.
+          </p>
+          <div class="cta-row">
+            <a class="btn btn-primary" href={registerUrl}>Create your account</a>
+            <a class="btn btn-ghost" href={loginUrl}>I already have an account</a>
+          </div>
+        </div>
+
+        <aside class="panel" aria-label="Highlights">
+          <ul>
+            <li>
+              <span class="check" aria-hidden="true">✓</span>
+              <div>
+                <strong>SEO-friendly landing</strong>
+                <div>Static HTML from Astro — fast first paint and crawlable content.</div>
+              </div>
+            </li>
+            <li>
+              <span class="check" aria-hidden="true">✓</span>
+              <div>
+                <strong>Product on app.*</strong>
+                <div>Authenticated Ionic app is separate from this public site.</div>
+              </div>
+            </li>
+            <li>
+              <span class="check" aria-hidden="true">✓</span>
+              <div>
+                <strong>API on api.*</strong>
+                <div>Rust backend stays independent of marketing deploys.</div>
+              </div>
+            </li>
+          </ul>
+        </aside>
+      </div>
+    </section>
+
+    <section class="features" id="features">
+      <div class="container feature-grid">
+        <article class="card">
+          <h2>Accounts built in</h2>
+          <p>Registration, login, email verification, and password reset out of the box.</p>
+        </article>
+        <article class="card">
+          <h2>Fast to customize</h2>
+          <p>Edit this Astro page for your brand. Ship marketing changes without touching the app.</p>
+        </article>
+        <article class="card">
+          <h2>Production-ready shape</h2>
+          <p>
+            Default hosts: <code>example.com</code>, <code>app.example.com</code>, and
+            <code>api.example.com</code>.
+          </p>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container inner">
+      <span>© {new Date().getFullYear()} {productName}</span>
+      <a href={loginUrl}>Sign in</a>
+    </div>
+  </footer>
+</Layout>

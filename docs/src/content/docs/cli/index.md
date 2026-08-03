@@ -105,24 +105,31 @@ Scaffolds a new full-stack project under `./<name>/`:
 │       ├── main.rs
 │       └── migrations/
 │           └── mod.rs          # extends erno_migrations()
-└── app/                        # Ionic/Angular/Capacitor frontend
-    ├── package.json            # depends on erno-angular
-    ├── angular.json
-    ├── capacitor.config.ts     # Capacitor bundle ID and web dir
-    └── src/
-        ├── global.scss         # Ionic global styles
-        ├── theme/
-        │   └── variables.scss  # Ionic CSS custom properties
-        └── app/
-            ├── app.module.ts   # IonicModule + ErnoModule.forRoot() wired up
-            ├── app-routing.module.ts
-            ├── app.component.ts
-            ├── app.component.html
-            ├── auth/           # login, register, forgot/reset password, verify email
-            └── home/           # authenticated home page
+├── app/                        # Ionic/Angular/Capacitor product app
+│   ├── package.json            # depends on erno-angular
+│   ├── angular.json
+│   ├── capacitor.config.ts     # Capacitor bundle ID and web dir
+│   └── src/
+│       └── app/
+│           ├── auth/           # login, register, forgot/reset password, verify email
+│           └── home/           # authenticated home page
+└── www/                        # Astro static marketing site (SEO landing page)
+    ├── package.json
+    ├── astro.config.mjs
+    └── src/pages/index.astro   # public landing → links to app /login and /register
 ```
 
 Also creates the `<name>_development` and `<name>_test` PostgreSQL databases using the admin credentials from `~/.erno/config.toml`.
+
+### Local URLs
+
+| Surface | Dev | Production (default hosts) |
+|---------|-----|----------------------------|
+| Marketing (`www/`) | http://localhost:4321 | `example.com` |
+| Product app (`app/`) | http://localhost:4200 | `app.example.com` |
+| API (`api/`) | http://localhost:3000 | `api.example.com` |
+
+`erno new` starts `erno dev` automatically (API + app + www). Landing page CTAs point at the app origin (`PUBLIC_APP_URL`, default `http://localhost:4200`).
 
 ### Options
 

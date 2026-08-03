@@ -7,6 +7,7 @@ use tokio::sync::Mutex;
 
 const CYAN: &str = "\x1b[36m";
 const GREEN: &str = "\x1b[32m";
+const MAGENTA: &str = "\x1b[35m";
 const RESET: &str = "\x1b[0m";
 
 pub async fn handle_dev(root: Option<std::path::PathBuf>) {
@@ -14,6 +15,7 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>) {
         root.unwrap_or_else(|| std::env::current_dir().expect("cannot read current directory"));
     let api_dir = root.join("api");
     let app_dir = root.join("app");
+    let www_dir = root.join("www");
 
     if !api_dir.is_dir() {
         eprintln!("No api/ directory found. Run `erno dev` from your project root.");
@@ -24,23 +26,11 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>) {
         std::process::exit(1);
     }
 
-    if !app_dir.join("node_modules").exists() {
-        println!("Installing npm dependencies...");
-        let status = std::process::Command::new("npm")
-            .arg("install")
-            .current_dir(&app_dir)
-            .status();
-        match status {
-            Err(e) => {
-                eprintln!("Failed to run npm install: {e}");
-                std::process::exit(1);
-            }
-            Ok(s) if !s.success() => {
-                eprintln!("npm install failed.");
-                std::process::exit(1);
-            }
-            _ => {}
-        }
+    let has_www = www_dir.is_dir() && www_dir.join("package.json").is_file();
+
+    ensure_npm_deps(&app_dir, "app");
+    if has_www {
+        ensure_npm_deps(&www_dir, "www");
     }
 
     let mut api_cmd = if has_cargo_watch() {
@@ -89,23 +79,95 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>) {
     let api_child = Arc::new(Mutex::new(api_child));
     let app_child = Arc::new(Mutex::new(app_child));
 
+    let www_child = if has_www {
+        let mut www_cmd = Command::new("npm");
+        www_cmd.args(["run", "dev"]);
+        #[cfg(unix)]
+        www_cmd.process_group(0);
+
+        let mut child = www_cmd
+            .current_dir(&www_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("failed to spawn `npm run dev` in www/");
+
+        let www_stdout = BufReader::new(child.stdout.take().unwrap());
+        let www_stderr = BufReader::new(child.stderr.take().unwrap());
+        spawn_printer(www_stdout, MAGENTA, "www");
+        spawn_printer(www_stderr, MAGENTA, "www");
+        Some(Arc::new(Mutex::new(child)))
+    } else {
+        None
+    };
+
     let api_handle = api_child.clone();
     let app_handle = app_child.clone();
+    let www_handle = www_child.clone();
 
-    tokio::select! {
-        _ = wait_child(api_child.clone()) => {
-            eprintln!("\n{CYAN}[api]{RESET} process exited — shutting down.");
-            kill_child(&app_handle).await;
+    if let Some(www) = www_child {
+        tokio::select! {
+            _ = wait_child(api_child.clone()) => {
+                eprintln!("\n{CYAN}[api]{RESET} process exited — shutting down.");
+                kill_child(&app_handle).await;
+                kill_child(&www).await;
+            }
+            _ = wait_child(app_child.clone()) => {
+                eprintln!("\n{GREEN}[app]{RESET} process exited — shutting down.");
+                kill_child(&api_handle).await;
+                kill_child(&www).await;
+            }
+            _ = wait_child(www.clone()) => {
+                eprintln!("\n{MAGENTA}[www]{RESET} process exited — shutting down.");
+                kill_child(&api_handle).await;
+                kill_child(&app_handle).await;
+            }
+            _ = tokio::signal::ctrl_c() => {
+                eprintln!("\nShutting down...");
+                kill_child(&api_handle).await;
+                kill_child(&app_handle).await;
+                kill_child(&www).await;
+            }
         }
-        _ = wait_child(app_child.clone()) => {
-            eprintln!("\n{GREEN}[app]{RESET} process exited — shutting down.");
-            kill_child(&api_handle).await;
+    } else {
+        let _ = www_handle;
+        tokio::select! {
+            _ = wait_child(api_child.clone()) => {
+                eprintln!("\n{CYAN}[api]{RESET} process exited — shutting down.");
+                kill_child(&app_handle).await;
+            }
+            _ = wait_child(app_child.clone()) => {
+                eprintln!("\n{GREEN}[app]{RESET} process exited — shutting down.");
+                kill_child(&api_handle).await;
+            }
+            _ = tokio::signal::ctrl_c() => {
+                eprintln!("\nShutting down...");
+                kill_child(&api_handle).await;
+                kill_child(&app_handle).await;
+            }
         }
-        _ = tokio::signal::ctrl_c() => {
-            eprintln!("\nShutting down...");
-            kill_child(&api_handle).await;
-            kill_child(&app_handle).await;
+    }
+}
+
+fn ensure_npm_deps(dir: &std::path::Path, label: &str) {
+    if dir.join("node_modules").exists() {
+        return;
+    }
+    println!("Installing {label} npm dependencies...");
+    let status = std::process::Command::new("npm")
+        .arg("install")
+        .current_dir(dir)
+        .status();
+    match status {
+        Err(e) => {
+            eprintln!("Failed to run npm install in {label}/: {e}");
+            std::process::exit(1);
         }
+        Ok(s) if !s.success() => {
+            eprintln!("npm install failed in {label}/.");
+            std::process::exit(1);
+        }
+        _ => {}
     }
 }
 

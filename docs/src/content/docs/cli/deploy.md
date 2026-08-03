@@ -7,7 +7,17 @@ sidebar:
 
 `erno deploy` scaffolds production packaging for a full-stack Erno project (Dockerfiles, Helm chart, GitHub Actions build, SOPS-encrypted secrets) and installs a chart version onto a Kubernetes cluster.
 
-Run all commands from the **project root** (the directory that contains `api/` and `app/`).
+Run all commands from the **project root** (the directory that contains `api/`, `app/`, and `www/`).
+
+### Host layout
+
+| Host (defaults in secrets) | Serves |
+|----------------------------|--------|
+| `example.com` | Marketing site (`www/` — Astro static) |
+| `app.example.com` | Product SPA (`app/` — Ionic) |
+| `api.example.com` | API (`api/` — Axum) |
+
+Landing CTAs use `www.app_url` (e.g. `https://app.example.com`) so Sign in / Get started open the product app.
 
 ## deploy init
 
@@ -28,14 +38,17 @@ Interactive setup that:
 | Path | Purpose |
 |------|---------|
 | `api/Dockerfile` | Multi-stage build for the Rust API |
-| `app/Dockerfile` | Frontend build + nginx |
+| `app/Dockerfile` | Product SPA build + nginx |
 | `app/docker/nginx.conf` | SPA static serving |
-| `app/docker/entrypoint.sh` | Container entrypoint |
+| `app/docker/entrypoint.sh` | Injects runtime `API_URL` into the SPA |
+| `www/Dockerfile` | Marketing site build + nginx |
+| `www/docker/nginx.conf` | Static site serving |
+| `www/docker/entrypoint.sh` | Injects runtime `APP_URL` into landing links |
 | `chart/Chart.yaml` | Helm chart metadata |
 | `chart/values.yaml` | Default values |
-| `chart/secrets.example.yaml` | Secret placeholders (admin hash, DB, Stripe, …) |
+| `chart/secrets.example.yaml` | Secret placeholders (admin hash, DB, hosts, …) |
 | `chart/deploy.toml` | Maps environment name → kubectl context |
-| `chart/templates/*` | API/app Deployments, Services, Ingress, cert-manager issuer, registry secret |
+| `chart/templates/*` | API/app/www Deployments, Services, Ingress, cert-manager issuer, registry secret |
 | `.github/workflows/build.yaml` | Build and publish images/chart |
 | `api/config/production.toml` | Created if missing (or warned if still full of `CHANGE_ME`) |
 | `chart/.sops.yaml` | Age public key rules (when `age-keygen` is available) |

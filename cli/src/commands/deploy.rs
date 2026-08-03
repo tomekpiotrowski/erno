@@ -12,6 +12,12 @@ const TEMPLATE_APP_NGINX_CONF: &str =
     include_str!("../../templates/deploy/app/docker/nginx.conf");
 const TEMPLATE_APP_ENTRYPOINT: &str =
     include_str!("../../templates/deploy/app/docker/entrypoint.sh");
+const TEMPLATE_WWW_DOCKERFILE: &str =
+    include_str!("../../templates/deploy/www/Dockerfile");
+const TEMPLATE_WWW_NGINX_CONF: &str =
+    include_str!("../../templates/deploy/www/docker/nginx.conf");
+const TEMPLATE_WWW_ENTRYPOINT: &str =
+    include_str!("../../templates/deploy/www/docker/entrypoint.sh");
 const TEMPLATE_CHART_YAML: &str =
     include_str!("../../templates/deploy/chart/Chart.yaml");
 const TEMPLATE_VALUES_YAML: &str =
@@ -30,6 +36,10 @@ const TEMPLATE_APP_DEPLOYMENT: &str =
     include_str!("../../templates/deploy/chart/templates/app.yaml");
 const TEMPLATE_APP_SERVICE: &str =
     include_str!("../../templates/deploy/chart/templates/app_service.yaml");
+const TEMPLATE_WWW_DEPLOYMENT: &str =
+    include_str!("../../templates/deploy/chart/templates/www.yaml");
+const TEMPLATE_WWW_SERVICE: &str =
+    include_str!("../../templates/deploy/chart/templates/www_service.yaml");
 const TEMPLATE_INGRESS: &str =
     include_str!("../../templates/deploy/chart/templates/ingress.yaml");
 const TEMPLATE_LETSENCRYPT_ISSUER: &str =
@@ -63,6 +73,9 @@ pub async fn handle_deploy_init() {
     write_file("app/Dockerfile", render(TEMPLATE_APP_DOCKERFILE, vars));
     write_file("app/docker/nginx.conf", render(TEMPLATE_APP_NGINX_CONF, vars));
     write_file("app/docker/entrypoint.sh", render(TEMPLATE_APP_ENTRYPOINT, vars));
+    write_file("www/Dockerfile", render(TEMPLATE_WWW_DOCKERFILE, vars));
+    write_file("www/docker/nginx.conf", render(TEMPLATE_WWW_NGINX_CONF, vars));
+    write_file("www/docker/entrypoint.sh", render(TEMPLATE_WWW_ENTRYPOINT, vars));
     write_file("chart/Chart.yaml", render(TEMPLATE_CHART_YAML, vars));
     write_file("chart/values.yaml", render(TEMPLATE_VALUES_YAML, vars));
     write_file("chart/secrets.example.yaml", render(TEMPLATE_SECRETS_EXAMPLE, vars));
@@ -72,6 +85,8 @@ pub async fn handle_deploy_init() {
     write_file("chart/templates/api_service.yaml", render(TEMPLATE_API_SERVICE, vars));
     write_file("chart/templates/app.yaml", render(TEMPLATE_APP_DEPLOYMENT, vars));
     write_file("chart/templates/app_service.yaml", render(TEMPLATE_APP_SERVICE, vars));
+    write_file("chart/templates/www.yaml", render(TEMPLATE_WWW_DEPLOYMENT, vars));
+    write_file("chart/templates/www_service.yaml", render(TEMPLATE_WWW_SERVICE, vars));
     write_file("chart/templates/ingress.yaml", render(TEMPLATE_INGRESS, vars));
     write_file("chart/templates/letsencrypt_issuer.yaml", render(TEMPLATE_LETSENCRYPT_ISSUER, vars));
     write_file("chart/templates/registry_secret.yaml", render(TEMPLATE_REGISTRY_SECRET, vars));
@@ -177,6 +192,11 @@ fn validate_project_root() {
         eprintln!("❌  Not an erno project root.");
         eprintln!("    Run this command from the directory that contains api/ and app/.");
         std::process::exit(1);
+    }
+    if !Path::new("www/package.json").exists() {
+        eprintln!("⚠️   No www/ marketing site found.");
+        eprintln!("    Newer scaffolds include www/ (Astro). Deploy will still generate www Docker/Helm files.");
+        eprintln!("    Add a www/ package or remove those units from the chart if unused.\n");
     }
 }
 
@@ -476,8 +496,11 @@ fn print_next_steps(name: &str, github_repo: &str) {
     println!("  4. Deploy:");
     println!("     erno deploy install v0.1.0");
     println!();
-    println!("  5. Point your DNS CNAME records to the ingress-nginx LoadBalancer IP:");
+    println!("  5. Point DNS at the ingress-nginx LoadBalancer IP:");
     println!("     kubectl get svc -n ingress-nginx ingress-nginx-controller");
+    println!("     example.com          → www (marketing)");
+    println!("     app.example.com      → app (product SPA)");
+    println!("     api.example.com      → api");
     println!();
     println!("  GitHub repo: https://github.com/{github_repo}");
     let _ = name;

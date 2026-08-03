@@ -3,7 +3,7 @@ title: Getting started
 description: Create a full-stack Erno project and run it locally
 ---
 
-The fastest path to a working Erno app is the CLI: it scaffolds a Rust API, an Ionic/Angular frontend, databases, and framework migrations in one command.
+The fastest path to a working Erno app is the CLI: it scaffolds a Rust API, an Ionic/Angular product app, an Astro marketing site, databases, and framework migrations in one command.
 
 ## Prerequisites
 
@@ -49,10 +49,19 @@ This creates:
 ```
 my_app/
 ├── api/     # Rust backend (erno library)
-└── app/     # Ionic / Angular / Capacitor frontend (erno-angular)
+├── app/     # Ionic / Angular / Capacitor product app (erno-angular)
+└── www/     # Astro static marketing / landing page
 ```
 
 It also creates `my_app_development` and `my_app_test` databases.
+
+`erno new` starts all three dev servers via `erno dev`:
+
+| Surface | URL |
+|---------|-----|
+| Marketing | http://localhost:4321 |
+| Product app | http://localhost:4200 |
+| API | http://localhost:3000 |
 
 When developing against a local erno checkout:
 
@@ -85,15 +94,27 @@ Built-in app commands (`cargo run --` from `api/`):
 | `generate-jwt-secret` | Print a random secret for `[auth].secret` |
 | `version` | Show version and build info |
 
-## 5. Run the app
+## 5. Run everything
+
+From the project root (after migrations):
 
 ```sh
-cd app
-npm install
-ionic serve
+erno dev
 ```
 
-The scaffold wires `ErnoModule.forRoot()` with login, register, password reset, and email verification screens. See [App overview](/app/) for service setup.
+Or start pieces separately:
+
+```sh
+# Product app
+cd app && npm install && npm start
+
+# Marketing site
+cd www && npm install && npm run dev
+```
+
+The app scaffold wires `ErnoModule.forRoot()` with login, register, password reset, and email verification screens. See [App overview](/app/) for service setup.
+
+The `www/` site is a static Astro landing page (SEO-friendly). CTAs link to the product app (`/login`, `/register`). In production those hosts are typically `example.com` (www) and `app.example.com` (app) — see [Deploy](/cli/deploy/).
 
 ## What you get
 

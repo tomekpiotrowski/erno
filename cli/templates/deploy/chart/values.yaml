@@ -7,3 +7,6 @@ api:
 
 app:
   replicas: 1
+
+www:
+  replicas: 1
