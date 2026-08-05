@@ -85,24 +85,20 @@ Hard `DELETE` notifies live sockets but offline clients never see the removal on
 ## 5. Client: register and start
 
 ```typescript
-import { ErnoSyncService, ErnoDatabaseService } from 'erno-angular';
+import { ErnoSyncService } from 'erno-angular';
 
-constructor(
-  private sync: ErnoSyncService,
-  private db: ErnoDatabaseService,
-) {}
+// App-owned Dexie store for domain rows (ErnoDatabaseService only holds
+// sync cursors + pending mutations).
+constructor(private sync: ErnoSyncService, private todosDb: TodosDatabase) {}
 
 async ngOnInit() {
-  this.sync.register('todos', async item => {
+  // deltaPath must match the route you mounted with sync_delta / sync_delta_shared.
+  this.sync.register('todos', '/api/todos/sync', async item => {
     if (item.deleted) {
-      await this.db.table('todos').delete(item.id);
+      await this.todosDb.todos.delete(item.id);
       return;
     }
-    await this.db.table('todos').put({
-      id: item.id,
-      ...(item.data as object),
-      sync_seq: item.sync_seq,
-    });
+    await this.todosDb.todos.put(item.data as TodoRow);
   });
 
   await this.sync.start();

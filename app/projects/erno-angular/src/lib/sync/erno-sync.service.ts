@@ -1,6 +1,6 @@
 import { Inject, Injectable, OnDestroy } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, Subscription } from 'rxjs';
+import { BehaviorSubject, Subscription, firstValueFrom } from 'rxjs';
 import { ERNO_CONFIG, ErnoConfig } from '../erno.config';
 import { ErnoDatabaseService } from './erno-database.service';
 import { ErnoRealtimeService, SyncPushEvent } from '../realtime/erno-realtime.service';
@@ -8,20 +8,51 @@ import { ErnoAppStateService } from '../app-state/erno-app-state.service';
 
 export type SyncStatus = 'idle' | 'syncing' | 'synced' | 'offline' | 'error';
 
+/**
+ * Normalized change applied to the local store.
+ *
+ * Delta pulls map each server row into this shape (`deleted` is true when
+ * `deleted_at` is set). Realtime push events already look like this.
+ */
 export interface SyncDeltaItem {
   entity: string;
   id: string;
   sync_seq: number;
   deleted: boolean;
+  /** Full row from delta pull, or the push snapshot when available. */
   data: unknown;
 }
 
+/** Server response from `GET {deltaPath}?since=N` (see erno sync_delta). */
+export interface SyncDeltaResponse {
+  items: Array<
+    Record<string, unknown> & {
+      id: string;
+      sync_seq: number;
+      deleted_at?: string | null;
+    }
+  >;
+  next_since: number;
+}
+
+interface EntityRegistration {
+  /** Path relative to baseUrl, e.g. `/api/sessions/sync`. */
+  deltaPath: string;
+  handler: (item: SyncDeltaItem) => Promise<void>;
+}
+
+/**
+ * Pulls per-entity deltas and applies realtime push events.
+ *
+ * Apps register each syncable entity with its delta endpoint (mounted via
+ * `sync_delta` / `sync_delta_shared` on the API), then call `start()` once.
+ */
 @Injectable()
 export class ErnoSyncService implements OnDestroy {
   private _status = new BehaviorSubject<SyncStatus>('idle');
   readonly status$ = this._status.asObservable();
 
-  private entityHandlers = new Map<string, (item: SyncDeltaItem) => Promise<void>>();
+  private entityHandlers = new Map<string, EntityRegistration>();
   private started = false;
   private pullInFlight: Promise<void> | null = null;
   private subscriptions = new Subscription();
@@ -42,8 +73,19 @@ export class ErnoSyncService implements OnDestroy {
     );
   }
 
-  register<T>(entity: string, handler: (item: SyncDeltaItem) => Promise<void>): void {
-    this.entityHandlers.set(entity, handler);
+  /**
+   * Register a handler for one syncable entity.
+   *
+   * @param entity Entity type string (must match `Syncable::entity_type()` / table name).
+   * @param deltaPath Absolute path under the API host, e.g. `/api/sessions/sync`.
+   * @param handler Applies one change to the app's local store.
+   */
+  register(
+    entity: string,
+    deltaPath: string,
+    handler: (item: SyncDeltaItem) => Promise<void>,
+  ): void {
+    this.entityHandlers.set(entity, { deltaPath, handler });
   }
 
   async start(): Promise<void> {
@@ -69,19 +111,24 @@ export class ErnoSyncService implements OnDestroy {
   private async doPullDelta(): Promise<void> {
     this._status.next('syncing');
     try {
-      for (const [entity, handler] of this.entityHandlers) {
+      for (const [entity, reg] of this.entityHandlers) {
         const since = await this.db.getLastSyncSeq(entity);
-        const items = await this.http
-          .get<SyncDeltaItem[]>(`${this.config.baseUrl}/api/sync/delta`, { params: { entity, since } })
-          .toPromise();
+        const response = await firstValueFrom(
+          this.http.get<SyncDeltaResponse>(`${this.config.baseUrl}${reg.deltaPath}`, {
+            params: { since },
+          }),
+        );
 
-        if (!items?.length) continue;
-
-        for (const item of items) {
-          await handler(item);
+        for (const row of response.items) {
+          await reg.handler({
+            entity,
+            id: row.id,
+            sync_seq: row.sync_seq,
+            deleted: row.deleted_at != null && row.deleted_at !== undefined,
+            data: row,
+          });
         }
-        const maxSeq = Math.max(...items.map(i => i.sync_seq));
-        await this.db.setLastSyncSeq(entity, maxSeq);
+        await this.db.setLastSyncSeq(entity, response.next_since);
       }
       this._status.next('synced');
     } catch {
@@ -90,9 +137,15 @@ export class ErnoSyncService implements OnDestroy {
   }
 
   private async applyPush(event: SyncPushEvent): Promise<void> {
-    const handler = this.entityHandlers.get(event.entity);
-    if (!handler) return;
-    await handler({ ...event, data: null });
+    const reg = this.entityHandlers.get(event.entity);
+    if (!reg) return;
+    await reg.handler({
+      entity: event.entity,
+      id: event.id,
+      sync_seq: event.sync_seq,
+      deleted: event.deleted,
+      data: event.data,
+    });
     await this.db.setLastSyncSeq(event.entity, event.sync_seq);
   }
 }

@@ -8,7 +8,10 @@ use tracing::debug;
 use crate::config::DatabaseConfig;
 
 pub mod migrations;
-pub(crate) mod models;
+/// SeaORM models for Erno-owned tables (users, jobs, sync queue, …).
+///
+/// Apps implementing `FromUser` need `user::Model` from here.
+pub mod models;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum DatabaseSetupStatus {

@@ -17,7 +17,8 @@ import { ErnoSyncService } from 'erno-angular';
 constructor(private sync: ErnoSyncService) {}
 
 async ngOnInit() {
-  this.sync.register('todo', async item => {
+  // Path is the app-mounted sync_delta route (under /api after Erno nests the app router).
+  this.sync.register('todos', '/api/todos/sync', async item => {
     // item: { entity, id, sync_seq, deleted, data }
     await this.applyToLocalStore(item);
   });
@@ -29,9 +30,9 @@ async ngOnInit() {
 
 | Member | Description |
 |--------|-------------|
-| `register(entity, handler)` | Registers a handler that applies delta/push items for an entity. Call before `start()`. |
+| `register(entity, deltaPath, handler)` | Registers a handler for one entity. `deltaPath` is the absolute path of the delta endpoint (e.g. `/api/todos/sync`). Call before `start()`. |
 | `start()` | Connects realtime, subscribes to push events, and runs the initial pull. Idempotent — calling it more than once is a no-op. |
-| `pullDelta()` | Fetches and applies the delta for every registered entity. Concurrent calls share a single in-flight request. |
+| `pullDelta()` | Fetches and applies the delta for every registered entity (`GET {deltaPath}?since=N` → `{ items, next_since }`). Concurrent calls share a single in-flight request. |
 | `status$` | Observable of sync status: `idle` \| `syncing` \| `synced` \| `offline` \| `error`. |
 
 ## Background and foreground
