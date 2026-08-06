@@ -4,6 +4,7 @@ import { webSocket, WebSocketSubject } from 'rxjs/webSocket';
 import { ERNO_CONFIG, ErnoConfig } from '../erno.config';
 import { ErnoAuthService } from '../auth/erno-auth.service';
 import { ErnoAppState, ErnoAppStateService } from '../app-state/erno-app-state.service';
+import { ErnoNetworkService } from '../network/erno-network.service';
 
 /** A sync change event, mapped from the backend's application broadcasts. */
 export interface SyncPushEvent {
@@ -58,15 +59,26 @@ export class ErnoRealtimeService implements OnDestroy {
   /** Whether the consumer wants a connection (set by connect/disconnect). */
   private shouldBeConnected = false;
   /** Whether the connection is paused because the app is backgrounded. */
-  private suspended = false;
-  private appStateSub: Subscription;
+  private backgroundSuspended = false;
+  /** Whether the connection is paused because the device is offline. */
+  private offlineSuspended = false;
+  private lifecycleSubs = new Subscription();
 
   constructor(
     @Inject(ERNO_CONFIG) private config: ErnoConfig,
     private auth: ErnoAuthService,
     private appState: ErnoAppStateService,
+    private network: ErnoNetworkService,
   ) {
-    this.appStateSub = this.appState.state$.subscribe(state => this.onAppStateChange(state));
+    this.backgroundSuspended = this.appState.state === 'background';
+    this.offlineSuspended = !this.network.connected;
+    this.lifecycleSubs.add(this.appState.state$.subscribe(state => this.onAppStateChange(state)));
+    this.lifecycleSubs.add(this.network.connected$.subscribe(connected => this.onNetworkChange(connected)));
+  }
+
+  /** True when backgrounded or offline — socket must stay closed. */
+  private get suspended(): boolean {
+    return this.backgroundSuspended || this.offlineSuspended;
   }
 
   /** Sync change events for entities this connection may read. */
@@ -87,8 +99,9 @@ export class ErnoRealtimeService implements OnDestroy {
    */
   connect(): void {
     this.shouldBeConnected = true;
-    if (this.appState.state === 'background') {
-      this.suspended = true;
+    this.backgroundSuspended = this.appState.state === 'background';
+    this.offlineSuspended = !this.network.connected;
+    if (this.suspended) {
       return;
     }
     this.openSocket();
@@ -170,7 +183,7 @@ export class ErnoRealtimeService implements OnDestroy {
 
   ngOnDestroy(): void {
     this.disconnect();
-    this.appStateSub.unsubscribe();
+    this.lifecycleSubs.unsubscribe();
     this.syncEvents$.complete();
     this.shareEventsSubject$.complete();
   }
@@ -215,14 +228,32 @@ export class ErnoRealtimeService implements OnDestroy {
 
   private onAppStateChange(state: ErnoAppState): void {
     if (state === 'background') {
-      this.suspended = true;
+      this.backgroundSuspended = true;
       this.clearReconnectTimer();
       this.teardownSocket();
-    } else if (this.suspended) {
-      this.suspended = false;
-      if (this.shouldBeConnected && !this.socket$) {
-        this.openSocket();
-      }
+      return;
+    }
+    if (!this.backgroundSuspended) return;
+    this.backgroundSuspended = false;
+    this.tryResumeSocket();
+  }
+
+  private onNetworkChange(connected: boolean): void {
+    if (!connected) {
+      this.offlineSuspended = true;
+      this.clearReconnectTimer();
+      this.teardownSocket();
+      return;
+    }
+    if (!this.offlineSuspended) return;
+    this.offlineSuspended = false;
+    this.tryResumeSocket();
+  }
+
+  /** Reopen the socket if the consumer still wants it and nothing suspends it. */
+  private tryResumeSocket(): void {
+    if (this.shouldBeConnected && !this.suspended && !this.socket$) {
+      this.openSocket();
     }
   }
 

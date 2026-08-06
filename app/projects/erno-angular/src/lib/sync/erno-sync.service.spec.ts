@@ -6,6 +6,7 @@ import { ERNO_CONFIG } from '../erno.config';
 import { ErnoDatabaseService } from './erno-database.service';
 import { ErnoRealtimeService, SyncPushEvent } from '../realtime/erno-realtime.service';
 import { ErnoAppStateService } from '../app-state/erno-app-state.service';
+import { ErnoNetworkService } from '../network/erno-network.service';
 import { ErnoSyncService } from './erno-sync.service';
 
 /** Drains the microtask queue so async pull side effects (the HTTP request) run. */
@@ -17,6 +18,7 @@ const DELTA_URL = `http://api${DELTA_PATH}`;
 describe('ErnoSyncService', () => {
   let service: ErnoSyncService;
   let appState: ErnoAppStateService;
+  let network: ErnoNetworkService;
   let http: HttpTestingController;
   let realtimeEvents: Subject<SyncPushEvent>;
   let connectSpy: jasmine.Spy;
@@ -42,17 +44,21 @@ describe('ErnoSyncService', () => {
         { provide: ErnoDatabaseService, useValue: dbStub },
         { provide: ErnoRealtimeService, useValue: realtimeStub },
         ErnoAppStateService,
+        ErnoNetworkService,
         ErnoSyncService,
       ],
     });
     appState = TestBed.inject(ErnoAppStateService);
+    network = TestBed.inject(ErnoNetworkService);
     http = TestBed.inject(HttpTestingController);
     service = TestBed.inject(ErnoSyncService);
   });
 
   afterEach(() => http.verify());
 
-  function registerTodo(handler: () => Promise<void> = () => Promise.resolve()): void {
+  function registerTodo(
+    handler: (item: SyncPushEvent) => Promise<void> = () => Promise.resolve(),
+  ): void {
     service.register('todos', DELTA_PATH, handler);
   }
 
@@ -139,5 +145,32 @@ describe('ErnoSyncService', () => {
 
     expect(applied).toEqual(['a', 'b']);
     expect(dbStub.setLastSyncSeq).toHaveBeenCalledWith('todos', 2);
+  });
+
+  it('skips pull while offline and sets status offline', async () => {
+    registerTodo();
+    network.notifyStatusChange(false);
+
+    await service.pullDelta();
+    await flush();
+
+    http.expectNone(DELTA_URL);
+    let status = '';
+    service.status$.subscribe(s => (status = s));
+    expect(status).toBe('offline');
+  });
+
+  it('pulls a delta when connectivity returns after start()', async () => {
+    registerTodo();
+    const started = service.start();
+    await flush();
+    http.expectOne(r => r.url === DELTA_URL).flush(emptyDelta());
+    await started;
+
+    network.notifyStatusChange(false);
+    network.notifyStatusChange(true);
+    await flush();
+
+    http.expectOne(r => r.url === DELTA_URL).flush(emptyDelta());
   });
 });

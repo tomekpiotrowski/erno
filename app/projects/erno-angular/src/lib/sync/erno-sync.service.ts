@@ -5,6 +5,7 @@ import { ERNO_CONFIG, ErnoConfig } from '../erno.config';
 import { ErnoDatabaseService } from './erno-database.service';
 import { ErnoRealtimeService, SyncPushEvent } from '../realtime/erno-realtime.service';
 import { ErnoAppStateService } from '../app-state/erno-app-state.service';
+import { ErnoNetworkService } from '../network/erno-network.service';
 
 export type SyncStatus = 'idle' | 'syncing' | 'synced' | 'offline' | 'error';
 
@@ -63,12 +64,25 @@ export class ErnoSyncService implements OnDestroy {
     private db: ErnoDatabaseService,
     private realtime: ErnoRealtimeService,
     private appState: ErnoAppStateService,
+    private network: ErnoNetworkService,
   ) {
     // On foreground resume the realtime socket reconnects on its own; pull a
     // delta to catch up on anything missed while the app was backgrounded.
     this.subscriptions.add(
       this.appState.resumed$.subscribe(() => {
         if (this.started) void this.pullDelta();
+      }),
+    );
+    // Same catch-up when the network returns; socket resume is handled by
+    // ErnoRealtimeService.
+    this.subscriptions.add(
+      this.network.online$.subscribe(() => {
+        if (this.started) void this.pullDelta();
+      }),
+    );
+    this.subscriptions.add(
+      this.network.offline$.subscribe(() => {
+        if (this.started) this._status.next('offline');
       }),
     );
   }
@@ -109,6 +123,10 @@ export class ErnoSyncService implements OnDestroy {
   }
 
   private async doPullDelta(): Promise<void> {
+    if (!this.network.connected) {
+      this._status.next('offline');
+      return;
+    }
     this._status.next('syncing');
     try {
       for (const [entity, reg] of this.entityHandlers) {
@@ -132,7 +150,7 @@ export class ErnoSyncService implements OnDestroy {
       }
       this._status.next('synced');
     } catch {
-      this._status.next('error');
+      this._status.next(this.network.connected ? 'error' : 'offline');
     }
   }
 

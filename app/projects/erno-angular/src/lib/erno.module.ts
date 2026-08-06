@@ -18,6 +18,7 @@ import { ErnoDevJobsService } from './devtools/erno-dev-jobs.service';
 import { ErnoAlertsService } from './alerts/erno-alerts.service';
 import { ErnoHttpService } from './http/erno-http.service';
 import { ErnoAppStateService } from './app-state/erno-app-state.service';
+import { ErnoNetworkService } from './network/erno-network.service';
 
 @NgModule({
   imports: [CommonModule, HttpClientModule],
@@ -34,6 +35,7 @@ export class ErnoModule {
         ErnoHttpService,
         ErnoAuthService,
         ErnoAppStateService,
+        ErnoNetworkService,
         ErnoRealtimeService,
         ErnoDatabaseService,
         ErnoSyncService,

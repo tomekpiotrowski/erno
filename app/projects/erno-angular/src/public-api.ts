@@ -6,6 +6,7 @@ export * from './lib/erno.module';
 export * from './lib/erno.config';
 export * from './lib/auth/erno-auth.service';
 export * from './lib/app-state/erno-app-state.service';
+export * from './lib/network/erno-network.service';
 export * from './lib/http/erno-http.interceptor';
 export * from './lib/http/erno-http.service';
 export * from './lib/realtime/erno-realtime.service';

@@ -75,10 +75,16 @@ export class ErnoAppStateService implements OnDestroy {
     const capacitor = (globalThis as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
     if (capacitor?.isNativePlatform?.()) {
       try {
-        // Variable specifier keeps bundlers from statically resolving the
-        // optional `@capacitor/app` dependency when it isn't installed.
+        // Variable specifier + ignore comments keep bundlers from statically
+        // resolving the optional `@capacitor/app` peer when it isn't installed.
+        // `@vite-ignore` is for Vite; `webpackIgnore` silences webpack's
+        // "Critical dependency: the request of a dependency is an expression".
         const specifier = '@capacitor/app';
-        const mod = (await import(/* @vite-ignore */ specifier)) as { App: CapacitorAppPlugin };
+        const mod = (await import(
+          /* @vite-ignore */
+          /* webpackIgnore: true */
+          specifier
+        )) as { App: CapacitorAppPlugin };
         this.capacitorHandle = await mod.App.addListener('appStateChange', ({ isActive }) =>
           this.zone.run(() => this.notifyStateChange(isActive ? 'active' : 'background')),
         );
