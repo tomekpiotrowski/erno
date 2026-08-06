@@ -22,20 +22,27 @@ export interface OauthProvidersResponse {
   providers: OauthProviderName[];
 }
 
+const ACCESS_KEY = 'erno_access_token';
+const REFRESH_KEY = 'erno_refresh_token';
+/** Persists `{ id, email }` so a page reload does not look signed-out. */
+const USER_KEY = 'erno_user';
+
 @Injectable()
 export class ErnoAuthService {
   constructor(
     @Inject(ERNO_CONFIG) private config: ErnoConfig,
     private http: HttpClient,
     private db: ErnoDatabaseService,
-  ) {}
+  ) {
+    this.restoreSession();
+  }
 
   private _currentUser = new BehaviorSubject<AuthUser | null>(null);
   readonly currentUser$ = this._currentUser.asObservable();
   get currentUser(): AuthUser | null { return this._currentUser.value; }
 
-  get accessToken(): string | null { return sessionStorage.getItem('erno_access_token'); }
-  get refreshToken(): string | null { return localStorage.getItem('erno_refresh_token'); }
+  get accessToken(): string | null { return sessionStorage.getItem(ACCESS_KEY); }
+  get refreshToken(): string | null { return localStorage.getItem(REFRESH_KEY); }
 
   login(email: string, password: string): Observable<LoginResponse> {
     return this.http.post<LoginResponse>(`${this.config.baseUrl}/api/auth/login`, { email, password }).pipe(
@@ -124,14 +131,50 @@ export class ErnoAuthService {
   }
 
   private storeSession(res: LoginResponse): void {
-    sessionStorage.setItem('erno_access_token', res.access_token);
-    localStorage.setItem('erno_refresh_token', res.refresh_token);
+    sessionStorage.setItem(ACCESS_KEY, res.access_token);
+    localStorage.setItem(REFRESH_KEY, res.refresh_token);
+    localStorage.setItem(USER_KEY, JSON.stringify(res.user));
     this._currentUser.next(res.user);
   }
 
   private clearSession(): void {
-    sessionStorage.removeItem('erno_access_token');
-    localStorage.removeItem('erno_refresh_token');
+    sessionStorage.removeItem(ACCESS_KEY);
+    localStorage.removeItem(REFRESH_KEY);
+    localStorage.removeItem(USER_KEY);
     this._currentUser.next(null);
+  }
+
+  /**
+   * After a full page load, tokens may still be in storage but `currentUser`
+   * starts null. Rehydrate the user from localStorage; if we still lack a
+   * user or access token, exchange the refresh token for a full session.
+   */
+  private restoreSession(): void {
+    if (!this.refreshToken) {
+      // Leave guest state clean (no partial token crumbs).
+      sessionStorage.removeItem(ACCESS_KEY);
+      localStorage.removeItem(USER_KEY);
+      return;
+    }
+
+    const raw = localStorage.getItem(USER_KEY);
+    if (raw) {
+      try {
+        const user = JSON.parse(raw) as AuthUser;
+        if (user?.id && user?.email) {
+          this._currentUser.next(user);
+        }
+      } catch {
+        localStorage.removeItem(USER_KEY);
+      }
+    }
+
+    // Missing access token (new tab) or user profile (upgrade / cleared key):
+    // refresh re-issues both and repopulates storage.
+    if (!this.accessToken || !this.currentUser) {
+      this.refresh().subscribe({
+        error: () => this.clearSession(),
+      });
+    }
   }
 }
