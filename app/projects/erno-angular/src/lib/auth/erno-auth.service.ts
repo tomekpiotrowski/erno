@@ -16,6 +16,12 @@ export interface LoginResponse {
   user: AuthUser;
 }
 
+export type OauthProviderName = 'google' | 'discord' | 'apple';
+
+export interface OauthProvidersResponse {
+  providers: OauthProviderName[];
+}
+
 @Injectable()
 export class ErnoAuthService {
   constructor(
@@ -47,16 +53,16 @@ export class ErnoAuthService {
     );
   }
 
-  /** Permanently delete the current account and all its data. Requires the
-   * current password, sent in the `X-Confirm-Password` header (some proxies
-   * strip bodies on DELETE). On success, clears the local session and wipes
-   * locally cached sync data (IndexedDB) so nothing remains on the device. */
-  deleteAccount(password: string): Observable<void> {
-    return this.http.delete<void>(`${this.config.baseUrl}/api/account`, {
-      headers: { 'X-Confirm-Password': password },
-    }).pipe(
+  /** Permanently delete the current account and all its data.
+   * Password accounts: pass the current password (`X-Confirm-Password`).
+   * OAuth-only accounts: omit the password. */
+  deleteAccount(password?: string): Observable<void> {
+    const headers: Record<string, string> = {};
+    if (password) {
+      headers['X-Confirm-Password'] = password;
+    }
+    return this.http.delete<void>(`${this.config.baseUrl}/api/account`, { headers }).pipe(
       tap(() => this.clearSession()),
-      // Best-effort local wipe; the account is already gone server-side.
       switchMap(() => from(this.wipeLocalData())),
     );
   }
@@ -81,12 +87,38 @@ export class ErnoAuthService {
     );
   }
 
+  resendVerification(email: string): Observable<void> {
+    return this.http.post<void>(`${this.config.baseUrl}/api/auth/email/resend-verification`, { email });
+  }
+
   requestPasswordReset(email: string): Observable<void> {
     return this.http.post<void>(`${this.config.baseUrl}/api/auth/password-reset/request`, { email });
   }
 
   confirmPasswordReset(token: string, password: string): Observable<LoginResponse> {
     return this.http.post<LoginResponse>(`${this.config.baseUrl}/api/auth/password-reset/confirm`, { token, password }).pipe(
+      tap(res => this.storeSession(res)),
+    );
+  }
+
+  /** Configured OAuth providers (for showing social buttons). */
+  listOauthProviders(): Observable<OauthProvidersResponse> {
+    return this.http.get<OauthProvidersResponse>(`${this.config.baseUrl}/api/auth/oauth/providers`);
+  }
+
+  /** Absolute URL that starts the OAuth redirect for `provider`. */
+  oauthStartUrl(provider: OauthProviderName): string {
+    return `${this.config.baseUrl}/api/auth/oauth/${provider}/start`;
+  }
+
+  /** Navigate the browser to the OAuth provider start endpoint. */
+  beginOauth(provider: OauthProviderName): void {
+    window.location.assign(this.oauthStartUrl(provider));
+  }
+
+  /** Exchange the one-time code from `/oauth/callback?code=` for a session. */
+  exchangeOauthCode(code: string): Observable<LoginResponse> {
+    return this.http.post<LoginResponse>(`${this.config.baseUrl}/api/auth/oauth/exchange`, { code }).pipe(
       tap(res => this.storeSession(res)),
     );
   }

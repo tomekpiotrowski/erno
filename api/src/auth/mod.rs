@@ -2,6 +2,7 @@
 pub mod current_user;
 pub mod handlers;
 pub mod jwt;
+pub mod oauth;
 pub mod prelude;
 pub mod router;
 

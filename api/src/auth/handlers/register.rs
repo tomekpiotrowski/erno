@@ -78,7 +78,7 @@ where
 
     let new_user = user::ActiveModel {
         email: Set(body.email.clone()),
-        password_hash: Set(password_hash),
+        password_hash: Set(Some(password_hash)),
         ..Default::default()
     };
 
@@ -187,7 +187,7 @@ mod tests {
 
         user::ActiveModel {
             email: Set("verified@example.com".to_string()),
-            password_hash: Set(hash_password("password123").unwrap()),
+            password_hash: Set(Some(hash_password("password123").unwrap())),
             email_verified_at: Set(Some(Utc::now().naive_utc())),
             ..Default::default()
         }

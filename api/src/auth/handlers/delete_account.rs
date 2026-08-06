@@ -29,32 +29,35 @@ pub async fn delete_account<ExtraConfig>(
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    let Some(password) = headers
-        .get(CONFIRM_PASSWORD_HEADER)
-        .and_then(|v| v.to_str().ok())
-    else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": format!("Missing {CONFIRM_PASSWORD_HEADER} header")
-            })),
-        )
-            .into_response();
-    };
-
-    // Re-verify identity for this destructive action.
-    match password::verify_password(password, &current_user.user.password_hash) {
-        Ok(true) => {}
-        Ok(false) => {
+    // Password accounts must re-confirm with the current password. OAuth-only
+    // accounts (null password_hash) may delete with a valid access token alone.
+    if let Some(password_hash) = current_user.user.password_hash.as_deref() {
+        let Some(password) = headers
+            .get(CONFIRM_PASSWORD_HEADER)
+            .and_then(|v| v.to_str().ok())
+        else {
             return (
-                StatusCode::FORBIDDEN,
-                Json(serde_json::json!({ "error": "Incorrect password" })),
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": format!("Missing {CONFIRM_PASSWORD_HEADER} header")
+                })),
             )
-                .into_response()
-        }
-        Err(e) => {
-            tracing::error!("Account deletion: password verification failed: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                .into_response();
+        };
+
+        match password::verify_password(password, password_hash) {
+            Ok(true) => {}
+            Ok(false) => {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(serde_json::json!({ "error": "Incorrect password" })),
+                )
+                    .into_response()
+            }
+            Err(e) => {
+                tracing::error!("Account deletion: password verification failed: {e}");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
         }
     }
 
@@ -127,7 +130,7 @@ mod tests {
     ) -> user::Model {
         user::ActiveModel {
             email: Set(email.to_string()),
-            password_hash: Set(hash_password(password).unwrap()),
+            password_hash: Set(Some(hash_password(password).unwrap())),
             email_verified_at: Set(Some(Utc::now().naive_utc())),
             ..Default::default()
         }

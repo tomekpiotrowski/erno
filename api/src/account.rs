@@ -148,7 +148,7 @@ mod tests {
     async fn create_user(db: &sea_orm::DatabaseConnection, email: &str) -> user::Model {
         user::ActiveModel {
             email: Set(email.to_string()),
-            password_hash: Set(hash_password("password123").unwrap()),
+            password_hash: Set(Some(hash_password("password123").unwrap())),
             email_verified_at: Set(Some(Utc::now().naive_utc())),
             ..Default::default()
         }

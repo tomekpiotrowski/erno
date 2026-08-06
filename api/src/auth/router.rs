@@ -1,5 +1,5 @@
 use axum::{
-    routing::{delete, post},
+    routing::{delete, get, post},
     Router,
 };
 
@@ -15,6 +15,7 @@ use super::handlers::{
     resend_verification::resend_verification,
     verify_email::verify_email,
 };
+use super::oauth::{oauth_callback, oauth_exchange, oauth_providers, oauth_start};
 
 /// Returns a router with all auth endpoints mounted under `/auth/`.
 ///
@@ -48,6 +49,16 @@ where
             post(password_reset_confirm::<ExtraConfig>),
         )
         .route("/auth/refresh", post(refresh::<ExtraConfig>))
+        .route("/auth/oauth/providers", get(oauth_providers::<ExtraConfig>))
+        .route(
+            "/auth/oauth/{provider}/start",
+            get(oauth_start::<ExtraConfig>),
+        )
+        .route(
+            "/auth/oauth/{provider}/callback",
+            get(oauth_callback::<ExtraConfig>),
+        )
+        .route("/auth/oauth/exchange", post(oauth_exchange::<ExtraConfig>))
         // Account deletion is mounted at the top level (`/api/account`), not under `/auth`.
         .route("/account", delete(delete_account::<ExtraConfig>))
         .with_state(app)

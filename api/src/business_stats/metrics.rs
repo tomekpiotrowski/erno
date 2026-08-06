@@ -259,7 +259,7 @@ mod tests {
     ) -> user::Model {
         user::ActiveModel {
             email: Set(email.to_string()),
-            password_hash: Set(hash_password("password123").unwrap()),
+            password_hash: Set(Some(hash_password("password123").unwrap())),
             email_verified_at: Set(Some(Utc::now().naive_utc())),
             subscription_type: Set(subscription_type.map(str::to_string)),
             subscription_plan: Set(subscription_plan.map(str::to_string)),

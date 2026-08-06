@@ -122,7 +122,7 @@ mod tests {
 
         let u = user::ActiveModel {
             email: Set("verify_valid@example.com".to_string()),
-            password_hash: Set(hash_password("password123").unwrap()),
+            password_hash: Set(Some(hash_password("password123").unwrap())),
             ..Default::default()
         }
         .insert(&t.db)

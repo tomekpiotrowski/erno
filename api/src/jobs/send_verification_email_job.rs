@@ -56,9 +56,21 @@ impl<ExtraConfig: Clone + Send + Sync + 'static> Job<ExtraConfig>
             app.config.app_url(),
             args.raw_token
         );
-        let body = format!(
+        let fallback = format!(
             "<p>Click <a href=\"{url}\">here</a> to verify your email.</p><p>Or paste: {url}</p>",
             url = verify_url
+        );
+        let mut vars = crate::email_templates::base_vars(
+            &args.email,
+            app.config.app_url(),
+            app.config.auth.one_time_token_expiry_hours,
+        );
+        vars.insert("verify_url", verify_url);
+        let body = crate::email_templates::render_or_fallback(
+            app.config.email_templates_dir.as_deref(),
+            crate::email_templates::EmailTemplate::Verification,
+            &vars,
+            fallback,
         );
 
         send_html_email(app, &args.email, "Verify your email", body)

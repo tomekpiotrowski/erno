@@ -132,7 +132,7 @@ mod tests {
 
         let u = user::ActiveModel {
             email: Set("admin-activate@example.com".to_string()),
-            password_hash: Set(hash_password("password123").unwrap()),
+            password_hash: Set(Some(hash_password("password123").unwrap())),
             email_verified_at: Set(None),
             ..Default::default()
         }

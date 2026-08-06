@@ -111,7 +111,7 @@ mod tests {
 
         let u = user::ActiveModel {
             email: Set("refresh@example.com".to_string()),
-            password_hash: Set(hash_password("password123").unwrap()),
+            password_hash: Set(Some(hash_password("password123").unwrap())),
             email_verified_at: Set(Some(Utc::now().naive_utc())),
             ..Default::default()
         }
@@ -151,7 +151,7 @@ mod tests {
 
         let u = user::ActiveModel {
             email: Set("refresh_replay@example.com".to_string()),
-            password_hash: Set(hash_password("password123").unwrap()),
+            password_hash: Set(Some(hash_password("password123").unwrap())),
             email_verified_at: Set(Some(Utc::now().naive_utc())),
             ..Default::default()
         }

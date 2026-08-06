@@ -6,6 +6,7 @@ pub mod job;
 pub mod job_execution;
 pub mod job_result;
 pub mod job_status;
+pub mod oauth_identity;
 pub mod sync_push_queue;
 pub mod user;
 pub mod user_token;

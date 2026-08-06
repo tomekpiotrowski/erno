@@ -24,12 +24,23 @@ impl<ExtraConfig: Clone + Send + Sync + 'static> Job<ExtraConfig>
 
     async fn execute(app: &App<ExtraConfig>, args: Self::Arguments) -> Result<(), JobError> {
         let login_url = format!("{}/login", app.config.app_url());
-        let body = format!(
+        let fallback = format!(
             "<p>Someone (possibly you) tried to register an account with this email address, \
              but an account already exists.</p>\
              <p>If this was you, <a href=\"{url}\">log in here</a> instead.</p>\
              <p>If this wasn't you, you can safely ignore this email.</p>",
             url = login_url
+        );
+        let vars = crate::email_templates::base_vars(
+            &args.email,
+            app.config.app_url(),
+            app.config.auth.one_time_token_expiry_hours,
+        );
+        let body = crate::email_templates::render_or_fallback(
+            app.config.email_templates_dir.as_deref(),
+            crate::email_templates::EmailTemplate::AlreadyRegistered,
+            &vars,
+            fallback,
         );
 
         send_html_email(

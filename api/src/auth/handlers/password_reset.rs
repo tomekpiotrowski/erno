@@ -123,7 +123,7 @@ where
 
     let user_update = user::ActiveModel {
         id: Set(user_id),
-        password_hash: Set(new_hash),
+        password_hash: Set(Some(new_hash)),
         ..Default::default()
     };
     if user_update.update(&app.db).await.is_err() {
@@ -202,7 +202,7 @@ mod tests {
 
         user::ActiveModel {
             email: Set("reset_request@example.com".to_string()),
-            password_hash: Set(hash_password("old_password").unwrap()),
+            password_hash: Set(Some(hash_password("old_password").unwrap())),
             email_verified_at: Set(Some(Utc::now().naive_utc())),
             ..Default::default()
         }
@@ -228,7 +228,7 @@ mod tests {
 
         let u = user::ActiveModel {
             email: Set("reset_confirm@example.com".to_string()),
-            password_hash: Set(hash_password("old_password").unwrap()),
+            password_hash: Set(Some(hash_password("old_password").unwrap())),
             email_verified_at: Set(Some(Utc::now().naive_utc())),
             ..Default::default()
         }

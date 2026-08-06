@@ -22,6 +22,7 @@ pub mod commands;
 pub mod config;
 pub mod database;
 pub mod dev;
+pub mod email_templates;
 pub mod emails;
 pub mod environment;
 pub mod job_queue;

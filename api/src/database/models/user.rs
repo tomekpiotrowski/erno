@@ -7,7 +7,8 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub email: String,
-    pub password_hash: String,
+    /// Null for OAuth-only accounts that never set a password.
+    pub password_hash: Option<String>,
     pub email_verified_at: Option<NaiveDateTime>,
     pub token_version: i32,
     pub subscription_id: Option<Uuid>,
@@ -23,6 +24,8 @@ pub struct Model {
 pub enum Relation {
     #[sea_orm(has_many = "super::user_token::Entity")]
     UserToken,
+    #[sea_orm(has_many = "super::oauth_identity::Entity")]
+    OauthIdentity,
 }
 
 impl Related<super::user_token::Entity> for Entity {

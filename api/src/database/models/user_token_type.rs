@@ -13,4 +13,7 @@ pub enum UserTokenType {
     PasswordReset,
     #[sea_orm(string_value = "refresh_token")]
     RefreshToken,
+    /// One-time code returned from OAuth callback; exchanged for a JWT pair.
+    #[sea_orm(string_value = "oauth_exchange")]
+    OauthExchange,
 }

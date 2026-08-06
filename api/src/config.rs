@@ -91,6 +91,12 @@ pub struct Config<ExtraConfig = ()> {
     pub jobs: JobsConfig,
     pub server: ServerConfig,
     pub email: EmailConfig,
+    /// Optional directory of branded HTML email templates
+    /// (`verification.html`, `password_reset.html`, `already_registered.html`).
+    /// Placeholders: `{{verify_url}}`, `{{reset_url}}`, `{{login_url}}`,
+    /// `{{email}}`, `{{app_name}}`, `{{expiry_hours}}`.
+    #[serde(default)]
+    pub email_templates_dir: Option<String>,
     /// API server base URL (used for CORS, self-referencing API links).
     pub api_url: String,
     /// Frontend app URL used in email links (verify-email, password-reset, etc.).
@@ -152,6 +158,34 @@ pub struct AuthConfig {
     /// Refresh token TTL in days. Default: 30.
     #[serde(default = "default_refresh_token_days")]
     pub refresh_token_days: u64,
+    /// Social login providers. Absent or incomplete entries are treated as disabled.
+    #[serde(default)]
+    pub oauth: OauthConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OauthConfig {
+    pub google: Option<OauthClientConfig>,
+    pub discord: Option<OauthClientConfig>,
+    pub apple: Option<AppleOauthConfig>,
+}
+
+/// Google / Discord OAuth2 client credentials.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OauthClientConfig {
+    pub client_id: String,
+    pub client_secret: String,
+}
+
+/// Sign in with Apple — Services ID + key used to mint the client secret JWT.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppleOauthConfig {
+    /// Services ID (client_id) for web OAuth.
+    pub client_id: String,
+    pub team_id: String,
+    pub key_id: String,
+    /// Contents of the `.p8` private key (PEM), including headers.
+    pub private_key_pem: String,
 }
 
 const fn default_access_token_minutes() -> u64 {

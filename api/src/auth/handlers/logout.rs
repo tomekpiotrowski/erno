@@ -86,7 +86,7 @@ mod tests {
 
         let u = user::ActiveModel {
             email: Set("logout@example.com".to_string()),
-            password_hash: Set(hash_password("password123").unwrap()),
+            password_hash: Set(Some(hash_password("password123").unwrap())),
             email_verified_at: Set(Some(Utc::now().naive_utc())),
             ..Default::default()
         }
@@ -117,7 +117,7 @@ mod tests {
 
         let u = user::ActiveModel {
             email: Set("logout_refresh@example.com".to_string()),
-            password_hash: Set(hash_password("password123").unwrap()),
+            password_hash: Set(Some(hash_password("password123").unwrap())),
             email_verified_at: Set(Some(Utc::now().naive_utc())),
             ..Default::default()
         }
@@ -167,7 +167,7 @@ mod tests {
 
         let u = user::ActiveModel {
             email: Set("reset_invalidates@example.com".to_string()),
-            password_hash: Set(hash_password("old_password").unwrap()),
+            password_hash: Set(Some(hash_password("old_password").unwrap())),
             email_verified_at: Set(Some(Utc::now().naive_utc())),
             ..Default::default()
         }

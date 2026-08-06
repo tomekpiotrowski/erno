@@ -19,6 +19,7 @@ mod m20260608_000001_create_shares;
 mod m20260608_000002_create_share_grants;
 mod m20260727_030000_create_stat_snapshot;
 mod m20260727_031500_add_last_active_at_to_users;
+mod m20260806_120000_oauth_and_nullable_password;
 
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
@@ -43,6 +44,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260608_000002_create_share_grants::Migration),
             Box::new(m20260727_030000_create_stat_snapshot::Migration),
             Box::new(m20260727_031500_add_last_active_at_to_users::Migration),
+            Box::new(m20260806_120000_oauth_and_nullable_password::Migration),
         ]
     }
 }

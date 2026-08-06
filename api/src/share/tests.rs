@@ -231,7 +231,7 @@ async fn setup() -> TestUtils {
 async fn create_user(db: &sea_orm::DatabaseConnection, label: &str) -> user::Model {
     user::ActiveModel {
         email: Set(format!("{label}-{}@example.com", Uuid::new_v4())),
-        password_hash: Set(hash_password("password123").unwrap()),
+        password_hash: Set(Some(hash_password("password123").unwrap())),
         email_verified_at: Set(Some(Utc::now().naive_utc())),
         ..Default::default()
     }

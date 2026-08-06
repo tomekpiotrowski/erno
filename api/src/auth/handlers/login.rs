@@ -39,7 +39,16 @@ where
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
-    match verify_password(&body.password, &user.password_hash) {
+    let Some(password_hash) = user.password_hash.as_deref() else {
+        // OAuth-only account — same response as wrong password (no enumeration).
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": "invalid_credentials" })),
+        )
+            .into_response();
+    };
+
+    match verify_password(&body.password, password_hash) {
         Ok(true) => {}
         Ok(false) => {
             return (
@@ -94,7 +103,7 @@ mod tests {
         let t = setup_test::<Migrator>(test_router, no_fixtures).await;
         user::ActiveModel {
             email: Set("verified@example.com".to_string()),
-            password_hash: Set(hash_password("password123").unwrap()),
+            password_hash: Set(Some(hash_password("password123").unwrap())),
             email_verified_at: Set(Some(chrono::Utc::now().naive_utc())),
             ..Default::default()
         }
@@ -118,7 +127,7 @@ mod tests {
         let t = setup_test::<Migrator>(test_router, no_fixtures).await;
         user::ActiveModel {
             email: Set("verified2@example.com".to_string()),
-            password_hash: Set(hash_password("password123").unwrap()),
+            password_hash: Set(Some(hash_password("password123").unwrap())),
             email_verified_at: Set(Some(chrono::Utc::now().naive_utc())),
             ..Default::default()
         }
