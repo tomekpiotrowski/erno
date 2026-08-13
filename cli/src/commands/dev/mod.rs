@@ -1,4 +1,5 @@
 mod banner;
+mod preflight;
 mod process;
 mod project;
 
@@ -31,6 +32,8 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>) {
     }
 
     let has_www = www_dir.is_dir() && www_dir.join("package.json").is_file();
+
+    preflight::run_preflight(has_www);
 
     ensure_npm_deps(&app_dir, "app");
     if has_www {

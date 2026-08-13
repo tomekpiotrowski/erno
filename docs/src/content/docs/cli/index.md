@@ -46,6 +46,8 @@ Starts the project’s dev servers (`api/` + `app/`, plus `www/` when present). 
 
 The banner reprints whenever a service changes state (`starting` → `ready`). Ctrl+C stops every child.
 
+Before spawning anything, `erno dev` checks that PostgreSQL is running and that ports 3000, 4200, and 4321 are free. If a port is held by a leftover `cargo`/`node`/`erno` process, it offers to kill it.
+
 ---
 
 ## admin
