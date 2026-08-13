@@ -2,6 +2,7 @@ mod banner;
 mod lock;
 mod log;
 mod mail;
+mod open;
 mod ports;
 mod preflight;
 mod process;
@@ -40,6 +41,9 @@ pub struct DevArgs {
     /// Ensure a verified demo user exists (dev@example.com / password)
     #[arg(long)]
     pub seed: bool,
+    /// Open the marketing site (or app, or API) in a browser once it is ready
+    #[arg(long)]
+    pub open: bool,
 }
 
 pub(crate) const CYAN: &str = "\x1b[36m";
@@ -103,6 +107,16 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) {
     }
 
     print_banner(&urls, &starting_snapshot(&urls));
+    if args.open {
+        if let Some(url) = open::url_to_open(
+            urls.www.as_deref(),
+            urls.app.as_deref(),
+            urls.api.as_deref(),
+        ) {
+            open::spawn_opener(url);
+        }
+    }
+
     if let Some(api_url) = urls.api.clone() {
         mail::spawn_mail_watcher(api_url.clone());
         let seed_root = root.clone();

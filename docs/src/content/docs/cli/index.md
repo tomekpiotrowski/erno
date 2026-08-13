@@ -37,6 +37,7 @@ erno dev --api
 erno dev --app --www
 erno dev --no-www
 erno dev --seed
+erno dev --open
 ```
 
 Starts the project’s dev servers (`api/` + `app/`, plus `www/` when present). Walks up from the current directory looking for `api/Cargo.toml`, so you can run it from `api/`, `app/`, or any subdirectory. Child tools are told to keep color and cargo’s progress bar even though their stdout is piped.
@@ -46,6 +47,8 @@ By default only errors and ready events are printed; the full multiplex is writt
 `--api`, `--app`, and `--www` start only the services you name (combine them). `--no-www` skips the marketing site when you want the default API + app pair. `--api` does not require an `app/` directory.
 
 `--seed` inserts a verified demo user (`dev@example.com` / `password`) if it is missing. An empty `users` table is seeded automatically on first run so login works without walking through email verification.
+
+`--open` opens one browser tab once a service is ready, preferring www, then the app, then the API.
 
 `erno dev` prints a status banner with each service URL and probes them until they respond:
 

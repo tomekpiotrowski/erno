@@ -48,6 +48,7 @@ mod tests {
             www,
             no_www,
             seed: false,
+            open: false,
         }
     }
 
