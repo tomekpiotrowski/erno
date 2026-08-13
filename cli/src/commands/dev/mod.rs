@@ -1,5 +1,6 @@
 mod banner;
 mod process;
+mod project;
 
 use std::sync::Arc;
 
@@ -8,6 +9,7 @@ use tokio::sync::Mutex;
 
 use banner::{print_banner, spawn_readiness_watcher, starting_snapshot, DevUrls};
 use process::{kill_child, spawn_labeled, wait_child};
+use project::resolve_project_root;
 
 pub(crate) const CYAN: &str = "\x1b[36m";
 pub(crate) const GREEN: &str = "\x1b[32m";
@@ -17,18 +19,14 @@ pub(crate) const DIM: &str = "\x1b[2m";
 pub(crate) const RESET: &str = "\x1b[0m";
 
 pub async fn handle_dev(root: Option<std::path::PathBuf>) {
-    let root =
-        root.unwrap_or_else(|| std::env::current_dir().expect("cannot read current directory"));
+    let root = resolve_project_root(root);
     let api_dir = root.join("api");
     let app_dir = root.join("app");
     let www_dir = root.join("www");
 
-    if !api_dir.is_dir() {
-        eprintln!("No api/ directory found. Run `erno dev` from your project root.");
-        std::process::exit(1);
-    }
     if !app_dir.is_dir() {
-        eprintln!("No app/ directory found. Run `erno dev` from your project root.");
+        eprintln!("Found project at {} but no app/ directory.", root.display());
+        eprintln!("Run `erno dev` from a full-stack Erno project (api/ + app/).");
         std::process::exit(1);
     }
 
