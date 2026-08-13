@@ -55,7 +55,7 @@ my_app/
 
 It also creates `my_app_development` and `my_app_test` databases.
 
-The API applies pending migrations on boot. `erno new` starts all three dev servers via `erno dev`:
+The API applies pending migrations on boot. `erno new` can start all three dev servers via `erno dev` (it asks on a TTY; pass `--dev` or `--no-dev` to skip the prompt):
 
 | Surface | URL |
 |---------|-----|

@@ -29,6 +29,12 @@ enum Commands {
         /// Capacitor bundle ID (default: com.example.<name>)
         #[arg(long, value_name = "ID")]
         bundle_id: Option<String>,
+        /// Start `erno dev` after scaffolding without prompting
+        #[arg(long)]
+        dev: bool,
+        /// Do not start `erno dev` after scaffolding
+        #[arg(long)]
+        no_dev: bool,
     },
     /// Configure global Erno settings (~/.erno/config.toml)
     Setup,
@@ -84,7 +90,19 @@ async fn main() {
             path,
             erno_path,
             bundle_id,
-        } => commands::new::handle_new(&name, path.as_deref(), erno_path.as_deref(), bundle_id.as_deref()).await,
+            dev,
+            no_dev,
+        } => {
+            commands::new::handle_new(
+                &name,
+                path.as_deref(),
+                erno_path.as_deref(),
+                bundle_id.as_deref(),
+                dev,
+                no_dev,
+            )
+            .await
+        }
         Commands::Setup => commands::setup::handle_setup().await,
         Commands::Dev(args) => commands::dev::handle_dev(None, args).await,
         Commands::Admin {

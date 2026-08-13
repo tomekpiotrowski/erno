@@ -44,7 +44,14 @@ const WWW_FAVICON: &str = include_str!("../../templates/www/public/favicon.svg")
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
-pub async fn handle_new(name: &str, path: Option<&str>, erno_path: Option<&str>, bundle_id: Option<&str>) {
+pub async fn handle_new(
+    name: &str,
+    path: Option<&str>,
+    erno_path: Option<&str>,
+    bundle_id: Option<&str>,
+    start_dev: bool,
+    no_dev: bool,
+) {
     validate_name(name);
 
     let dest = match path {
@@ -95,8 +102,49 @@ pub async fn handle_new(name: &str, path: Option<&str>, erno_path: Option<&str>,
         );
     }
 
-    print_next_steps(name);
-    crate::commands::dev::handle_dev(Some(dest), crate::commands::dev::DevArgs::default()).await;
+    let start = match decide_start_dev(start_dev, no_dev, std::io::IsTerminal::is_terminal(&std::io::stdin())) {
+        Ok(start) => start,
+        Err(msg) => {
+            eprintln!("{msg}");
+            std::process::exit(1);
+        }
+    };
+
+    print_next_steps(name, start);
+    if start {
+        crate::commands::dev::handle_dev(Some(dest), crate::commands::dev::DevArgs::default()).await;
+    }
+}
+
+pub fn decide_start_dev(dev: bool, no_dev: bool, is_tty: bool) -> Result<bool, String> {
+    if dev && no_dev {
+        return Err("cannot combine --dev and --no-dev".into());
+    }
+    if no_dev {
+        return Ok(false);
+    }
+    if dev {
+        return Ok(true);
+    }
+    if !is_tty {
+        return Ok(false);
+    }
+    Ok(confirm_start_dev())
+}
+
+fn confirm_start_dev() -> bool {
+    use std::io::{self, Write};
+    print!("Start dev servers now? [Y/n] ");
+    let _ = io::stdout().flush();
+    let mut input = String::new();
+    if io::stdin().read_line(&mut input).is_err() {
+        return true;
+    }
+    match input.trim().to_ascii_lowercase().as_str() {
+        "" | "y" | "yes" => true,
+        "n" | "no" => false,
+        _ => true,
+    }
 }
 
 // ── Erno dependency resolution ────────────────────────────────────────────────
@@ -607,7 +655,7 @@ async fn create_db(client: &tokio_postgres::Client, db: &str) {
 
 // ── Next steps ────────────────────────────────────────────────────────────────
 
-fn print_next_steps(name: &str) {
+fn print_next_steps(name: &str, starting_dev: bool) {
     println!(
         r#"
 ✅  Created {name}/
@@ -615,13 +663,33 @@ fn print_next_steps(name: &str) {
   api/  Rust API
   app/  Ionic product app (app.example.com in production)
   www/  Astro marketing site (example.com in production)
-
-Starting dev servers now (Ctrl+C to stop).
-The API applies pending migrations on boot.
-
-  www  → http://localhost:4321
-  app  → http://localhost:4200
-  api  → http://localhost:3000
 "#
     );
+    if starting_dev {
+        println!(
+            "Starting dev servers now (Ctrl+C to stop).\nThe API applies pending migrations on boot.\n"
+        );
+        println!("  www  → http://localhost:4321");
+        println!("  app  → http://localhost:4200");
+        println!("  api  → http://localhost:3000");
+    } else {
+        println!("Next:  cd {name} && erno dev");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decide_start_dev;
+
+    #[test]
+    fn flags_override_tty() {
+        assert!(decide_start_dev(true, false, false).unwrap());
+        assert!(!decide_start_dev(false, true, true).unwrap());
+        assert!(decide_start_dev(true, true, true).is_err());
+    }
+
+    #[test]
+    fn non_tty_does_not_start_without_flag() {
+        assert!(!decide_start_dev(false, false, false).unwrap());
+    }
 }

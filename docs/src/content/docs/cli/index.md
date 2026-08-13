@@ -118,7 +118,7 @@ Exit code is `0` if all required checks pass, `1` otherwise.
 ## new
 
 ```sh
-erno new <name> [--path <dir>] [--erno-path <erno-dir>] [--bundle-id <id>]
+erno new <name> [--path <dir>] [--erno-path <erno-dir>] [--bundle-id <id>] [--dev|--no-dev]
 ```
 
 Scaffolds a new full-stack project under `./<name>/`:
@@ -160,7 +160,7 @@ Also creates the `<name>_development` and `<name>_test` PostgreSQL databases usi
 | Product app (`app/`) | http://localhost:4200 | `app.example.com` |
 | API (`api/`) | http://localhost:3000 | `api.example.com` |
 
-`erno new` starts `erno dev` automatically (API + app + www). Landing page CTAs point at the app origin (`PUBLIC_APP_URL`, default `http://localhost:4200`).
+After scaffolding, `erno new` asks whether to start `erno dev` (default yes on a TTY). `--dev` starts without asking; `--no-dev` skips. Non-interactive runs do not start servers. Landing page CTAs point at the app origin (`PUBLIC_APP_URL`, default `http://localhost:4200`).
 
 ### Options
 
@@ -169,6 +169,8 @@ Also creates the `<name>_development` and `<name>_test` PostgreSQL databases usi
 | `--path <dir>` | current directory | Parent directory for the new project |
 | `--erno-path <erno-dir>` | git reference | Path to a local erno repository root or its `api/` directory (for development against an unpublished erno) |
 | `--bundle-id <id>` | `com.example.<name>` | Capacitor bundle ID (reverse-DNS, no dashes) |
+| `--dev` | prompt on TTY | Start `erno dev` without asking |
+| `--no-dev` | prompt on TTY | Do not start `erno dev` |
 
 ### Erno dependency
 
