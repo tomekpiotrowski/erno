@@ -6,6 +6,7 @@ mod ports;
 mod preflight;
 mod process;
 mod project;
+mod seed;
 mod selection;
 mod watch;
 
@@ -36,6 +37,9 @@ pub struct DevArgs {
     /// Skip the marketing site even when www/ is present
     #[arg(long)]
     pub no_www: bool,
+    /// Ensure a verified demo user exists (dev@example.com / password)
+    #[arg(long)]
+    pub seed: bool,
 }
 
 pub(crate) const CYAN: &str = "\x1b[36m";
@@ -67,6 +71,11 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) {
         }
     };
 
+    if args.seed && !sel.api {
+        eprintln!("--seed requires the API (pass --api or omit service flags).");
+        std::process::exit(1);
+    }
+
     if sel.app && !app_dir.is_dir() {
         eprintln!("Found project at {} but no app/ directory.", root.display());
         eprintln!("Pass --api to start only the API, or scaffold an app with `erno new`.");
@@ -95,7 +104,12 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) {
 
     print_banner(&urls, &starting_snapshot(&urls));
     if let Some(api_url) = urls.api.clone() {
-        mail::spawn_mail_watcher(api_url);
+        mail::spawn_mail_watcher(api_url.clone());
+        let seed_root = root.clone();
+        let force_seed = args.seed;
+        tokio::spawn(async move {
+            seed::maybe_seed(&seed_root, &api_url, force_seed).await;
+        });
     }
     spawn_readiness_watcher(urls);
 

@@ -41,6 +41,23 @@ pub fn ports_to_check(urls: &DevUrls) -> Vec<u16> {
     ports
 }
 
+pub fn parse_table_string(toml: &str, table: &str, key: &str) -> Option<String> {
+    let mut in_table = false;
+    for line in toml.lines() {
+        let line = line.trim();
+        if line.starts_with('[') && line.ends_with(']') {
+            in_table = line[1..line.len() - 1] == *table;
+            continue;
+        }
+        if in_table {
+            if let Some(val) = parse_assignment_line(line, key) {
+                return Some(val);
+            }
+        }
+    }
+    None
+}
+
 pub fn parse_table_u16(toml: &str, table: &str, key: &str) -> Option<u16> {
     let mut in_table = false;
     for line in toml.lines() {
@@ -129,6 +146,15 @@ app_url = "http://localhost:4210"
 [server]
 port = 3010
 "#;
+        assert_eq!(
+            parse_table_string(
+                "[database]\nurl = \"postgres://x:y@localhost/db\"\n",
+                "database",
+                "url"
+            )
+            .as_deref(),
+            Some("postgres://x:y@localhost/db")
+        );
         assert_eq!(parse_table_u16(toml, "server", "port"), Some(3010));
         assert_eq!(
             parse_assignment(toml, "api_url").as_deref(),

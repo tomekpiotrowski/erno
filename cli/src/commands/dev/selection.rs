@@ -47,6 +47,7 @@ mod tests {
             app,
             www,
             no_www,
+            seed: false,
         }
     }
 
