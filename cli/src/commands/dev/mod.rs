@@ -1,14 +1,20 @@
-use std::process::Stdio;
+mod banner;
+mod process;
+
 use std::sync::Arc;
 
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, Command};
+use tokio::process::Command;
 use tokio::sync::Mutex;
 
-const CYAN: &str = "\x1b[36m";
-const GREEN: &str = "\x1b[32m";
-const MAGENTA: &str = "\x1b[35m";
-const RESET: &str = "\x1b[0m";
+use banner::{print_banner, spawn_readiness_watcher, starting_snapshot, DevUrls};
+use process::{kill_child, spawn_labeled, wait_child};
+
+pub(crate) const CYAN: &str = "\x1b[36m";
+pub(crate) const GREEN: &str = "\x1b[32m";
+pub(crate) const MAGENTA: &str = "\x1b[35m";
+pub(crate) const YELLOW: &str = "\x1b[33m";
+pub(crate) const DIM: &str = "\x1b[2m";
+pub(crate) const RESET: &str = "\x1b[0m";
 
 pub async fn handle_dev(root: Option<std::path::PathBuf>) {
     let root =
@@ -33,77 +39,41 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>) {
         ensure_npm_deps(&www_dir, "www");
     }
 
-    let mut api_cmd = if has_cargo_watch() {
+    let urls = DevUrls::defaults(has_www);
+    print_banner(&urls, &starting_snapshot(&urls));
+    spawn_readiness_watcher(urls);
+
+    let api_cmd = if has_cargo_watch() {
         let mut cmd = Command::new("cargo");
         cmd.args(["watch", "-x", "run"]);
         cmd
     } else {
-        println!("{CYAN}[api]{RESET} cargo-watch not found — run `cargo install cargo-watch` for auto-reload");
+        println!(
+            "{CYAN}[api]{RESET} cargo-watch not found — run `cargo install cargo-watch` for auto-reload"
+        );
         let mut cmd = Command::new("cargo");
         cmd.arg("run");
         cmd
     };
 
-    #[cfg(unix)]
-    api_cmd.process_group(0);
-
-    let mut api_child = api_cmd
-        .current_dir(&api_dir)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("failed to spawn api process");
+    let api_child = Arc::new(Mutex::new(spawn_labeled(api_cmd, &api_dir, CYAN, "api")));
 
     let mut app_cmd = Command::new("npm");
     app_cmd.arg("start");
-    #[cfg(unix)]
-    app_cmd.process_group(0);
-
-    let mut app_child = app_cmd
-        .current_dir(&app_dir)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("failed to spawn `npm start`");
-
-    let api_stdout = BufReader::new(api_child.stdout.take().unwrap());
-    let api_stderr = BufReader::new(api_child.stderr.take().unwrap());
-    let app_stdout = BufReader::new(app_child.stdout.take().unwrap());
-    let app_stderr = BufReader::new(app_child.stderr.take().unwrap());
-
-    spawn_printer(api_stdout, CYAN, "api");
-    spawn_printer(api_stderr, CYAN, "api");
-    spawn_printer(app_stdout, GREEN, "app");
-    spawn_printer(app_stderr, GREEN, "app");
-
-    let api_child = Arc::new(Mutex::new(api_child));
-    let app_child = Arc::new(Mutex::new(app_child));
+    let app_child = Arc::new(Mutex::new(spawn_labeled(app_cmd, &app_dir, GREEN, "app")));
 
     let www_child = if has_www {
         let mut www_cmd = Command::new("npm");
         www_cmd.args(["run", "dev"]);
-        #[cfg(unix)]
-        www_cmd.process_group(0);
-
-        let mut child = www_cmd
-            .current_dir(&www_dir)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("failed to spawn `npm run dev` in www/");
-
-        let www_stdout = BufReader::new(child.stdout.take().unwrap());
-        let www_stderr = BufReader::new(child.stderr.take().unwrap());
-        spawn_printer(www_stdout, MAGENTA, "www");
-        spawn_printer(www_stderr, MAGENTA, "www");
-        Some(Arc::new(Mutex::new(child)))
+        Some(Arc::new(Mutex::new(spawn_labeled(
+            www_cmd, &www_dir, MAGENTA, "www",
+        ))))
     } else {
         None
     };
 
     let api_handle = api_child.clone();
     let app_handle = app_child.clone();
-    let www_handle = www_child.clone();
 
     if let Some(www) = www_child {
         tokio::select! {
@@ -130,7 +100,6 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>) {
             }
         }
     } else {
-        let _ = www_handle;
         tokio::select! {
             _ = wait_child(api_child.clone()) => {
                 eprintln!("\n{CYAN}[api]{RESET} process exited — shutting down.");
@@ -169,37 +138,6 @@ fn ensure_npm_deps(dir: &std::path::Path, label: &str) {
         }
         _ => {}
     }
-}
-
-fn spawn_printer<R>(reader: R, color: &'static str, label: &'static str)
-where
-    R: tokio::io::AsyncRead + Unpin + Send + 'static,
-{
-    let mut lines = BufReader::new(reader).lines();
-    tokio::spawn(async move {
-        while let Ok(Some(line)) = lines.next_line().await {
-            println!("{color}[{label}]{RESET} {line}");
-        }
-    });
-}
-
-async fn wait_child(child: Arc<Mutex<Child>>) {
-    let _ = child.lock().await.wait().await;
-}
-
-async fn kill_child(child: &Arc<Mutex<Child>>) {
-    let mut guard = child.lock().await;
-
-    // Kill the entire process group so grandchildren (e.g. cargo run, ng serve)
-    // don't survive after their parent (cargo watch, npm) is gone.
-    #[cfg(unix)]
-    if let Some(pid) = guard.id() {
-        unsafe {
-            libc::kill(-(pid as libc::pid_t), libc::SIGKILL);
-        }
-    }
-
-    let _ = guard.kill().await;
 }
 
 fn has_cargo_watch() -> bool {

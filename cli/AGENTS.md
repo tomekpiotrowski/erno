@@ -17,6 +17,7 @@ cargo install --path .                   # install globally as `erno`
 | `erno setup` | Interactive wizard — writes `~/.erno/config.toml` with PostgreSQL admin credentials |
 | `erno doctor` | Checks the local environment: Rust, Node, Angular CLI, PostgreSQL, `~/.erno/config.toml`, admin DB access |
 | `erno new <name>` | Scaffolds a full-stack Erno project (Rust API + Ionic app + Astro www) |
+| `erno dev` | Starts api + app + www dev servers and prints a readiness banner |
 | `erno admin` | Operator TUI — talks to the running API's `/admin/api` over HTTP (Basic auth) |
 | `erno deploy init` | Scaffolds Docker/Helm deploy files; generates admin password hash for production |
 | `erno deploy install` | Installs a chart version to the cluster (`helm secrets upgrade --install`) |
@@ -67,6 +68,7 @@ ALTER USER erno CREATEDB;
 | `src/commands/setup.rs` | Interactive config writer; validates admin connection before saving |
 | `src/commands/doctor.rs` | Environment checks — each returns a `CheckResult` (Pass/Warn/Fail) |
 | `src/commands/new.rs` | Project scaffolding — inline templates, directory creation, database creation |
+| `src/commands/dev/` | `erno dev` — process multiplexer, readiness banner |
 
 ## Architecture notes
 

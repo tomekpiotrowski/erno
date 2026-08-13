@@ -22,8 +22,29 @@ cargo install erno-cli
 | [`erno setup`](#setup) | Configure `~/.erno/config.toml` (PostgreSQL admin credentials) |
 | [`erno doctor`](#doctor) | Verify that your environment is ready to develop Erno apps |
 | [`erno new <name>`](#new) | Scaffold a new full-stack Erno project |
+| [`erno dev`](#dev) | Start the API, app, and www dev servers |
 | [`erno admin`](#admin) | Operator TUI against the running API (`/admin/api`) |
 | [`erno deploy`](/cli/deploy/) | Scaffold Docker/Helm files and install releases |
+
+---
+
+## dev
+
+```sh
+erno dev
+```
+
+Starts the project’s dev servers from the project root (`api/` + `app/`, plus `www/` when present). Logs are prefixed by service (`[api]`, `[app]`, `[www]`).
+
+`erno dev` prints a status banner with each service URL and probes them until they respond:
+
+| Surface | Probe | Default URL |
+|---------|-------|-------------|
+| API | `GET /readiness` | http://localhost:3000 |
+| Product app | HTTP | http://localhost:4200 |
+| Marketing | HTTP | http://localhost:4321 |
+
+The banner reprints whenever a service changes state (`starting` → `ready`). Ctrl+C stops every child.
 
 ---
 
