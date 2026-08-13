@@ -12,11 +12,27 @@ impl ServiceSelection {
         if args.www && args.no_www {
             return Err("cannot combine --www and --no-www".into());
         }
+        if args.ios && args.android {
+            return Err("cannot combine --ios and --android".into());
+        }
 
+        let device = args.ios || args.android;
         let explicit = args.api || args.app || args.www;
         let sel = Self {
-            api: if explicit { args.api } else { true },
-            app: if explicit { args.app } else { true },
+            api: if device {
+                true
+            } else if explicit {
+                args.api
+            } else {
+                true
+            },
+            app: if device {
+                true
+            } else if explicit {
+                args.app
+            } else {
+                true
+            },
             www: if args.no_www {
                 false
             } else if explicit {
@@ -49,6 +65,8 @@ mod tests {
             no_www,
             seed: false,
             open: false,
+            ios: false,
+            android: false,
         }
     }
 
@@ -94,5 +112,18 @@ mod tests {
     #[test]
     fn rejects_www_and_no_www() {
         assert!(ServiceSelection::resolve(&args(false, false, true, true), true).is_err());
+    }
+
+    #[test]
+    fn device_flags_force_api_and_app() {
+        let mut a = args(false, false, true, false);
+        a.ios = true;
+        let sel = ServiceSelection::resolve(&a, true).unwrap();
+        assert!(sel.api && sel.app && sel.www);
+
+        let mut both = args(false, false, false, false);
+        both.ios = true;
+        both.android = true;
+        assert!(ServiceSelection::resolve(&both, false).is_err());
     }
 }

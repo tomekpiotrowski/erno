@@ -1,4 +1,5 @@
 mod banner;
+mod device;
 mod lock;
 mod log;
 mod mail;
@@ -44,6 +45,12 @@ pub struct DevArgs {
     /// Open the marketing site (or app, or API) in a browser once it is ready
     #[arg(long)]
     pub open: bool,
+    /// Live-reload the app on a connected iOS device / simulator
+    #[arg(long)]
+    pub ios: bool,
+    /// Live-reload the app on a connected Android device / emulator
+    #[arg(long)]
+    pub android: bool,
 }
 
 pub(crate) const CYAN: &str = "\x1b[36m";
@@ -86,7 +93,54 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) {
         std::process::exit(1);
     }
 
-    let urls = ports::discover_urls(&root, &sel);
+    let mut urls = ports::discover_urls(&root, &sel);
+
+    let device = if args.ios {
+        Some(device::DevicePlatform::Ios)
+    } else if args.android {
+        Some(device::DevicePlatform::Android)
+    } else {
+        None
+    };
+
+    let mut _url_rewrite = None;
+    let mut cors_env = None;
+    if let Some(platform) = device {
+        let ip = device::lan_ip().unwrap_or_else(|| {
+            eprintln!(
+                "Could not detect a LAN IP for `--{}`. Connect to a network and try again.",
+                platform.as_str()
+            );
+            std::process::exit(1);
+        });
+        if let Some(api) = urls.api.clone() {
+            let api_http = device::rewrite_url_host(&api, ip);
+            let api_ws = if api_http.starts_with("https://") {
+                api_http.replacen("https://", "wss://", 1)
+            } else {
+                api_http.replacen("http://", "ws://", 1)
+            };
+            urls.api = Some(api_http.clone());
+            if let Some(app) = urls.app.clone() {
+                urls.app = Some(device::rewrite_url_host(&app, ip));
+            }
+            match device::apply_lan_api_urls(&app_dir, &api_http, &api_ws) {
+                Ok(guard) => _url_rewrite = Some(guard),
+                Err(e) => {
+                    eprintln!("{e}");
+                    std::process::exit(1);
+                }
+            }
+            if let Some(app) = &urls.app {
+                cors_env = Some(device::cors_origins(app));
+            }
+        }
+        println!(
+            "{DIM}Device live-reload ({}) on {ip}{RESET}",
+            platform.as_str()
+        );
+    }
+
     preflight::run_preflight(sel.api, &ports::ports_to_check(&urls));
 
     if sel.app {
@@ -125,16 +179,20 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) {
             seed::maybe_seed(&seed_root, &api_url, force_seed).await;
         });
     }
-    spawn_readiness_watcher(urls);
+    spawn_readiness_watcher(urls.clone());
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let api = sel.api.then(|| {
         let api_dir_spawn = api_dir.clone();
         let api_sink = sink.clone();
+        let cors_env = cors_env.clone();
         Supervisor::start("api", CYAN, shutdown_rx.clone(), move || {
             let mut cmd = Command::new("cargo");
             cmd.arg("run");
+            if let Some(origins) = cors_env.as_deref() {
+                cmd.env("ERNO_DEV_CORS_ORIGINS", origins);
+            }
             spawn_labeled(cmd, &api_dir_spawn, CYAN, "api", api_sink.clone())
         })
     });
@@ -142,12 +200,33 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) {
         watch::spawn_api_watcher(api_dir.clone(), api.clone(), shutdown_rx.clone());
     }
 
+    let app_port = urls
+        .app
+        .as_deref()
+        .and_then(|u| ports::port_from_url(Some(u)))
+        .unwrap_or(4200);
     let app = sel.app.then(|| {
         let app_dir_spawn = app_dir.clone();
         let app_sink = sink.clone();
         Supervisor::start("app", GREEN, shutdown_rx.clone(), move || {
-            let mut cmd = Command::new("npm");
-            cmd.arg("start");
+            let cmd = if let Some(platform) = device {
+                let mut cmd = Command::new("npx");
+                cmd.args([
+                    "ionic",
+                    "cap",
+                    "run",
+                    platform.as_str(),
+                    "--livereload",
+                    "--external",
+                    "--port",
+                    &app_port.to_string(),
+                ]);
+                cmd
+            } else {
+                let mut cmd = Command::new("npm");
+                cmd.arg("start");
+                cmd
+            };
             spawn_labeled(cmd, &app_dir_spawn, GREEN, "app", app_sink.clone())
         })
     });

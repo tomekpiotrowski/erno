@@ -29,7 +29,7 @@ can actually own. Each mobile/compliance item below is tagged:
 ## Mobile DX gaps
 
 - [ ] **[FW-scaffold]** **Deep links in scaffold** — Add Capacitor universal links / deep-link config to `erno new` template so password reset and email verify work on physical devices out of the box (app supplies its associated-domain / app-site-association)
-- [ ] **[FW]** **Physical device dev** — Add `ionic cap run` option to `erno dev` command for live-reload on physical iOS/Android devices
+- [x] **[FW]** **Physical device dev** — Add `ionic cap run` option to `erno dev` command for live-reload on physical iOS/Android devices
 
 ## Mobile / platform compliance
 

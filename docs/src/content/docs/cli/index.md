@@ -38,6 +38,8 @@ erno dev --app --www
 erno dev --no-www
 erno dev --seed
 erno dev --open
+erno dev --ios
+erno dev --android
 ```
 
 Starts the project’s dev servers (`api/` + `app/`, plus `www/` when present). Walks up from the current directory looking for `api/Cargo.toml`, so you can run it from `api/`, `app/`, or any subdirectory. Child tools are told to keep color and cargo’s progress bar even though their stdout is piped.
@@ -49,6 +51,8 @@ By default only errors and ready events are printed; the full multiplex is writt
 `--seed` inserts a verified demo user (`dev@example.com` / `password`) if it is missing. An empty `users` table is seeded automatically on first run so login works without walking through email verification.
 
 `--open` opens one browser tab once a service is ready, preferring www, then the app, then the API.
+
+`--ios` / `--android` start the API plus `ionic cap run` with live reload on the machine’s LAN IP. The app is rewritten for the session to call `http://<lan>:api-port`, extra CORS origins are passed to the API as `ERNO_DEV_CORS_ORIGINS`, and the original environment file is restored on exit.
 
 `erno dev` prints a status banner with each service URL and probes them until they respond:
 

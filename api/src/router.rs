@@ -53,13 +53,7 @@ where
     let rate_limit_state = app.rate_limit_state.clone();
     let rate_limiting_enabled = app.config.rate_limiting.enabled;
     let metrics_enabled = app.config.metrics.enabled;
-    let cors_origins: Vec<HeaderValue> = app
-        .config
-        .cors
-        .allowed_origins
-        .iter()
-        .filter_map(|o| o.parse().ok())
-        .collect();
+    let cors_origins: Vec<HeaderValue> = cors_origin_list(&app.config.cors.allowed_origins);
     let metrics_state = MetricsEndpointState {
         handle: app.prometheus_handle.clone(),
         auth_token: app.config.metrics.auth_token.clone(),
@@ -129,4 +123,42 @@ where
     }
 
     base
+}
+
+/// Configured CORS origins plus any `ERNO_DEV_CORS_ORIGINS` (comma-separated)
+/// injected by `erno dev --ios` / `--android`.
+pub fn cors_origin_list(configured: &[String]) -> Vec<HeaderValue> {
+    configured
+        .iter()
+        .cloned()
+        .chain(parse_extra_cors_origins(
+            &std::env::var("ERNO_DEV_CORS_ORIGINS").unwrap_or_default(),
+        ))
+        .filter_map(|o| o.parse().ok())
+        .collect()
+}
+
+pub fn parse_extra_cors_origins(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+#[cfg(test)]
+mod extra_cors_tests {
+    use super::parse_extra_cors_origins;
+
+    #[test]
+    fn splits_and_trims_extra_origins() {
+        assert_eq!(
+            parse_extra_cors_origins(" http://192.168.1.5:4200, capacitor://localhost ,"),
+            vec![
+                "http://192.168.1.5:4200".to_string(),
+                "capacitor://localhost".to_string()
+            ]
+        );
+        assert!(parse_extra_cors_origins("").is_empty());
+    }
 }

@@ -17,6 +17,7 @@ const API_DEVELOPMENT_TOML: &str = include_str!("../../templates/api/config/deve
 const API_PRODUCTION_TOML: &str = include_str!("../../templates/api/config/production.toml");
 const API_TEST_TOML: &str = include_str!("../../templates/api/config/test.toml");
 const APP_MODULE_TS: &str = include_str!("../../templates/app/app.module.ts");
+const APP_ENVIRONMENT_TS: &str = include_str!("../../templates/app/src/environments/environment.ts");
 const APP_COMPONENT_HTML: &str = include_str!("../../templates/app/app.component.html");
 const APP_ROUTING_MODULE_TS: &str = include_str!("../../templates/app/src/app/app-routing.module.ts");
 const AUTH_GUARD_TS: &str = include_str!("../../templates/app/src/app/auth/auth.guard.ts");
@@ -536,6 +537,7 @@ fn patch_app(
     let _ = fs::remove_file(app.join("src/app/home/home-routing.module.ts"));
 
     // Replace ionic-generated files with erno versions
+    write(&app.join("src/environments/environment.ts"), APP_ENVIRONMENT_TS);
     write(&app.join("src/app/app.module.ts"), APP_MODULE_TS);
     write(&app.join("src/app/app.component.html"), APP_COMPONENT_HTML);
     write(&app.join("src/app/app-routing.module.ts"), APP_ROUTING_MODULE_TS);

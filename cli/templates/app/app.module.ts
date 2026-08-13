@@ -5,6 +5,7 @@ import { IonicModule, IonicRouteStrategy } from '@ionic/angular';
 import { ReactiveFormsModule } from '@angular/forms';
 import { ErnoModule } from 'erno-angular';
 
+import { environment } from '../environments/environment';
 import { AppRoutingModule } from './app-routing.module';
 import { AppComponent } from './app.component';
 import { HomePage } from './home/home.page';
@@ -30,8 +31,8 @@ import { VerifyEmailComponent } from './auth/verify-email/verify-email.component
     ReactiveFormsModule,
     AppRoutingModule,
     ErnoModule.forRoot({
-      baseUrl: 'http://localhost:3000',
-      wsUrl: 'ws://localhost:3000',
+      baseUrl: environment.apiUrl,
+      wsUrl: environment.wsUrl,
     }),
   ],
   providers: [
