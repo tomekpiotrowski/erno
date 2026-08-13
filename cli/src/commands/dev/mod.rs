@@ -3,13 +3,10 @@ mod preflight;
 mod process;
 mod project;
 
-use std::sync::Arc;
-
 use tokio::process::Command;
-use tokio::sync::Mutex;
 
 use banner::{print_banner, spawn_readiness_watcher, starting_snapshot, DevUrls};
-use process::{kill_child, spawn_labeled, wait_child};
+use process::{spawn_labeled, Supervisor};
 use project::resolve_project_root;
 
 pub(crate) const CYAN: &str = "\x1b[36m";
@@ -44,78 +41,48 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>) {
     print_banner(&urls, &starting_snapshot(&urls));
     spawn_readiness_watcher(urls);
 
-    let api_cmd = if has_cargo_watch() {
-        let mut cmd = Command::new("cargo");
-        cmd.args(["watch", "-x", "run"]);
-        cmd
-    } else {
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+
+    let use_watch = has_cargo_watch();
+    if !use_watch {
         println!(
             "{CYAN}[api]{RESET} cargo-watch not found — run `cargo install cargo-watch` for auto-reload"
         );
+    }
+    let api_dir_spawn = api_dir.clone();
+    let api = Supervisor::start("api", CYAN, shutdown_rx.clone(), move || {
         let mut cmd = Command::new("cargo");
-        cmd.arg("run");
-        cmd
-    };
-
-    let api_child = Arc::new(Mutex::new(spawn_labeled(api_cmd, &api_dir, CYAN, "api")));
-
-    let mut app_cmd = Command::new("npm");
-    app_cmd.arg("start");
-    let app_child = Arc::new(Mutex::new(spawn_labeled(app_cmd, &app_dir, GREEN, "app")));
-
-    let www_child = if has_www {
-        let mut www_cmd = Command::new("npm");
-        www_cmd.args(["run", "dev"]);
-        Some(Arc::new(Mutex::new(spawn_labeled(
-            www_cmd, &www_dir, MAGENTA, "www",
-        ))))
-    } else {
-        None
-    };
-
-    let api_handle = api_child.clone();
-    let app_handle = app_child.clone();
-
-    if let Some(www) = www_child {
-        tokio::select! {
-            _ = wait_child(api_child.clone()) => {
-                eprintln!("\n{CYAN}[api]{RESET} process exited — shutting down.");
-                kill_child(&app_handle).await;
-                kill_child(&www).await;
-            }
-            _ = wait_child(app_child.clone()) => {
-                eprintln!("\n{GREEN}[app]{RESET} process exited — shutting down.");
-                kill_child(&api_handle).await;
-                kill_child(&www).await;
-            }
-            _ = wait_child(www.clone()) => {
-                eprintln!("\n{MAGENTA}[www]{RESET} process exited — shutting down.");
-                kill_child(&api_handle).await;
-                kill_child(&app_handle).await;
-            }
-            _ = tokio::signal::ctrl_c() => {
-                eprintln!("\nShutting down...");
-                kill_child(&api_handle).await;
-                kill_child(&app_handle).await;
-                kill_child(&www).await;
-            }
+        if use_watch {
+            cmd.args(["watch", "-x", "run"]);
+        } else {
+            cmd.arg("run");
         }
-    } else {
-        tokio::select! {
-            _ = wait_child(api_child.clone()) => {
-                eprintln!("\n{CYAN}[api]{RESET} process exited — shutting down.");
-                kill_child(&app_handle).await;
-            }
-            _ = wait_child(app_child.clone()) => {
-                eprintln!("\n{GREEN}[app]{RESET} process exited — shutting down.");
-                kill_child(&api_handle).await;
-            }
-            _ = tokio::signal::ctrl_c() => {
-                eprintln!("\nShutting down...");
-                kill_child(&api_handle).await;
-                kill_child(&app_handle).await;
-            }
-        }
+        spawn_labeled(cmd, &api_dir_spawn, CYAN, "api")
+    });
+
+    let app_dir_spawn = app_dir.clone();
+    let app = Supervisor::start("app", GREEN, shutdown_rx.clone(), move || {
+        let mut cmd = Command::new("npm");
+        cmd.arg("start");
+        spawn_labeled(cmd, &app_dir_spawn, GREEN, "app")
+    });
+
+    let www = has_www.then(|| {
+        let www_dir_spawn = www_dir.clone();
+        Supervisor::start("www", MAGENTA, shutdown_rx.clone(), move || {
+            let mut cmd = Command::new("npm");
+            cmd.args(["run", "dev"]);
+            spawn_labeled(cmd, &www_dir_spawn, MAGENTA, "www")
+        })
+    });
+
+    let _ = tokio::signal::ctrl_c().await;
+    eprintln!("\nShutting down...");
+    let _ = shutdown_tx.send(true);
+    api.shutdown().await;
+    app.shutdown().await;
+    if let Some(www) = www {
+        www.shutdown().await;
     }
 }
 

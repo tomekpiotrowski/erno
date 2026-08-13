@@ -61,21 +61,144 @@ where
     });
 }
 
-pub async fn wait_child(child: Arc<Mutex<Child>>) {
-    let _ = child.lock().await.wait().await;
+const GRACEFUL_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+const MIN_BACKOFF: std::time::Duration = std::time::Duration::from_secs(1);
+const MAX_BACKOFF: std::time::Duration = std::time::Duration::from_secs(8);
+const RESET_AFTER: std::time::Duration = std::time::Duration::from_secs(30);
+
+pub fn next_backoff(current: std::time::Duration) -> std::time::Duration {
+    current.saturating_mul(2).min(MAX_BACKOFF)
 }
 
-pub async fn kill_child(child: &Arc<Mutex<Child>>) {
-    let mut guard = child.lock().await;
-
-    // Kill the entire process group so grandchildren (e.g. cargo run, ng serve)
-    // don't survive after their parent (cargo watch, npm) is gone.
+/// SIGTERM the process group, wait briefly, then SIGKILL leftovers.
+pub async fn terminate_child(child: &mut Child) {
     #[cfg(unix)]
-    if let Some(pid) = guard.id() {
+    let pid = child.id();
+    #[cfg(unix)]
+    if let Some(pid) = pid {
         unsafe {
-            libc::kill(-(pid as libc::pid_t), libc::SIGKILL);
+            libc::kill(-(pid as libc::pid_t), libc::SIGTERM);
         }
     }
 
-    let _ = guard.kill().await;
+    match tokio::time::timeout(GRACEFUL_WAIT, child.wait()).await {
+        Ok(_) => {}
+        Err(_) => {
+            #[cfg(unix)]
+            if let Some(pid) = pid {
+                unsafe {
+                    libc::kill(-(pid as libc::pid_t), libc::SIGKILL);
+                }
+            }
+            let _ = child.kill().await;
+        }
+    }
+}
+
+pub struct Supervisor {
+    slot: Arc<Mutex<Option<Child>>>,
+}
+
+impl Supervisor {
+    pub fn start<F>(
+        name: &'static str,
+        color: &'static str,
+        mut shutdown: tokio::sync::watch::Receiver<bool>,
+        mut spawn: F,
+    ) -> Self
+    where
+        F: FnMut() -> Child + Send + 'static,
+    {
+        let slot = Arc::new(Mutex::new(None));
+        let slot_task = slot.clone();
+        tokio::spawn(async move {
+            let mut backoff = MIN_BACKOFF;
+            loop {
+                if *shutdown.borrow() {
+                    break;
+                }
+
+                let child = spawn();
+                {
+                    *slot_task.lock().await = Some(child);
+                }
+
+                let started = std::time::Instant::now();
+                tokio::select! {
+                    _ = wait_slot(&slot_task) => {
+                        if *shutdown.borrow() {
+                            break;
+                        }
+                        if started.elapsed() >= RESET_AFTER {
+                            backoff = MIN_BACKOFF;
+                        }
+                        eprintln!(
+                            "\n{color}[{name}]{RESET} process exited — restarting in {}s",
+                            backoff.as_secs()
+                        );
+                        tokio::select! {
+                            _ = tokio::time::sleep(backoff) => {}
+                            _ = wait_shutdown(&mut shutdown) => break,
+                        }
+                        backoff = next_backoff(backoff);
+                    }
+                    _ = wait_shutdown(&mut shutdown) => {
+                        if let Some(child) = slot_task.lock().await.as_mut() {
+                            terminate_child(child).await;
+                        }
+                        break;
+                    }
+                }
+            }
+            *slot_task.lock().await = None;
+        });
+        Self { slot }
+    }
+
+    pub async fn shutdown(&self) {
+        if let Some(child) = self.slot.lock().await.as_mut() {
+            terminate_child(child).await;
+        }
+    }
+}
+
+async fn wait_slot(slot: &Arc<Mutex<Option<Child>>>) {
+    // Release the lock while waiting by taking the wait future after a short
+    // lock to read try_wait in a loop — Child::wait needs &mut, so we poll.
+    loop {
+        {
+            let mut guard = slot.lock().await;
+            if let Some(child) = guard.as_mut() {
+                match child.try_wait() {
+                    Ok(Some(_)) => return,
+                    Ok(None) => {}
+                    Err(_) => return,
+                }
+            } else {
+                return;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}
+
+async fn wait_shutdown(rx: &mut tokio::sync::watch::Receiver<bool>) {
+    while !*rx.borrow_and_update() {
+        if rx.changed().await.is_err() {
+            break;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backoff_doubles_and_caps() {
+        let s1 = next_backoff(MIN_BACKOFF);
+        assert_eq!(s1, std::time::Duration::from_secs(2));
+        assert_eq!(next_backoff(s1), std::time::Duration::from_secs(4));
+        assert_eq!(next_backoff(std::time::Duration::from_secs(8)), MAX_BACKOFF);
+    }
 }
