@@ -1,23 +1,20 @@
 use std::io::{self, IsTerminal, Write};
 use std::process::Command;
 
-const DEFAULT_API_PORT: u16 = 3000;
-const DEFAULT_APP_PORT: u16 = 4200;
-const DEFAULT_WWW_PORT: u16 = 4321;
+pub const DEFAULT_API_PORT: u16 = 3000;
+pub const DEFAULT_APP_PORT: u16 = 4200;
+pub const DEFAULT_WWW_PORT: u16 = 4321;
 
 const FRIENDLY_COMMANDS: &[&str] = &[
     "erno", "cargo", "node", "npm", "ng", "astro", "esbuild", "vite",
 ];
 
-pub fn run_preflight(has_www: bool) {
-    check_postgres();
-
-    let mut ports = vec![DEFAULT_API_PORT, DEFAULT_APP_PORT];
-    if has_www {
-        ports.push(DEFAULT_WWW_PORT);
+pub fn run_preflight(check_db: bool, ports: &[u16]) {
+    if check_db {
+        check_postgres();
     }
     for port in ports {
-        check_port(port);
+        check_port(*port);
     }
 }
 

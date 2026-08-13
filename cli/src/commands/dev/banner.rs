@@ -31,26 +31,30 @@ impl ServiceState {
 
 #[derive(Clone, Debug)]
 pub struct DevUrls {
-    pub api: String,
-    pub app: String,
+    pub api: Option<String>,
+    pub app: Option<String>,
     pub www: Option<String>,
 }
 
 impl DevUrls {
-    pub fn defaults(has_www: bool) -> Self {
+    pub fn defaults(start_api: bool, start_app: bool, start_www: bool) -> Self {
         Self {
-            api: "http://localhost:3000".to_string(),
-            app: "http://localhost:4200".to_string(),
-            www: has_www.then(|| "http://localhost:4321".to_string()),
+            api: start_api.then(|| "http://localhost:3000".to_string()),
+            app: start_app.then(|| "http://localhost:4200".to_string()),
+            www: start_www.then(|| "http://localhost:4321".to_string()),
         }
     }
 
-    pub fn api_readiness(&self) -> String {
-        format!("{}/readiness", self.api.trim_end_matches('/'))
+    pub fn api_readiness(&self) -> Option<String> {
+        self.api
+            .as_deref()
+            .map(|u| format!("{}/readiness", u.trim_end_matches('/')))
     }
 
-    pub fn api_liveness(&self) -> String {
-        format!("{}/liveness", self.api.trim_end_matches('/'))
+    pub fn api_liveness(&self) -> Option<String> {
+        self.api
+            .as_deref()
+            .map(|u| format!("{}/liveness", u.trim_end_matches('/')))
     }
 }
 
@@ -70,11 +74,11 @@ pub fn render_banner(urls: &DevUrls, snap: &BannerSnapshot) -> String {
     if let (Some(url), Some(state)) = (urls.www.as_deref(), snap.www) {
         out.push_str(&format_row(MAGENTA, "www", url, state));
     }
-    if let Some(state) = snap.app {
-        out.push_str(&format_row(GREEN, "app", &urls.app, state));
+    if let (Some(url), Some(state)) = (urls.app.as_deref(), snap.app) {
+        out.push_str(&format_row(GREEN, "app", url, state));
     }
-    if let Some(state) = snap.api {
-        out.push_str(&format_row(CYAN, "api", &urls.api, state));
+    if let (Some(url), Some(state)) = (urls.api.as_deref(), snap.api) {
+        out.push_str(&format_row(CYAN, "api", url, state));
     }
     out.push('\n');
     out
@@ -94,8 +98,8 @@ pub fn print_banner(urls: &DevUrls, snap: &BannerSnapshot) {
 
 pub fn starting_snapshot(urls: &DevUrls) -> BannerSnapshot {
     BannerSnapshot {
-        api: Some(ServiceState::Starting),
-        app: Some(ServiceState::Starting),
+        api: urls.api.as_ref().map(|_| ServiceState::Starting),
+        app: urls.app.as_ref().map(|_| ServiceState::Starting),
         www: urls.www.as_ref().map(|_| ServiceState::Starting),
     }
 }
@@ -125,9 +129,15 @@ pub fn spawn_readiness_watcher(urls: DevUrls) {
 }
 
 async fn probe_all(client: &Client, urls: &DevUrls) -> BannerSnapshot {
-    let api = Some(probe_api(client, urls).await);
-    let app = Some(probe_http(client, &urls.app).await);
-    let www = match &urls.www {
+    let api = match urls.api.as_deref() {
+        Some(_) => Some(probe_api(client, urls).await),
+        None => None,
+    };
+    let app = match urls.app.as_deref() {
+        Some(url) => Some(probe_http(client, url).await),
+        None => None,
+    };
+    let www = match urls.www.as_deref() {
         Some(url) => Some(probe_http(client, url).await),
         None => None,
     };
@@ -135,10 +145,17 @@ async fn probe_all(client: &Client, urls: &DevUrls) -> BannerSnapshot {
 }
 
 async fn probe_api(client: &Client, urls: &DevUrls) -> ServiceState {
-    if is_up(client, &urls.api_readiness()).await {
+    let Some(readiness) = urls.api_readiness() else {
+        return ServiceState::Starting;
+    };
+    if is_up(client, &readiness).await {
         ServiceState::Ready
-    } else if is_up(client, &urls.api_liveness()).await {
-        ServiceState::Migrating
+    } else if let Some(liveness) = urls.api_liveness() {
+        if is_up(client, &liveness).await {
+            ServiceState::Migrating
+        } else {
+            ServiceState::Starting
+        }
     } else {
         ServiceState::Starting
     }
@@ -165,7 +182,7 @@ mod tests {
 
     #[test]
     fn banner_includes_urls_and_states() {
-        let urls = DevUrls::defaults(true);
+        let urls = DevUrls::defaults(true, true, true);
         let snap = BannerSnapshot {
             api: Some(ServiceState::Ready),
             app: Some(ServiceState::Starting),
@@ -181,7 +198,7 @@ mod tests {
 
     #[test]
     fn banner_shows_migrating() {
-        let urls = DevUrls::defaults(false);
+        let urls = DevUrls::defaults(true, true, false);
         let snap = BannerSnapshot {
             api: Some(ServiceState::Migrating),
             app: Some(ServiceState::Starting),
@@ -194,11 +211,20 @@ mod tests {
 
     #[test]
     fn banner_omits_www_when_absent() {
-        let urls = DevUrls::defaults(false);
+        let urls = DevUrls::defaults(true, true, false);
         let snap = starting_snapshot(&urls);
         let text = render_banner(&urls, &snap);
         assert!(!text.contains("www"));
         assert!(text.contains("api"));
         assert!(urls.www.is_none());
+    }
+
+    #[test]
+    fn banner_omits_unselected_services() {
+        let urls = DevUrls::defaults(true, false, false);
+        let text = render_banner(&urls, &starting_snapshot(&urls));
+        assert!(text.contains("api"));
+        assert!(!text.contains("app"));
+        assert!(!text.contains("www"));
     }
 }
