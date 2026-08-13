@@ -4,28 +4,20 @@ use std::process::Stdio;
 
 use crate::global_config::GlobalConfig;
 
-const TEMPLATE_API_DOCKERFILE: &str =
-    include_str!("../../templates/deploy/api/Dockerfile");
-const TEMPLATE_APP_DOCKERFILE: &str =
-    include_str!("../../templates/deploy/app/Dockerfile");
-const TEMPLATE_APP_NGINX_CONF: &str =
-    include_str!("../../templates/deploy/app/docker/nginx.conf");
+const TEMPLATE_API_DOCKERFILE: &str = include_str!("../../templates/deploy/api/Dockerfile");
+const TEMPLATE_APP_DOCKERFILE: &str = include_str!("../../templates/deploy/app/Dockerfile");
+const TEMPLATE_APP_NGINX_CONF: &str = include_str!("../../templates/deploy/app/docker/nginx.conf");
 const TEMPLATE_APP_ENTRYPOINT: &str =
     include_str!("../../templates/deploy/app/docker/entrypoint.sh");
-const TEMPLATE_WWW_DOCKERFILE: &str =
-    include_str!("../../templates/deploy/www/Dockerfile");
-const TEMPLATE_WWW_NGINX_CONF: &str =
-    include_str!("../../templates/deploy/www/docker/nginx.conf");
+const TEMPLATE_WWW_DOCKERFILE: &str = include_str!("../../templates/deploy/www/Dockerfile");
+const TEMPLATE_WWW_NGINX_CONF: &str = include_str!("../../templates/deploy/www/docker/nginx.conf");
 const TEMPLATE_WWW_ENTRYPOINT: &str =
     include_str!("../../templates/deploy/www/docker/entrypoint.sh");
-const TEMPLATE_CHART_YAML: &str =
-    include_str!("../../templates/deploy/chart/Chart.yaml");
-const TEMPLATE_VALUES_YAML: &str =
-    include_str!("../../templates/deploy/chart/values.yaml");
+const TEMPLATE_CHART_YAML: &str = include_str!("../../templates/deploy/chart/Chart.yaml");
+const TEMPLATE_VALUES_YAML: &str = include_str!("../../templates/deploy/chart/values.yaml");
 const TEMPLATE_SECRETS_EXAMPLE: &str =
     include_str!("../../templates/deploy/chart/secrets.example.yaml");
-const TEMPLATE_DEPLOY_TOML: &str =
-    include_str!("../../templates/deploy/chart/deploy.toml");
+const TEMPLATE_DEPLOY_TOML: &str = include_str!("../../templates/deploy/chart/deploy.toml");
 const TEMPLATE_HELPERS_TPL: &str =
     include_str!("../../templates/deploy/chart/templates/_helpers.tpl");
 const TEMPLATE_API_DEPLOYMENT: &str =
@@ -40,8 +32,7 @@ const TEMPLATE_WWW_DEPLOYMENT: &str =
     include_str!("../../templates/deploy/chart/templates/www.yaml");
 const TEMPLATE_WWW_SERVICE: &str =
     include_str!("../../templates/deploy/chart/templates/www_service.yaml");
-const TEMPLATE_INGRESS: &str =
-    include_str!("../../templates/deploy/chart/templates/ingress.yaml");
+const TEMPLATE_INGRESS: &str = include_str!("../../templates/deploy/chart/templates/ingress.yaml");
 const TEMPLATE_LETSENCRYPT_ISSUER: &str =
     include_str!("../../templates/deploy/chart/templates/letsencrypt_issuer.yaml");
 const TEMPLATE_REGISTRY_SECRET: &str =
@@ -50,6 +41,13 @@ const TEMPLATE_GITHUB_WORKFLOW: &str =
     include_str!("../../templates/deploy/github/workflows/build.yaml");
 const TEMPLATE_API_PRODUCTION_TOML: &str =
     include_str!("../../templates/api/config/production.toml");
+const TEMPLATE_ADMIN_DOCKERFILE: &str = include_str!("../../templates/deploy/admin/Dockerfile");
+const TEMPLATE_ADMIN_NGINX: &str = include_str!("../../templates/deploy/admin/nginx.conf");
+const TEMPLATE_ADMIN_ENTRYPOINT: &str = include_str!("../../templates/deploy/admin/entrypoint.sh");
+const TEMPLATE_ADMIN_DEPLOYMENT: &str =
+    include_str!("../../templates/deploy/chart/templates/admin.yaml");
+const TEMPLATE_PROMETHEUS_DEPLOYMENT: &str =
+    include_str!("../../templates/deploy/chart/templates/prometheus.yaml");
 
 pub async fn handle_deploy_init() {
     validate_project_root();
@@ -71,26 +69,91 @@ pub async fn handle_deploy_init() {
 
     write_file("api/Dockerfile", render(TEMPLATE_API_DOCKERFILE, vars));
     write_file("app/Dockerfile", render(TEMPLATE_APP_DOCKERFILE, vars));
-    write_file("app/docker/nginx.conf", render(TEMPLATE_APP_NGINX_CONF, vars));
-    write_file("app/docker/entrypoint.sh", render(TEMPLATE_APP_ENTRYPOINT, vars));
+    write_file(
+        "app/docker/nginx.conf",
+        render(TEMPLATE_APP_NGINX_CONF, vars),
+    );
+    write_file(
+        "app/docker/entrypoint.sh",
+        render(TEMPLATE_APP_ENTRYPOINT, vars),
+    );
     write_file("www/Dockerfile", render(TEMPLATE_WWW_DOCKERFILE, vars));
-    write_file("www/docker/nginx.conf", render(TEMPLATE_WWW_NGINX_CONF, vars));
-    write_file("www/docker/entrypoint.sh", render(TEMPLATE_WWW_ENTRYPOINT, vars));
+    write_file(
+        "www/docker/nginx.conf",
+        render(TEMPLATE_WWW_NGINX_CONF, vars),
+    );
+    write_file(
+        "www/docker/entrypoint.sh",
+        render(TEMPLATE_WWW_ENTRYPOINT, vars),
+    );
+    write_file("admin/Dockerfile", render(TEMPLATE_ADMIN_DOCKERFILE, vars));
+    write_file(
+        "admin/docker/nginx.conf",
+        render(TEMPLATE_ADMIN_NGINX, vars),
+    );
+    write_file(
+        "admin/docker/entrypoint.sh",
+        render(TEMPLATE_ADMIN_ENTRYPOINT, vars),
+    );
     write_file("chart/Chart.yaml", render(TEMPLATE_CHART_YAML, vars));
     write_file("chart/values.yaml", render(TEMPLATE_VALUES_YAML, vars));
-    write_file("chart/secrets.example.yaml", render(TEMPLATE_SECRETS_EXAMPLE, vars));
+    write_file(
+        "chart/secrets.example.yaml",
+        render(TEMPLATE_SECRETS_EXAMPLE, vars),
+    );
     write_file("chart/deploy.toml", render(TEMPLATE_DEPLOY_TOML, vars));
-    write_file("chart/templates/_helpers.tpl", render(TEMPLATE_HELPERS_TPL, vars));
-    write_file("chart/templates/api.yaml", render(TEMPLATE_API_DEPLOYMENT, vars));
-    write_file("chart/templates/api_service.yaml", render(TEMPLATE_API_SERVICE, vars));
-    write_file("chart/templates/app.yaml", render(TEMPLATE_APP_DEPLOYMENT, vars));
-    write_file("chart/templates/app_service.yaml", render(TEMPLATE_APP_SERVICE, vars));
-    write_file("chart/templates/www.yaml", render(TEMPLATE_WWW_DEPLOYMENT, vars));
-    write_file("chart/templates/www_service.yaml", render(TEMPLATE_WWW_SERVICE, vars));
-    write_file("chart/templates/ingress.yaml", render(TEMPLATE_INGRESS, vars));
-    write_file("chart/templates/letsencrypt_issuer.yaml", render(TEMPLATE_LETSENCRYPT_ISSUER, vars));
-    write_file("chart/templates/registry_secret.yaml", render(TEMPLATE_REGISTRY_SECRET, vars));
-    write_file(".github/workflows/build.yaml", render(TEMPLATE_GITHUB_WORKFLOW, vars));
+    write_file(
+        "chart/templates/_helpers.tpl",
+        render(TEMPLATE_HELPERS_TPL, vars),
+    );
+    write_file(
+        "chart/templates/api.yaml",
+        render(TEMPLATE_API_DEPLOYMENT, vars),
+    );
+    write_file(
+        "chart/templates/api_service.yaml",
+        render(TEMPLATE_API_SERVICE, vars),
+    );
+    write_file(
+        "chart/templates/app.yaml",
+        render(TEMPLATE_APP_DEPLOYMENT, vars),
+    );
+    write_file(
+        "chart/templates/app_service.yaml",
+        render(TEMPLATE_APP_SERVICE, vars),
+    );
+    write_file(
+        "chart/templates/www.yaml",
+        render(TEMPLATE_WWW_DEPLOYMENT, vars),
+    );
+    write_file(
+        "chart/templates/www_service.yaml",
+        render(TEMPLATE_WWW_SERVICE, vars),
+    );
+    write_file(
+        "chart/templates/admin.yaml",
+        render(TEMPLATE_ADMIN_DEPLOYMENT, vars),
+    );
+    write_file(
+        "chart/templates/prometheus.yaml",
+        render(TEMPLATE_PROMETHEUS_DEPLOYMENT, vars),
+    );
+    write_file(
+        "chart/templates/ingress.yaml",
+        render(TEMPLATE_INGRESS, vars),
+    );
+    write_file(
+        "chart/templates/letsencrypt_issuer.yaml",
+        render(TEMPLATE_LETSENCRYPT_ISSUER, vars),
+    );
+    write_file(
+        "chart/templates/registry_secret.yaml",
+        render(TEMPLATE_REGISTRY_SECRET, vars),
+    );
+    write_file(
+        ".github/workflows/build.yaml",
+        render(TEMPLATE_GITHUB_WORKFLOW, vars),
+    );
 
     ensure_production_toml(&name);
 
@@ -126,7 +189,7 @@ fn generate_admin_password() -> (String, String) {
 fn print_admin_password_once(password: &str) {
     println!("\n🔐  Admin password (store in your password manager — shown only once):\n");
     println!("    {password}\n");
-    println!("    Login:  erno admin --url https://api.example.com");
+    println!("    Login:  https://admin.example.com");
     println!("    Username: admin");
     println!("    Only the Argon2 hash was written to chart/secrets.example.yaml.");
     println!("    The plaintext is NOT stored in the cluster or in git.\n");
@@ -155,12 +218,18 @@ pub async fn handle_deploy_install(version: &str, env: &str) {
     run_command(
         "helm",
         &[
-            "secrets", "upgrade", "--install", &name,
+            "secrets",
+            "upgrade",
+            "--install",
+            &name,
             &chart_ref,
-            "--version", version,
+            "--version",
+            version,
             "--atomic",
-            "--timeout", "300s",
-            "-f", &secrets_file,
+            "--timeout",
+            "300s",
+            "-f",
+            &secrets_file,
         ],
     );
 
@@ -201,8 +270,10 @@ fn validate_project_root() {
 }
 
 fn read_project_name() -> String {
-    let cargo_toml = std::fs::read_to_string("api/Cargo.toml")
-        .unwrap_or_else(|_| { eprintln!("❌  Could not read api/Cargo.toml"); std::process::exit(1) });
+    let cargo_toml = std::fs::read_to_string("api/Cargo.toml").unwrap_or_else(|_| {
+        eprintln!("❌  Could not read api/Cargo.toml");
+        std::process::exit(1)
+    });
 
     for line in cargo_toml.lines() {
         if let Some(rest) = line.strip_prefix("name") {
@@ -244,9 +315,7 @@ fn read_github_repo() -> String {
 
 fn extract_github_repo(url: &str) -> String {
     // https://github.com/owner/repo.git  or  git@github.com:owner/repo.git
-    let stripped = url
-        .trim_end_matches(".git")
-        .trim_end_matches('/');
+    let stripped = url.trim_end_matches(".git").trim_end_matches('/');
 
     if let Some(path) = stripped.strip_prefix("https://github.com/") {
         return path.to_string();
@@ -351,9 +420,13 @@ async fn setup_sops(name: &str, github_repo: &str) {
     // Try to set GitHub Actions secret via `gh` CLI
     let private_key = private_key_lines.join("\n");
     let config = GlobalConfig::load().ok();
-    let github_token = config.as_ref().and_then(|c| c.github.as_ref()).map(|g| g.token.as_str());
+    let github_token = config
+        .as_ref()
+        .and_then(|c| c.github.as_ref())
+        .map(|g| g.token.as_str());
 
-    let secret_set = try_set_github_secret(github_repo, "SOPS_AGE_KEY", &private_key, github_token).await;
+    let secret_set =
+        try_set_github_secret(github_repo, "SOPS_AGE_KEY", &private_key, github_token).await;
 
     println!("\n🔑  Age keypair generated.");
     println!("    Public key:  {public_key}");
@@ -364,7 +437,10 @@ async fn setup_sops(name: &str, github_repo: &str) {
     } else {
         println!("\n    ⚠️   Could not set GitHub Actions secret automatically.");
         println!("    Run this command to set it manually:");
-        println!("      gh secret set SOPS_AGE_KEY --repo {github_repo} --body '{}'", private_key.replace('\n', "\\n"));
+        println!(
+            "      gh secret set SOPS_AGE_KEY --repo {github_repo} --body '{}'",
+            private_key.replace('\n', "\\n")
+        );
     }
 
     println!("\n    ⚠️   Back up your private key — it cannot be recovered:");
@@ -372,11 +448,24 @@ async fn setup_sops(name: &str, github_repo: &str) {
     let _ = name; // used in template vars
 }
 
-async fn try_set_github_secret(repo: &str, secret_name: &str, value: &str, token: Option<&str>) -> bool {
+async fn try_set_github_secret(
+    repo: &str,
+    secret_name: &str,
+    value: &str,
+    token: Option<&str>,
+) -> bool {
     // Prefer `gh` CLI if available
     if which_gh() {
         let status = std::process::Command::new("gh")
-            .args(["secret", "set", secret_name, "--repo", repo, "--body", value])
+            .args([
+                "secret",
+                "set",
+                secret_name,
+                "--repo",
+                repo,
+                "--body",
+                value,
+            ])
             .status();
         if let Ok(s) = status {
             return s.success();
@@ -399,8 +488,13 @@ fn which_gh() -> bool {
         .unwrap_or(false)
 }
 
-async fn set_github_secret_via_api(repo: &str, secret_name: &str, value: &str, token: &str) -> bool {
-    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+async fn set_github_secret_via_api(
+    repo: &str,
+    secret_name: &str,
+    value: &str,
+    token: &str,
+) -> bool {
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
     let client = reqwest::Client::new();
 
@@ -411,12 +505,23 @@ async fn set_github_secret_via_api(repo: &str, secret_name: &str, value: &str, t
         .header("Authorization", format!("Bearer {token}"))
         .header("User-Agent", "erno-cli")
         .send()
-        .await else { return false; };
+        .await
+    else {
+        return false;
+    };
 
-    let Ok(json) = resp.json::<serde_json::Value>().await else { return false; };
-    let Some(key_id) = json["key_id"].as_str() else { return false; };
-    let Some(key_b64) = json["key"].as_str() else { return false; };
-    let Ok(pub_key_bytes) = BASE64.decode(key_b64) else { return false; };
+    let Ok(json) = resp.json::<serde_json::Value>().await else {
+        return false;
+    };
+    let Some(key_id) = json["key_id"].as_str() else {
+        return false;
+    };
+    let Some(key_b64) = json["key"].as_str() else {
+        return false;
+    };
+    let Ok(pub_key_bytes) = BASE64.decode(key_b64) else {
+        return false;
+    };
 
     // Step 2: encrypt with NaCl sealed box (libsodium crypto_box_seal)
     // Requires the `crypto_box` crate — we approximate with `gh` CLI fallback above.
@@ -447,16 +552,23 @@ fn write_file(path: &str, content: String) {
 }
 
 fn render(template: &str, vars: &[(&str, &str)]) -> String {
-    vars.iter().fold(template.to_string(), |s, (k, v)| s.replace(k, v))
+    vars.iter()
+        .fold(template.to_string(), |s, (k, v)| s.replace(k, v))
 }
 
 fn prompt(label: &str, default: &str) -> String {
     print!("{label}: ");
     io::stdout().flush().unwrap();
     let mut input = String::new();
-    io::stdin().read_line(&mut input).expect("failed to read stdin");
+    io::stdin()
+        .read_line(&mut input)
+        .expect("failed to read stdin");
     let trimmed = input.trim();
-    if trimmed.is_empty() { default.to_string() } else { trimmed.to_string() }
+    if trimmed.is_empty() {
+        default.to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn run_command(program: &str, args: &[&str]) {

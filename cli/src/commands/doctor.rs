@@ -108,6 +108,7 @@ async fn run_checks() -> Vec<CheckResult> {
         check_global_config(),
         check_postgres_admin().await,
         check_sea_orm_cli(),
+        check_prometheus(),
     ]
 }
 
@@ -303,6 +304,16 @@ fn check_sea_orm_cli() -> CheckResult {
             "Install with: cargo install sea-orm-cli",
         ),
         Some(v) => CheckResult::pass("sea-orm-cli", v.trim().to_string()),
+    }
+}
+
+fn check_prometheus() -> CheckResult {
+    match run_cmd("prometheus", &["--version"]) {
+        None => CheckResult::warn(
+            "prometheus not found",
+            "Install Prometheus to scrape /metrics in `erno dev` (https://prometheus.io/docs/prometheus/latest/installation/)",
+        ),
+        Some(v) => CheckResult::pass("prometheus", v.lines().next().unwrap_or(v.trim()).to_string()),
     }
 }
 

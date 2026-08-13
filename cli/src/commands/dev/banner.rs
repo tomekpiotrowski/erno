@@ -89,7 +89,7 @@ pub fn render_banner(urls: &DevUrls, snap: &BannerSnapshot) -> String {
 pub fn hidden_surfaces(api_url: &str) -> String {
     let base = api_url.trim_end_matches('/');
     format!(
-        "  {DIM}admin{RESET} erno admin                      password: admin\n  {DIM}mail {RESET} {base}/dev/emails\n  {DIM}jobs {RESET} {base}/dev/jobs\n"
+        "  {DIM}admin{RESET} http://localhost:4300             password: admin\n  {DIM}mail {RESET} {base}/dev/emails\n  {DIM}jobs {RESET} {base}/dev/jobs\n"
     )
 }
 
@@ -203,7 +203,7 @@ mod tests {
         assert!(text.contains("http://localhost:4321"));
         assert!(text.contains("ready"));
         assert!(text.contains("starting"));
-        assert!(text.contains("erno admin"));
+        assert!(text.contains("http://localhost:4300"));
         assert!(text.contains("/dev/emails"));
         assert!(text.contains("/dev/jobs"));
     }

@@ -79,7 +79,7 @@ Background work uses a PostgreSQL-backed queue (advisory locks, workers, cron). 
 
 | Surface | Purpose |
 |---------|---------|
-| `/admin/api/*` + `erno admin` | Users, gifts, jobs (Basic auth) |
+| `/admin/api/*` + `admin/` SPA | Users, gifts, jobs, emails (Basic auth). Charts via Prometheus. |
 | Business stats snapshots | Daily SaaS metrics for the TUI |
 | `/metrics` | Prometheus |
 | `erno deploy` | Docker/Helm scaffold and install |

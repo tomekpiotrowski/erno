@@ -58,7 +58,7 @@ Interactive setup that:
 The plaintext admin password is printed once at the end of `init`. Store it in a password manager. Only the Argon2 hash is written into `chart/secrets.example.yaml` — the plaintext is **not** committed or stored in the cluster.
 
 ```sh
-erno admin --url https://api.example.com
+Open https://admin.example.com
 # Username: admin
 # Password: <the one-time value from init>
 ```

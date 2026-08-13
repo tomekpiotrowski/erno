@@ -18,7 +18,7 @@ cargo install --path .                   # install globally as `erno`
 | `erno doctor` | Checks the local environment: Rust, Node, Angular CLI, PostgreSQL, `~/.erno/config.toml`, admin DB access |
 | `erno new <name>` | Scaffolds a full-stack Erno project (Rust API + Ionic app + Astro www) |
 | `erno dev` | Starts api + app + www dev servers, readiness banner, `--ios`/`--android` live reload |
-| `erno admin` | Operator TUI — talks to the running API's `/admin/api` over HTTP (Basic auth) |
+| `erno dev` | Also starts Prometheus (if installed) and `admin/` on :4300 |
 | `erno deploy init` | Scaffolds Docker/Helm deploy files; generates admin password hash for production |
 | `erno deploy install` | Installs a chart version to the cluster (`helm secrets upgrade --install`) |
 

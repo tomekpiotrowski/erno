@@ -112,6 +112,9 @@ pub struct Config<ExtraConfig = ()> {
     pub metrics: MetricsConfig,
     #[serde(default)]
     pub cors: CorsConfig,
+    /// Days to keep `email_messages` rows (default 30). Purged by the job-cleanup loop.
+    #[serde(default = "default_email_log_retention_days")]
+    pub email_log_retention_days: u64,
     /// Operator admin API (`/admin/api/*`). Disabled when absent or when
     /// `password_hash` is empty.
     #[serde(default)]
@@ -120,7 +123,7 @@ pub struct Config<ExtraConfig = ()> {
     pub extra: ExtraConfig,
 }
 
-/// Configuration for the HTTP admin API used by `erno admin`.
+/// Configuration for the HTTP admin API.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdminConfig {
     /// Basic-auth username. Defaults to `"admin"`.
@@ -382,4 +385,8 @@ const fn default_failed_retention() -> u64 {
 
 const fn default_cleanup_batch_size() -> usize {
     1000
+}
+
+const fn default_email_log_retention_days() -> u64 {
+    30
 }

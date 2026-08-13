@@ -13,6 +13,10 @@
 - name: APP__ADMIN__USERNAME
   value: "admin"
 {{- end }}
+{{- if .Values.api.metrics_auth_token }}
+- name: APP__METRICS__AUTH_TOKEN
+  value: {{ .Values.api.metrics_auth_token | quote }}
+{{- end }}
 - name: APP__TRACING__LOG_LEVEL
   value: {{ .Values.api.log_level | default "info" | quote }}
 - name: APP__EMAIL__TYPE

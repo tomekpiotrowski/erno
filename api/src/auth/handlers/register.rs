@@ -94,6 +94,14 @@ where
         }
     };
 
+    crate::admin_events::emit_ok(
+        &app.db,
+        crate::admin_events::USER_REGISTERED,
+        Some(created_user.id),
+        crate::admin_events::empty_payload(),
+    )
+    .await;
+
     let raw_token = generate_secure_token(64);
     let args = SendVerificationEmailArgs {
         user_id: created_user.id,
@@ -148,6 +156,14 @@ mod tests {
 
         assert_eq!(response.status_code(), 201);
         assert_eq!(t.enqueued_jobs_of_type("send_verification_email").len(), 1);
+
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+        let events = crate::database::models::admin_event::Entity::find()
+            .filter(crate::database::models::admin_event::Column::Name.eq("user.registered"))
+            .all(&t.db)
+            .await
+            .unwrap();
+        assert_eq!(events.len(), 1);
     }
 
     #[tokio::test]

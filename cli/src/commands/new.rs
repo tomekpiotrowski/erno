@@ -93,6 +93,7 @@ pub async fn handle_new(
     install_app_deps(&dest, erno_angular_dep.starts_with("file:"));
     create_www(&dest, name);
     install_www_deps(&dest);
+    copy_admin(&dest, erno_path);
 
     let config = GlobalConfig::load().ok();
     if let Some(config) = config {
@@ -355,6 +356,39 @@ fn create_www(dest: &Path, name: &str) {
     );
     write(&www.join("src/styles/global.css"), WWW_GLOBAL_CSS);
     write(&www.join("public/favicon.svg"), WWW_FAVICON);
+}
+
+fn copy_admin(dest: &Path, erno_path: Option<&str>) {
+    let Some(erno_path) = erno_path else {
+        return;
+    };
+    let src = PathBuf::from(erno_path).join("admin");
+    if !src.join("package.json").is_file() {
+        return;
+    }
+    let dst = dest.join("admin");
+    println!("  Copying admin/...");
+    copy_dir_filtered(&src, &dst);
+}
+
+fn copy_dir_filtered(src: &Path, dst: &Path) {
+    std::fs::create_dir_all(dst).ok();
+    let Ok(entries) = std::fs::read_dir(src) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if name == "node_modules" || name == "dist" || name == ".angular" {
+            continue;
+        }
+        let from = entry.path();
+        let to = dst.join(name);
+        if from.is_dir() {
+            copy_dir_filtered(&from, &to);
+        } else {
+            let _ = std::fs::copy(&from, &to);
+        }
+    }
 }
 
 fn install_www_deps(dest: &Path) {

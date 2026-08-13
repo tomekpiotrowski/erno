@@ -46,9 +46,17 @@ pub async fn create_trial(
         user_id,
         Some(inserted.id),
         Some("trial".to_string()),
-        Some(plan),
+        Some(plan.clone()),
     )
     .await?;
+
+    crate::admin_events::emit_ok(
+        db,
+        crate::admin_events::SUBSCRIPTION_ACTIVATED,
+        Some(user_id),
+        serde_json::json!({ "type": "trial", "plan": plan }),
+    )
+    .await;
 
     Ok(())
 }

@@ -68,13 +68,21 @@ pub async fn admin_gift<ExtraConfig: Clone + Send + Sync + 'static>(
         req.user_id,
         Some(inserted.id),
         Some("gift".to_string()),
-        Some(req.plan),
+        Some(req.plan.clone()),
     )
     .await
     {
         tracing::error!("Failed to update user subscription cache: {}", e);
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
+
+    crate::admin_events::emit_ok(
+        &app.db,
+        crate::admin_events::SUBSCRIPTION_GIFTED,
+        Some(req.user_id),
+        serde_json::json!({ "plan": req.plan, "duration_days": req.duration_days }),
+    )
+    .await;
 
     StatusCode::CREATED.into_response()
 }

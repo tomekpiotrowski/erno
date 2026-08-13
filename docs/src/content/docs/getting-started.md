@@ -126,7 +126,7 @@ The `www/` site is a static Astro landing page (SEO-friendly). CTAs link to the 
 | Sync | Offline-first delta sync + WebSocket push |
 | Billing | Stripe, gift, and trial subscriptions |
 | Storage | Local or S3-compatible files |
-| Ops | Admin HTTP API, `erno admin` TUI, Prometheus metrics |
+| Ops | Admin HTTP API, Angular operator app, Prometheus metrics |
 
 ## Manual API-only setup
 

@@ -8,6 +8,7 @@ mod ports;
 mod preflight;
 mod process;
 mod project;
+mod prometheus;
 mod seed;
 mod selection;
 mod watch;
@@ -51,6 +52,12 @@ pub struct DevArgs {
     /// Live-reload the app on a connected Android device / emulator
     #[arg(long)]
     pub android: bool,
+    /// Do not start Prometheus even if the binary is on PATH
+    #[arg(long)]
+    pub no_prometheus: bool,
+    /// Do not start the operator admin SPA
+    #[arg(long)]
+    pub no_admin: bool,
 }
 
 pub(crate) const CYAN: &str = "\x1b[36m";
@@ -231,6 +238,63 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) {
         })
     });
 
+    let api_port = urls
+        .api
+        .as_deref()
+        .and_then(|u| ports::port_from_url(Some(u)))
+        .unwrap_or(3000);
+    let prometheus = if sel.api && !args.no_prometheus {
+        if prometheus::binary_on_path() {
+            let metrics_toml = std::fs::read_to_string(root.join("api/config/development.toml"))
+                .unwrap_or_default();
+            let scrape_token = ports::parse_table_string(&metrics_toml, "metrics", "auth_token");
+            match prometheus::prepare_dir(&root, api_port, scrape_token.as_deref()) {
+                Ok(dir) => {
+                    let prom_sink = sink.clone();
+                    Some(Supervisor::start(
+                        "prom",
+                        YELLOW,
+                        shutdown_rx.clone(),
+                        move || prometheus::spawn(&dir, YELLOW, prom_sink.clone()),
+                    ))
+                }
+                Err(e) => {
+                    eprintln!("Could not prepare Prometheus data dir: {e}");
+                    None
+                }
+            }
+        } else {
+            eprintln!(
+                "{DIM}prometheus not on PATH — skip scrape server (erno doctor, or --no-prometheus){RESET}"
+            );
+            None
+        }
+    } else {
+        None
+    };
+
+    let admin_dir = find_admin_dir(&root);
+    let admin = if !args.no_admin {
+        if let Some(admin_dir) = admin_dir {
+            ensure_npm_deps(&admin_dir, "admin");
+            let admin_sink = sink.clone();
+            Some(Supervisor::start(
+                "admin",
+                YELLOW,
+                shutdown_rx.clone(),
+                move || {
+                    let mut cmd = Command::new("npm");
+                    cmd.arg("start");
+                    spawn_labeled(cmd, &admin_dir, YELLOW, "admin", admin_sink.clone())
+                },
+            ))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     let www = sel.www.then(|| {
         let www_dir_spawn = www_dir.clone();
         let www_sink = sink.clone();
@@ -253,6 +317,34 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) {
     if let Some(www) = www {
         www.shutdown().await;
     }
+    if let Some(prometheus) = prometheus {
+        prometheus.shutdown().await;
+    }
+    if let Some(admin) = admin {
+        admin.shutdown().await;
+    }
+}
+
+fn find_admin_dir(root: &std::path::Path) -> Option<std::path::PathBuf> {
+    let local = root.join("admin");
+    if local.join("package.json").is_file() {
+        return Some(local);
+    }
+    let cargo = std::fs::read_to_string(root.join("api/Cargo.toml")).ok()?;
+    for line in cargo.lines() {
+        let line = line.trim();
+        if !line.starts_with("erno") || !line.contains("path") {
+            continue;
+        }
+        let path = line.split("path").nth(1)?;
+        let path = path.split('"').nth(1).or_else(|| path.split('\'').nth(1))?;
+        let api_dir = root.join("api").join(path);
+        let admin = api_dir.parent()?.join("admin");
+        if admin.join("package.json").is_file() {
+            return Some(admin);
+        }
+    }
+    None
 }
 
 fn ensure_npm_deps(dir: &std::path::Path, label: &str) {

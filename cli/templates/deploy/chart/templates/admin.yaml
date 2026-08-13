@@ -1,0 +1,42 @@
+{{- if .Values.admin.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-admin
+spec:
+  replicas: {{ .Values.admin.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-admin
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-admin
+    spec:
+      imagePullSecrets:
+        - name: {{ .Release.Name }}-registry
+      containers:
+        - name: admin
+          image: "ghcr.io/{{github_repo}}/admin:{{ .Values.admin.imageTag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 80
+          env:
+            - name: API_HOST
+              value: {{ .Release.Name }}-api
+            - name: API_PORT
+              value: {{ .Values.api.port | quote }}
+            - name: PROM_HOST
+              value: {{ .Release.Name }}-prometheus
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-admin
+spec:
+  selector:
+    app: {{ .Release.Name }}-admin
+  ports:
+    - port: 80
+      targetPort: 80
+{{- end }}

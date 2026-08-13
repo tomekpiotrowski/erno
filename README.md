@@ -28,7 +28,7 @@ Full-stack SaaS framework — a Rust/Axum backend library paired with an Angular
 - **Authorization** - Pundit-style policy-based authz (`Policy` trait)
 - **WebSocket** - Real-time push to connected clients
 - **Metrics** - Prometheus-compatible `/metrics` endpoint
-- **Admin** - HTTP admin API + `erno admin` TUI
+- **Admin** - HTTP admin API + Angular operator app (`admin/`)
 
 ### Frontend (Angular / `app/`)
 

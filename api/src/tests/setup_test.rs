@@ -53,11 +53,23 @@ async fn initialize_database_schema<AppMigrator: MigratorTrait>(fixture_loader: 
     let db = setup_database_connection(&app_config.database).await;
     debug!("Database connection established");
 
-    // Reset and reapply migrations for a clean slate
-    debug!("Refreshing database migrations");
-    match AppMigrator::refresh(&db).await {
+    // Wipe the schema so removed migrations (and leftover seaql_migrations
+    // rows) cannot block a clean apply.
+    debug!("Resetting public schema");
+    if let Err(e) = db
+        .execute_unprepared(
+            "DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO public;",
+        )
+        .await
+    {
+        error!("❌ Failed to reset test schema: {e}");
+        panic!("Failed to reset test schema: {e}");
+    }
+
+    debug!("Applying database migrations");
+    match AppMigrator::up(&db, None).await {
         Ok(()) => {
-            debug!("Database migrations refreshed successfully");
+            debug!("Database migrations applied successfully");
         }
         Err(e) => {
             error!("❌ Database migrations failed: {}", e);

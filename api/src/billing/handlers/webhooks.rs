@@ -138,9 +138,17 @@ async fn handle_checkout_completed<ExtraConfig: Clone + Send + Sync + 'static>(
         user_id,
         Some(inserted.id),
         Some("stripe".to_string()),
-        Some(plan),
+        Some(plan.clone()),
     )
     .await?;
+
+    crate::admin_events::emit_ok(
+        &app.db,
+        crate::admin_events::SUBSCRIPTION_ACTIVATED,
+        Some(user_id),
+        serde_json::json!({ "type": "stripe", "plan": plan }),
+    )
+    .await;
 
     Ok(())
 }
@@ -164,6 +172,7 @@ async fn handle_subscription_updated<ExtraConfig: Clone + Send + Sync + 'static>
         return Ok(());
     };
 
+    let previous_status = existing.status.clone();
     let status = stripe_status_to_ours(&subscription.status);
     let period_start = timestamp_to_naive(subscription.current_period_start);
     let period_end = timestamp_to_naive(subscription.current_period_end);
@@ -176,6 +185,16 @@ async fn handle_subscription_updated<ExtraConfig: Clone + Send + Sync + 'static>
     active_model.cancel_at_period_end = Set(cancel_at_period_end);
     active_model.updated_at = Set(Utc::now().naive_utc());
     active_model.update(&app.db).await?;
+
+    if status == SubscriptionStatus::Canceled && previous_status != SubscriptionStatus::Canceled {
+        crate::admin_events::emit_ok(
+            &app.db,
+            crate::admin_events::SUBSCRIPTION_CANCELED,
+            Some(existing.user_id),
+            serde_json::json!({ "type": "stripe", "source": "updated" }),
+        )
+        .await;
+    }
 
     // If the subscription is no longer active, clear the user cache
     if status != SubscriptionStatus::Active {
@@ -222,6 +241,14 @@ async fn handle_subscription_deleted<ExtraConfig: Clone + Send + Sync + 'static>
     if currently_active {
         update_user_subscription_cache(&app.db, existing.user_id, None, None, None).await?;
     }
+
+    crate::admin_events::emit_ok(
+        &app.db,
+        crate::admin_events::SUBSCRIPTION_CANCELED,
+        Some(existing.user_id),
+        serde_json::json!({ "type": "stripe" }),
+    )
+    .await;
 
     Ok(())
 }

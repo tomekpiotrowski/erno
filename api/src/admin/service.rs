@@ -2,56 +2,42 @@
 use chrono::Utc;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, DbBackend, DbErr,
-    EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set, Statement, TransactionTrait,
+    EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set, Statement,
+    TransactionTrait,
 };
 use uuid::Uuid;
 
 use crate::{
     account::{purge_user_account, UserDataDeleter},
     admin::dto::{
-        DashboardResponse, EmailJobStat, JobSummary, JobTypeStat, JobsResponse, MetricPointDto,
-        MetricSeriesDto, StatsResponse, SubscriptionInfo, UserDetailResponse, UserListResponse,
+        AdminEventDto, DashboardResponse, EmailJobStat, EmailListResponse, EmailMessageDto,
+        EventsResponse, JobDetailResponse, JobExecutionDto, JobSummary, JobTypeStat, JobsResponse,
+        SubscriptionInfo, TableCountDto, TablesResponse, UserDetailResponse, UserListResponse,
         UserSummary,
     },
     billing::{
         handlers::webhooks::update_user_subscription_cache,
         lookup::{load_current_subscription, CurrentSubscription},
-        models::gift_subscription,
+        models::{gift_subscription, stripe_subscription, trial_subscription},
     },
-    business_stats::models::stat_snapshot,
     database::models::{
+        admin_event, email_message,
         job::{self, Column as JobColumn},
+        job_execution,
         job_status::JobStatus,
+        oauth_identity,
         user::{self, Column as UserColumn},
     },
     job_queue::JobQueue,
 };
 use std::sync::Arc;
 
-/// Display order for well-known metrics (matches the original Stats TUI).
-const HEADLINE_METRICS: &[&str] = &[
-    "total_users",
-    "new_users_since_last",
-    "email_verified_count",
-    "paid_active_count",
-    "trial_active_count",
-    "gift_active_count",
-    "no_sub_count",
-    "past_due_count",
-    "canceled_count",
-    "cancel_at_period_end_count",
-    "active_users_1d",
-    "active_users_7d",
-    "active_users_30d",
-    "total_storage_bytes",
-    "total_file_count",
-];
-
 fn user_summary(u: &user::Model) -> UserSummary {
     UserSummary {
         id: u.id,
         email: u.email.clone(),
         email_verified_at: u.email_verified_at,
+        last_active_at: u.last_active_at,
         subscription_type: u.subscription_type.clone(),
         subscription_plan: u.subscription_plan.clone(),
         created_at: u.created_at,
@@ -91,34 +77,55 @@ fn subscription_info(s: CurrentSubscription) -> SubscriptionInfo {
 }
 
 pub async fn dashboard(db: &DatabaseConnection) -> Result<DashboardResponse, DbErr> {
-    let count_from = |sql: &'static str| async move {
-        db.query_one(Statement::from_string(DbBackend::Postgres, sql))
-            .await
-            .map(|r| r.and_then(|r| r.try_get::<i64>("", "count").ok()).unwrap_or(0))
-    };
+    let mut stripe = 0;
+    let mut gift = 0;
+    let mut trial = 0;
+    let mut no_sub = 0;
+    let mut total = 0;
+    for r in db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT subscription_type, COUNT(*)::bigint AS count FROM users GROUP BY 1",
+        ))
+        .await?
+    {
+        let n: i64 = r.try_get("", "count").unwrap_or(0);
+        total += n;
+        match r
+            .try_get::<Option<String>>("", "subscription_type")
+            .ok()
+            .flatten()
+            .as_deref()
+        {
+            Some("stripe") => stripe = n,
+            Some("gift") => gift = n,
+            Some("trial") => trial = n,
+            _ => no_sub += n,
+        }
+    }
 
-    let total = count_from("SELECT COUNT(*)::bigint AS count FROM users").await?;
-    let stripe = count_from(
-        "SELECT COUNT(*)::bigint AS count FROM users WHERE subscription_type = 'stripe'",
-    )
-    .await?;
-    let gift =
-        count_from("SELECT COUNT(*)::bigint AS count FROM users WHERE subscription_type = 'gift'")
-            .await?;
-    let trial =
-        count_from("SELECT COUNT(*)::bigint AS count FROM users WHERE subscription_type = 'trial'")
-            .await?;
-    let no_sub =
-        count_from("SELECT COUNT(*)::bigint AS count FROM users WHERE subscription_type IS NULL")
-            .await?;
-    let pending = count_from(
-        "SELECT COUNT(*)::bigint AS count FROM job WHERE status IN ('pending', 'pending_retry')",
-    )
-    .await?;
-    let running =
-        count_from("SELECT COUNT(*)::bigint AS count FROM job WHERE status = 'running'").await?;
-    let failed =
-        count_from("SELECT COUNT(*)::bigint AS count FROM job WHERE status = 'failed'").await?;
+    let mut pending = 0;
+    let mut running = 0;
+    let mut failed = 0;
+    for r in db
+        .query_all(Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT status, COUNT(*)::bigint AS count FROM job GROUP BY 1",
+        ))
+        .await?
+    {
+        let n: i64 = r.try_get("", "count").unwrap_or(0);
+        match r
+            .try_get::<String>("", "status")
+            .unwrap_or_default()
+            .as_str()
+        {
+            "pending" | "pending_retry" => pending += n,
+            "running" => running = n,
+            "failed" => failed = n,
+            _ => {}
+        }
+    }
 
     let exec_row = db
         .query_one(Statement::from_string(
@@ -145,25 +152,18 @@ pub async fn dashboard(db: &DatabaseConnection) -> Result<DashboardResponse, DbE
     let email_rows = db
         .query_all(Statement::from_string(
             DbBackend::Postgres,
-            "SELECT j.type, \
+            "SELECT COALESCE(template, '(none)') AS template, \
               COUNT(*)::bigint AS total, \
-              COUNT(*) FILTER (WHERE je.result = 'completed')::bigint AS completed, \
-              COUNT(*) FILTER (WHERE je.result = 'failed')::bigint    AS failed \
-             FROM job_execution je \
-             JOIN job j ON je.job_id = j.id \
-             WHERE j.type IN ('send_verification_email','send_password_reset_email','send_already_registered_email') \
-             GROUP BY j.type ORDER BY j.type",
+              COUNT(*) FILTER (WHERE status = 'sent')::bigint AS completed, \
+              COUNT(*) FILTER (WHERE status = 'failed')::bigint AS failed \
+             FROM email_messages \
+             GROUP BY 1 ORDER BY 1",
         ))
         .await?;
     let email_stats: Vec<EmailJobStat> = email_rows
         .into_iter()
         .map(|r| {
-            let raw: String = r.try_get("", "type").unwrap_or_default();
-            let name = raw
-                .strip_prefix("send_")
-                .and_then(|s| s.strip_suffix("_email"))
-                .unwrap_or(&raw)
-                .to_string();
+            let name: String = r.try_get("", "template").unwrap_or_default();
             let total: i64 = r.try_get("", "total").unwrap_or(0);
             let completed: i64 = r.try_get("", "completed").unwrap_or(0);
             let failed: i64 = r.try_get("", "failed").unwrap_or(0);
@@ -197,14 +197,26 @@ pub async fn dashboard(db: &DatabaseConnection) -> Result<DashboardResponse, DbE
 pub async fn list_users(
     db: &DatabaseConnection,
     query: Option<&str>,
+    page: u64,
+    per_page: u64,
 ) -> Result<UserListResponse, DbErr> {
+    let page = page.max(1);
+    let per_page = per_page.clamp(1, 200);
     let mut q = user::Entity::find().order_by_asc(UserColumn::Email);
     if let Some(qstr) = query.filter(|s| !s.is_empty()) {
         q = q.filter(UserColumn::Email.like(format!("%{}%", qstr.to_lowercase())));
     }
-    let users = q.limit(200).all(db).await?;
+    let total = q.clone().count(db).await?;
+    let users = q
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+        .all(db)
+        .await?;
     Ok(UserListResponse {
         users: users.iter().map(user_summary).collect(),
+        page,
+        per_page,
+        total,
     })
 }
 
@@ -218,9 +230,46 @@ pub async fn user_detail(
     let subscription = load_current_subscription(db, &u)
         .await
         .map(subscription_info);
+
+    let oauth_providers = oauth_identity::Entity::find()
+        .filter(oauth_identity::Column::UserId.eq(user_id))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|i| i.provider)
+        .collect();
+
+    let mut subscription_history = Vec::new();
+    for row in stripe_subscription::Entity::find()
+        .filter(stripe_subscription::Column::UserId.eq(user_id))
+        .order_by_desc(stripe_subscription::Column::CreatedAt)
+        .all(db)
+        .await?
+    {
+        subscription_history.push(subscription_info(CurrentSubscription::Stripe(row)));
+    }
+    for row in gift_subscription::Entity::find()
+        .filter(gift_subscription::Column::UserId.eq(user_id))
+        .order_by_desc(gift_subscription::Column::CreatedAt)
+        .all(db)
+        .await?
+    {
+        subscription_history.push(subscription_info(CurrentSubscription::Gift(row)));
+    }
+    for row in trial_subscription::Entity::find()
+        .filter(trial_subscription::Column::UserId.eq(user_id))
+        .order_by_desc(trial_subscription::Column::CreatedAt)
+        .all(db)
+        .await?
+    {
+        subscription_history.push(subscription_info(CurrentSubscription::Trial(row)));
+    }
+
     Ok(Some(UserDetailResponse {
         user: user_summary(&u),
         subscription,
+        oauth_providers,
+        subscription_history,
     }))
 }
 
@@ -238,6 +287,13 @@ pub async fn activate_user(
         ..Default::default()
     };
     user::Entity::update(active).exec(db).await?;
+    crate::admin_events::emit_ok(
+        db,
+        crate::admin_events::USER_VERIFIED,
+        Some(user_id),
+        serde_json::json!({ "source": "admin" }),
+    )
+    .await;
     user_detail(db, user_id).await
 }
 
@@ -280,9 +336,16 @@ pub async fn gift_subscription(
         user_id,
         Some(inserted.id),
         Some("gift".to_string()),
-        Some(plan),
+        Some(plan.clone()),
     )
     .await?;
+    crate::admin_events::emit_ok(
+        db,
+        crate::admin_events::SUBSCRIPTION_GIFTED,
+        Some(user_id),
+        serde_json::json!({ "plan": plan, "duration_days": duration_days }),
+    )
+    .await;
     user_detail(db, user_id).await
 }
 
@@ -360,81 +423,183 @@ pub async fn retry_job(db: &DatabaseConnection, job_id: Uuid) -> Result<bool, Db
     Ok(true)
 }
 
-/// Load `stat_snapshot` history for the business-stats sparklines.
-pub async fn business_stats(
-    db: &DatabaseConnection,
-    window_days: i64,
-) -> Result<StatsResponse, DbErr> {
-    let window_days = window_days.clamp(1, 365);
-    let since = Utc::now().naive_utc() - chrono::Duration::days(window_days);
+fn job_summary(j: &job::Model) -> JobSummary {
+    JobSummary {
+        id: j.id,
+        job_type: j.r#type.clone(),
+        status: j.status,
+        retry_count: j.retry_count,
+        created_at: j.created_at,
+        next_execution_at: j.next_execution_at,
+    }
+}
 
-    let rows = stat_snapshot::Entity::find()
-        .filter(stat_snapshot::Column::CapturedAt.gte(since))
-        .order_by_asc(stat_snapshot::Column::Metric)
-        .order_by_asc(stat_snapshot::Column::Dimension)
-        .order_by_asc(stat_snapshot::Column::CapturedAt)
+pub async fn job_detail(
+    db: &DatabaseConnection,
+    job_id: Uuid,
+) -> Result<Option<JobDetailResponse>, DbErr> {
+    let Some(j) = job::Entity::find_by_id(job_id).one(db).await? else {
+        return Ok(None);
+    };
+    let executions = job_execution::Entity::find()
+        .filter(job_execution::Column::JobId.eq(job_id))
+        .order_by_desc(job_execution::Column::StartedAt)
         .all(db)
         .await?;
+    Ok(Some(JobDetailResponse {
+        job: job_summary(&j),
+        arguments: j.arguments,
+        executions: executions
+            .into_iter()
+            .map(|e| JobExecutionDto {
+                id: e.id,
+                result: e.result.to_string(),
+                started_at: e.started_at,
+                finished_at: e.finished_at,
+                execution_time_ms: e.execution_time_ms,
+                failure_reason: e.failure_reason,
+            })
+            .collect(),
+    }))
+}
 
-    Ok(StatsResponse {
-        window_days,
-        series: group_into_series(rows),
+fn email_dto(m: email_message::Model) -> EmailMessageDto {
+    EmailMessageDto {
+        id: m.id,
+        to: m.to,
+        from: m.from,
+        subject: m.subject,
+        template: m.template,
+        user_id: m.user_id,
+        job_id: m.job_id,
+        status: m.status,
+        error: m.error,
+        sent_at: m.sent_at,
+        created_at: m.created_at,
+    }
+}
+
+pub async fn list_emails(
+    db: &DatabaseConnection,
+    to: Option<&str>,
+    template: Option<&str>,
+    status: Option<&str>,
+    page: u64,
+    per_page: u64,
+) -> Result<EmailListResponse, DbErr> {
+    let page = page.max(1);
+    let per_page = per_page.clamp(1, 200);
+    let mut q = email_message::Entity::find().order_by_desc(email_message::Column::CreatedAt);
+    if let Some(to) = to.filter(|s| !s.is_empty()) {
+        q = q.filter(email_message::Column::To.like(format!("%{to}%")));
+    }
+    if let Some(template) = template.filter(|s| !s.is_empty()) {
+        q = q.filter(email_message::Column::Template.eq(template));
+    }
+    if let Some(status) = status.filter(|s| !s.is_empty()) {
+        q = q.filter(email_message::Column::Status.eq(status));
+    }
+    let total = q.clone().count(db).await?;
+    let emails = q
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+        .all(db)
+        .await?;
+    Ok(EmailListResponse {
+        emails: emails.into_iter().map(email_dto).collect(),
+        page,
+        per_page,
+        total,
     })
 }
 
-fn group_into_series(rows: Vec<stat_snapshot::Model>) -> Vec<MetricSeriesDto> {
-    type Grouped =
-        std::collections::BTreeMap<(String, Option<String>), Vec<(chrono::NaiveDateTime, f64)>>;
-
-    let mut grouped: Grouped = Grouped::new();
-    for row in rows {
-        grouped
-            .entry((row.metric, row.dimension))
-            .or_default()
-            .push((row.captured_at, row.value));
-    }
-
-    let mut headline = Vec::new();
-    let mut rest = Vec::new();
-    for ((metric, dimension), points) in grouped {
-        let headline_pos = if dimension.is_none() {
-            HEADLINE_METRICS.iter().position(|&m| m == metric)
-        } else {
-            None
-        };
-        let label = display_label(&metric, dimension.as_deref());
-        let series = MetricSeriesDto {
-            metric,
-            dimension,
-            label,
-            points: points
-                .into_iter()
-                .map(|(captured_at, value)| MetricPointDto { captured_at, value })
-                .collect(),
-        };
-        match headline_pos {
-            Some(pos) => headline.push((pos, series)),
-            None => rest.push(series),
-        }
-    }
-    headline.sort_by_key(|(pos, _)| *pos);
-    headline.into_iter().map(|(_, s)| s).chain(rest).collect()
+pub async fn get_email(
+    db: &DatabaseConnection,
+    id: Uuid,
+) -> Result<Option<EmailMessageDto>, DbErr> {
+    Ok(email_message::Entity::find_by_id(id)
+        .one(db)
+        .await?
+        .map(email_dto))
 }
 
-fn display_label(metric: &str, dimension: Option<&str>) -> String {
-    let words: Vec<String> = metric
-        .split('_')
-        .map(|w| {
-            let mut c = w.chars();
-            match c.next() {
-                Some(first) => first.to_uppercase().collect::<String>() + c.as_str(),
-                None => String::new(),
-            }
-        })
-        .collect();
-    let base = words.join(" ");
-    match dimension {
-        Some(d) => format!("{base} ({d})"),
-        None => base,
+pub async fn list_tables(
+    db: &DatabaseConnection,
+    configured: &[String],
+) -> Result<TablesResponse, DbErr> {
+    let pool = db.get_postgres_connection_pool();
+    let query = if configured.is_empty() {
+        sqlx::query(
+            "SELECT relname, n_live_tup, n_dead_tup, \
+             COALESCE(last_analyze, last_autoanalyze) AS last_analyze \
+             FROM pg_stat_user_tables ORDER BY relname",
+        )
+        .fetch_all(pool)
+        .await
+    } else {
+        sqlx::query(
+            "SELECT relname, n_live_tup, n_dead_tup, \
+             COALESCE(last_analyze, last_autoanalyze) AS last_analyze \
+             FROM pg_stat_user_tables WHERE relname = ANY($1) ORDER BY relname",
+        )
+        .bind(configured)
+        .fetch_all(pool)
+        .await
+    };
+
+    let rows = query.map_err(|e| DbErr::Custom(e.to_string()))?;
+    Ok(TablesResponse {
+        tables: rows
+            .into_iter()
+            .map(|r| {
+                use sqlx::Row;
+                TableCountDto {
+                    table: r.try_get::<String, _>(0).unwrap_or_default(),
+                    approx_rows: r.try_get::<i64, _>(1).unwrap_or(0),
+                    n_dead_tup: r.try_get::<i64, _>(2).unwrap_or(0),
+                    last_analyze: r
+                        .try_get::<Option<chrono::NaiveDateTime>, _>(3)
+                        .ok()
+                        .flatten(),
+                    approx: true,
+                }
+            })
+            .collect(),
+    })
+}
+
+pub async fn list_events(
+    db: &DatabaseConnection,
+    name: Option<&str>,
+    days: i64,
+    page: u64,
+    per_page: u64,
+) -> Result<EventsResponse, DbErr> {
+    let page = page.max(1);
+    let per_page = per_page.clamp(1, 200);
+    let days = days.clamp(1, 365);
+    let since = Utc::now().naive_utc() - chrono::Duration::days(days);
+    let mut q = admin_event::Entity::find()
+        .filter(admin_event::Column::CreatedAt.gte(since))
+        .order_by_desc(admin_event::Column::CreatedAt);
+    if let Some(name) = name.filter(|s| !s.is_empty()) {
+        q = q.filter(admin_event::Column::Name.eq(name));
     }
+    let events = q
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+        .all(db)
+        .await?;
+    Ok(EventsResponse {
+        events: events
+            .into_iter()
+            .map(|e| AdminEventDto {
+                id: e.id,
+                name: e.name,
+                user_id: e.user_id,
+                payload: e.payload,
+                created_at: e.created_at,
+            })
+            .collect(),
+    })
 }

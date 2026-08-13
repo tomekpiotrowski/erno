@@ -1,15 +1,15 @@
 use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
-#[sea_orm(table_name = "stat_snapshot")]
+#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+#[sea_orm(table_name = "admin_event")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
-    pub captured_at: NaiveDateTime,
-    pub metric: String,
-    pub dimension: Option<String>,
-    pub value: f64,
+    pub name: String,
+    pub user_id: Option<Uuid>,
+    #[sea_orm(column_type = "JsonBinary")]
+    pub payload: Json,
     pub created_at: NaiveDateTime,
 }
 

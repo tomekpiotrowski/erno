@@ -67,6 +67,8 @@ mod tests {
             open: false,
             ios: false,
             android: false,
+            no_prometheus: false,
+            no_admin: false,
         }
     }
 

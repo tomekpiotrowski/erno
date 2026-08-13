@@ -89,7 +89,7 @@ The webhook endpoint validates the `Stripe-Signature` header using `stripe.webho
 
 ## Admin gifting
 
-Subscriptions can also be gifted from [`erno admin`](../console) (`POST /admin/api/users/{id}/gift`).
+Subscriptions can also be gifted from the [admin app](../console) (`POST /admin/api/users/{id}/gift`).
 
 ## Configuration
 

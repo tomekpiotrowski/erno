@@ -53,25 +53,28 @@ where
         .await
         .map_err(|e| e.to_string())?;
 
-    let user_row = if let Some(u) = existing {
+    let (user_row, created) = if let Some(u) = existing {
         if u.email_verified_at.is_none() {
             let mut am: user::ActiveModel = u.into();
             am.email_verified_at = Set(Some(Utc::now().naive_utc()));
-            am.update(&txn).await.map_err(|e| e.to_string())?
+            (am.update(&txn).await.map_err(|e| e.to_string())?, false)
         } else {
-            u
+            (u, false)
         }
     } else {
         // 3. Create OAuth-only user (no password).
-        user::ActiveModel {
-            email: Set(email.clone()),
-            password_hash: Set(None),
-            email_verified_at: Set(Some(Utc::now().naive_utc())),
-            ..Default::default()
-        }
-        .insert(&txn)
-        .await
-        .map_err(|e| e.to_string())?
+        (
+            user::ActiveModel {
+                email: Set(email.clone()),
+                password_hash: Set(None),
+                email_verified_at: Set(Some(Utc::now().naive_utc())),
+                ..Default::default()
+            }
+            .insert(&txn)
+            .await
+            .map_err(|e| e.to_string())?,
+            true,
+        )
     };
 
     oauth_identity::ActiveModel {
@@ -84,6 +87,25 @@ where
     .insert(&txn)
     .await
     .map_err(|e| e.to_string())?;
+
+    if created {
+        crate::admin_events::emit(
+            &txn,
+            crate::admin_events::USER_REGISTERED,
+            Some(user_row.id),
+            serde_json::json!({ "provider": provider.as_str() }),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        crate::admin_events::emit(
+            &txn,
+            crate::admin_events::USER_VERIFIED,
+            Some(user_row.id),
+            serde_json::json!({ "provider": provider.as_str() }),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    }
 
     txn.commit().await.map_err(|e| e.to_string())?;
     Ok(user_row)

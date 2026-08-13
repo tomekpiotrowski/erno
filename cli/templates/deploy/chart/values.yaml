@@ -10,3 +10,14 @@ app:
 
 www:
   replicas: 1
+
+admin:
+  enabled: true
+  replicas: 1
+  imageTag: ""
+
+prometheus:
+  enabled: true
+  image: prom/prometheus:v2.55.1
+  retention: 90d
+  storage: 10Gi

@@ -72,6 +72,14 @@ pub async fn purge_user_account(
         deleter.delete_user_data(txn, job_queue, user_id).await?;
     }
 
+    crate::admin_events::emit(
+        txn,
+        crate::admin_events::USER_DELETED,
+        Some(user_id),
+        crate::admin_events::empty_payload(),
+    )
+    .await?;
+
     // Framework-owned data: cascades to user_tokens + subscription tables.
     user::Entity::delete_by_id(user_id).exec(txn).await?;
 

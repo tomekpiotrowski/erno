@@ -111,7 +111,7 @@ Never rely on client checks alone: always keep `ActiveSubscription` on the serve
 
 ## Gift and admin
 
-Operators can grant gift subscriptions via [`erno admin`](/api/console/) without going through Stripe. Those users also pass `ActiveSubscription` while the gift is active.
+Operators can grant gift subscriptions via the [admin app](/api/console/) without going through Stripe. Those users also pass `ActiveSubscription` while the gift is active.
 
 ## Checklist
 

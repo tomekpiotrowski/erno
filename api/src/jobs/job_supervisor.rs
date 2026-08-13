@@ -10,6 +10,7 @@ use crate::{
     app::App,
     config::{CleanupConfig, JobRetryDefaults, JobsConfig, WorkerQueueConfig, WorkersConfig},
     database::models::{
+        email_message,
         job::{self, Entity as JobEntity},
         job_execution,
         job_result::JobResult as JobResultEnum,
@@ -79,7 +80,11 @@ pub async fn job_supervisor<ExtraConfig>(
     start_recovery_task(&jobs_config.workers, jobs_config.defaults, &app.db);
 
     // Start the job cleanup task
-    start_cleanup_task(&jobs_config.cleanup, &app.db);
+    start_cleanup_task(
+        &jobs_config.cleanup,
+        app.config.email_log_retention_days,
+        &app.db,
+    );
 
     // Keep the supervisor running
     run_supervisor_loop().await;
@@ -344,7 +349,11 @@ async fn recover_individual_stuck_job(
 }
 
 /// Start the job cleanup task
-fn start_cleanup_task(config: &CleanupConfig, db: &DatabaseConnection) {
+fn start_cleanup_task(
+    config: &CleanupConfig,
+    email_log_retention_days: u64,
+    db: &DatabaseConnection,
+) {
     let cleanup_config = config.clone();
     let cleanup_db = db.clone();
 
@@ -357,7 +366,7 @@ fn start_cleanup_task(config: &CleanupConfig, db: &DatabaseConnection) {
                 let config = cleanup_config.clone();
                 async move {
                     info!("🧹 Starting job cleanup task");
-                    run_cleanup_loop(&config, &db).await;
+                    run_cleanup_loop(&config, email_log_retention_days, &db).await;
                 }
             },
         )
@@ -365,15 +374,32 @@ fn start_cleanup_task(config: &CleanupConfig, db: &DatabaseConnection) {
     });
 }
 
-async fn run_cleanup_loop(config: &CleanupConfig, db: &DatabaseConnection) {
+async fn run_cleanup_loop(
+    config: &CleanupConfig,
+    email_log_retention_days: u64,
+    db: &DatabaseConnection,
+) {
     loop {
         if let Err(e) = cleanup_old_jobs(config, db).await {
             error!("🧹 Failed to clean up old jobs: {}", e);
+        }
+        if let Err(e) = cleanup_old_emails(email_log_retention_days, db).await {
+            error!("🧹 Failed to clean up email_messages: {e}");
         }
 
         // Wait for the configured interval between cleanup runs
         sleep(Duration::from_secs(config.interval_seconds)).await;
     }
+}
+
+async fn cleanup_old_emails(retention_days: u64, db: &DatabaseConnection) -> Result<(), DbErr> {
+    let days = i64::try_from(retention_days).unwrap_or(30).max(1);
+    let cutoff = chrono::Utc::now().naive_utc() - chrono::Duration::days(days);
+    email_message::Entity::delete_many()
+        .filter(email_message::Column::CreatedAt.lt(cutoff))
+        .exec(db)
+        .await?;
+    Ok(())
 }
 
 /// Clean up old completed and failed jobs along with their executions

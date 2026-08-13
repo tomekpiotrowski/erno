@@ -22,8 +22,7 @@ cargo install erno-cli
 | [`erno setup`](#setup) | Configure `~/.erno/config.toml` (PostgreSQL admin credentials) |
 | [`erno doctor`](#doctor) | Verify that your environment is ready to develop Erno apps |
 | [`erno new <name>`](#new) | Scaffold a new full-stack Erno project |
-| [`erno dev`](#dev) | Start the API, app, and www dev servers |
-| [`erno admin`](#admin) | Operator TUI against the running API (`/admin/api`) |
+| [`erno dev`](#dev) | Start the API, app, www, Prometheus, and admin SPA |
 | [`erno deploy`](/cli/deploy/) | Scaffold Docker/Helm files and install releases |
 
 ---
@@ -62,22 +61,9 @@ By default only errors and ready events are printed; the full multiplex is writt
 | Product app | HTTP | `app_url` or `angular.json` serve port (4200) |
 | Marketing | HTTP | `--port` in `www/package.json` `dev` script (4321) |
 
-A second `erno dev` in the same project is rejected via `.erno/dev.lock` (stale locks from a crashed session are replaced). When the API is running the banner also lists `erno admin` (password `admin`), `/dev/emails`, and `/dev/jobs`. Newly captured mock emails are printed as `[mail] subject → to`. The banner reprints whenever a service changes state (`starting` → `ready`). If one process exits, it is restarted (with backoff) without taking the others down. The API is rebuilt automatically when `api/` source files change (no `cargo-watch` needed). Ctrl+C sends SIGTERM, then SIGKILL after two seconds.
+A second `erno dev` in the same project is rejected via `.erno/dev.lock` (stale locks from a crashed session are replaced). When the API is running the banner also lists the admin SPA (`http://localhost:4300`, password `admin`), `/dev/emails`, and `/dev/jobs`. Newly captured mock emails are printed as `[mail] subject → to`. The banner reprints whenever a service changes state (`starting` → `ready`). If one process exits, it is restarted (with backoff) without taking the others down. The API is rebuilt automatically when `api/` source files change (no `cargo-watch` needed). Ctrl+C sends SIGTERM, then SIGKILL after two seconds. Prometheus is started when the `prometheus` binary is on `PATH` (`--no-prometheus` to skip).
 
 Before spawning anything, `erno dev` checks that PostgreSQL is running (when the API is selected) and that each selected service’s port is free. If a port is held by a leftover `cargo`/`node`/`erno` process, it offers to kill it.
-
----
-
-## admin
-
-```sh
-erno admin
-erno admin --url https://api.example.com
-```
-
-Interactive TUI for users, gifts, and jobs. Talks to the API over HTTP with Basic auth — see [Admin console](/api/console).
-
-Against localhost, the password defaults to `admin` (no prompt). Production password is generated once by `erno deploy init` (hash only stored in the cluster).
 
 ---
 

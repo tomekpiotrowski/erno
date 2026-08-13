@@ -17,9 +17,11 @@ mod m20260514_200001_create_file_attachments;
 mod m20260515_000001_add_refresh_token_type;
 mod m20260608_000001_create_shares;
 mod m20260608_000002_create_share_grants;
-mod m20260727_030000_create_stat_snapshot;
 mod m20260727_031500_add_last_active_at_to_users;
 mod m20260806_120000_oauth_and_nullable_password;
+mod m20260813_120000_create_email_messages;
+mod m20260813_121000_create_admin_event;
+mod m20260813_122000_admin_count_indexes;
 
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
@@ -42,9 +44,11 @@ impl MigratorTrait for Migrator {
             Box::new(m20260515_000001_add_refresh_token_type::Migration),
             Box::new(m20260608_000001_create_shares::Migration),
             Box::new(m20260608_000002_create_share_grants::Migration),
-            Box::new(m20260727_030000_create_stat_snapshot::Migration),
             Box::new(m20260727_031500_add_last_active_at_to_users::Migration),
             Box::new(m20260806_120000_oauth_and_nullable_password::Migration),
+            Box::new(m20260813_120000_create_email_messages::Migration),
+            Box::new(m20260813_121000_create_admin_event::Migration),
+            Box::new(m20260813_122000_admin_count_indexes::Migration),
         ]
     }
 }

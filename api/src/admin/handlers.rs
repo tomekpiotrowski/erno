@@ -45,6 +45,8 @@ where
 #[derive(Debug, Deserialize)]
 pub struct UsersQuery {
     pub q: Option<String>,
+    pub page: Option<u64>,
+    pub per_page: Option<u64>,
 }
 
 pub async fn list_users<ExtraConfig>(
@@ -55,7 +57,14 @@ pub async fn list_users<ExtraConfig>(
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    match service::list_users(&app.db, query.q.as_deref()).await {
+    match service::list_users(
+        &app.db,
+        query.q.as_deref(),
+        query.page.unwrap_or(1),
+        query.per_page.unwrap_or(50),
+    )
+    .await
+    {
         Ok(body) => Json(body).into_response(),
         Err(e) => db_error(e),
     }
@@ -194,6 +203,123 @@ where
     }
 }
 
+pub async fn get_job<ExtraConfig>(
+    State(app): State<App<ExtraConfig>>,
+    _auth: AdminAuth,
+    Path(job_id): Path<Uuid>,
+) -> impl IntoResponse
+where
+    ExtraConfig: Clone + Send + Sync + 'static,
+{
+    match service::job_detail(&app.db, job_id).await {
+        Ok(Some(body)) => Json(body).into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(ErrorBody {
+                error: "job_not_found".to_string(),
+            }),
+        )
+            .into_response(),
+        Err(e) => db_error(e),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EmailsQuery {
+    pub to: Option<String>,
+    pub template: Option<String>,
+    pub status: Option<String>,
+    pub page: Option<u64>,
+    pub per_page: Option<u64>,
+}
+
+pub async fn list_emails<ExtraConfig>(
+    State(app): State<App<ExtraConfig>>,
+    _auth: AdminAuth,
+    Query(query): Query<EmailsQuery>,
+) -> impl IntoResponse
+where
+    ExtraConfig: Clone + Send + Sync + 'static,
+{
+    match service::list_emails(
+        &app.db,
+        query.to.as_deref(),
+        query.template.as_deref(),
+        query.status.as_deref(),
+        query.page.unwrap_or(1),
+        query.per_page.unwrap_or(50),
+    )
+    .await
+    {
+        Ok(body) => Json(body).into_response(),
+        Err(e) => db_error(e),
+    }
+}
+
+pub async fn get_email<ExtraConfig>(
+    State(app): State<App<ExtraConfig>>,
+    _auth: AdminAuth,
+    Path(id): Path<Uuid>,
+) -> impl IntoResponse
+where
+    ExtraConfig: Clone + Send + Sync + 'static,
+{
+    match service::get_email(&app.db, id).await {
+        Ok(Some(body)) => Json(body).into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(ErrorBody {
+                error: "email_not_found".to_string(),
+            }),
+        )
+            .into_response(),
+        Err(e) => db_error(e),
+    }
+}
+
+pub async fn list_tables<ExtraConfig>(
+    State(app): State<App<ExtraConfig>>,
+    _auth: AdminAuth,
+) -> impl IntoResponse
+where
+    ExtraConfig: Clone + Send + Sync + 'static,
+{
+    match service::list_tables(&app.db, &app.config.metrics.table_counts).await {
+        Ok(body) => Json(body).into_response(),
+        Err(e) => db_error(e),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EventsQuery {
+    pub name: Option<String>,
+    pub days: Option<i64>,
+    pub page: Option<u64>,
+    pub per_page: Option<u64>,
+}
+
+pub async fn list_events<ExtraConfig>(
+    State(app): State<App<ExtraConfig>>,
+    _auth: AdminAuth,
+    Query(query): Query<EventsQuery>,
+) -> impl IntoResponse
+where
+    ExtraConfig: Clone + Send + Sync + 'static,
+{
+    match service::list_events(
+        &app.db,
+        query.name.as_deref(),
+        query.days.unwrap_or(7),
+        query.page.unwrap_or(1),
+        query.per_page.unwrap_or(50),
+    )
+    .await
+    {
+        Ok(body) => Json(body).into_response(),
+        Err(e) => db_error(e),
+    }
+}
+
 pub async fn retry_job<ExtraConfig>(
     State(app): State<App<ExtraConfig>>,
     _auth: AdminAuth,
@@ -232,25 +358,4 @@ where
         .map(|s| s.price_ids.keys().cloned().collect())
         .unwrap_or_default();
     Json(PlansResponse { plans })
-}
-
-#[derive(Debug, Deserialize)]
-pub struct StatsQuery {
-    /// Window in days (default 7; allowed 1–365).
-    pub days: Option<i64>,
-}
-
-pub async fn get_stats<ExtraConfig>(
-    State(app): State<App<ExtraConfig>>,
-    _auth: AdminAuth,
-    Query(query): Query<StatsQuery>,
-) -> impl IntoResponse
-where
-    ExtraConfig: Clone + Send + Sync + 'static,
-{
-    let days = query.days.unwrap_or(7);
-    match service::business_stats(&app.db, days).await {
-        Ok(body) => Json(body).into_response(),
-        Err(e) => db_error(e),
-    }
 }

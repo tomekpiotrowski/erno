@@ -2,6 +2,8 @@
 
 pub mod prelude;
 
+pub mod admin_event;
+pub mod email_message;
 pub mod job;
 pub mod job_execution;
 pub mod job_result;

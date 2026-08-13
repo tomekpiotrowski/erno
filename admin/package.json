@@ -1,0 +1,26 @@
+{
+  "name": "erno-admin",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "start": "ng serve --port 4300 --proxy-config proxy.conf.json",
+    "build": "ng build",
+    "test": "ng test --watch=false"
+  },
+  "dependencies": {
+    "@angular/common": "^20.2.0",
+    "@angular/compiler": "^20.2.0",
+    "@angular/core": "^20.2.0",
+    "@angular/forms": "^20.2.0",
+    "@angular/platform-browser": "^20.2.0",
+    "@angular/router": "^20.2.0",
+    "rxjs": "~7.8.0",
+    "tslib": "^2.3.0"
+  },
+  "devDependencies": {
+    "@angular/build": "^20.3.26",
+    "@angular/cli": "^20.2.0",
+    "@angular/compiler-cli": "^20.2.0",
+    "typescript": "~5.9.0"
+  }
+}

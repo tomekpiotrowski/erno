@@ -47,7 +47,7 @@ Erno is a Rust library that provides shared infrastructure for building REST API
 | [Jobs](./jobs) | Background job scheduling with cron and advisory locks |
 | [Email](./email) | Sending HTML and multipart emails via SMTP |
 | [Telemetry](./telemetry) | Distributed tracing and Prometheus metrics |
-| [Admin console](./console) | HTTP admin API + `erno admin` TUI |
+| [Admin console](./console) | HTTP admin API + Angular operator app |
 | [Business stats](./business-stats) | Daily SaaS metric snapshots |
 
 ## Installation

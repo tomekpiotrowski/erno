@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     app::App,
-    emails::send_html_email,
+    emails::{send_html_email_with_meta, EmailMeta},
     jobs::{Job, JobError},
 };
 
@@ -43,11 +43,16 @@ impl<ExtraConfig: Clone + Send + Sync + 'static> Job<ExtraConfig>
             fallback,
         );
 
-        send_html_email(
+        send_html_email_with_meta(
             app,
             &args.email,
             "Someone tried to register your account",
             body,
+            EmailMeta {
+                template: Some("already_registered".to_string()),
+                user_id: None,
+                job_id: None,
+            },
         )
         .await
         .map_err(|e| JobError::TryAgainLater(e.to_string()))

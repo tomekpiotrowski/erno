@@ -33,9 +33,9 @@ Rate limiting and email sending are disabled in the test environment.
 | `storage` | S3 / local file storage abstraction |
 | `rate_limiting` | Multi-tier adaptive rate limiting |
 | `policy` | Pundit-style authorization (`Policy` trait) |
-| `metrics` | Prometheus metrics |
-| `admin` | HTTP admin API (`/admin/api/*`) for `erno admin` |
-| `business_stats` | Daily SaaS metric snapshots + optional scheduled job |
+| `metrics` | Prometheus scrape target + `db_stats` gauges |
+| `admin` | HTTP admin API (`/admin/api/*`) for the Angular operator app |
+| `admin_events` | Operator event log + matching counters |
 
 ## Architecture notes
 
@@ -63,7 +63,7 @@ Narrative docs for each module live in `docs/src/content/docs/api/`:
 | `policy` | `authorization.md` |
 | `metrics` | `telemetry.md` |
 | `admin` | `console.md` |
-| `business_stats` | `business-stats.md` |
+| `admin_events` / gauges | `business-stats.md` |
 | `websocket` | `websocket.md` |
 | `emails` / mailer | `email.md` |
 | `database` | `database.md` |

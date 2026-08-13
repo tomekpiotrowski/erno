@@ -15,6 +15,9 @@ spec:
         - {{ .Values.ingress.api.host }}
         - {{ .Values.ingress.app.host }}
         - {{ .Values.ingress.www.host }}
+        {{- if .Values.admin.enabled }}
+        - {{ .Values.ingress.admin.host }}
+        {{- end }}
       secretName: {{ .Release.Name }}-tls
   {{- end }}
   rules:
@@ -48,3 +51,15 @@ spec:
                 name: {{ .Release.Name }}-www
                 port:
                   number: 80
+    {{- if .Values.admin.enabled }}
+    - host: {{ .Values.ingress.admin.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-admin
+                port:
+                  number: 80
+    {{- end }}

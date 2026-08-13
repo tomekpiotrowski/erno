@@ -20,7 +20,7 @@ use crate::{
         failure_handler::JobFailureHandler, job_registry::JobRegistry,
         job_supervisor::job_supervisor, scheduled_job::ScheduledJob,
     },
-    metrics::{self, collector::CollectorRegistry},
+    metrics,
     router::router,
     sync::registry::SyncRegistry,
     websocket::connections::Connections,
@@ -35,6 +35,7 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
     sync_registry: SyncRegistry,
     job_failure_handler: Option<Arc<dyn JobFailureHandler>>,
     user_data_deleter: Option<Arc<dyn crate::account::UserDataDeleter>>,
+    metrics_collectors: crate::metrics::collector::CollectorRegistry,
 ) where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
@@ -124,7 +125,7 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
 
     // Set up Prometheus metrics recorder
     let prometheus_handle = metrics::setup_metrics();
-    let metrics_collectors = Arc::new(CollectorRegistry::default());
+    let metrics_collectors = Arc::new(metrics_collectors);
 
     let app = App {
         config: config.clone(),

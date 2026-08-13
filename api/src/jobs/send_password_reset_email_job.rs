@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::{
     app::App,
     database::models::{user_token, user_token_type::UserTokenType},
-    emails::send_html_email,
+    emails::{send_html_email_with_meta, EmailMeta},
     jobs::{Job, JobError},
     token::hash_token,
 };
@@ -73,8 +73,18 @@ impl<ExtraConfig: Clone + Send + Sync + 'static> Job<ExtraConfig>
             fallback,
         );
 
-        send_html_email(app, &args.email, "Reset your password", body)
-            .await
-            .map_err(|e| JobError::TryAgainLater(e.to_string()))
+        send_html_email_with_meta(
+            app,
+            &args.email,
+            "Reset your password",
+            body,
+            EmailMeta {
+                template: Some("password_reset".to_string()),
+                user_id: Some(args.user_id),
+                job_id: None,
+            },
+        )
+        .await
+        .map_err(|e| JobError::TryAgainLater(e.to_string()))
     }
 }

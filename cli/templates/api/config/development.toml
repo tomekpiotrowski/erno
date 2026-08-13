@@ -41,9 +41,12 @@ default_max_requests = 100
 backoff_multiplier = 2.0
 
 [cors]
-allowed_origins = ["http://localhost:4200"]
+allowed_origins = ["http://localhost:4200", "http://localhost:4300"]
 
-# Operator admin API (`erno admin`). Dev password: admin
+[metrics]
+table_counts = ["users", "job", "job_execution", "files", "file_attachments", "stripe_subscriptions", "email_messages", "admin_event"]
+
+# Operator admin API. Dev password: admin
 [admin]
 username = "admin"
 password_hash = "$argon2id$v=19$m=19456,t=2,p=1$5B2ECOLqakkxkiD5EjKyDQ$PBe29N0j5lou/OHFWQuxjKEnL7fv4GE9MhniBui9rYc"

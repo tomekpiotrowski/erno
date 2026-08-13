@@ -75,6 +75,14 @@ where
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
 
+    crate::admin_events::emit_ok(
+        &app.db,
+        crate::admin_events::USER_VERIFIED,
+        Some(user_id),
+        crate::admin_events::empty_payload(),
+    )
+    .await;
+
     // Re-fetch the user to get the current token_version for the JWT.
     let verified_user = match user::Entity::find_by_id(user_id).one(&app.db).await {
         Ok(Some(u)) => u,
@@ -149,6 +157,15 @@ mod tests {
         let body: serde_json::Value = response.json();
         assert!(body["access_token"].is_string());
         assert!(body["refresh_token"].is_string());
+
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+        let events = crate::database::models::admin_event::Entity::find()
+            .filter(crate::database::models::admin_event::Column::Name.eq("user.verified"))
+            .filter(crate::database::models::admin_event::Column::UserId.eq(u.id))
+            .all(&t.db)
+            .await
+            .unwrap();
+        assert_eq!(events.len(), 1);
     }
 
     #[tokio::test]

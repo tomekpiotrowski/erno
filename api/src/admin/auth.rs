@@ -76,8 +76,7 @@ where
         let decoded = BASE64
             .decode(encoded.trim())
             .map_err(|_| AdminAuthError::Unauthorized)?;
-        let decoded =
-            String::from_utf8(decoded).map_err(|_| AdminAuthError::Unauthorized)?;
+        let decoded = String::from_utf8(decoded).map_err(|_| AdminAuthError::Unauthorized)?;
 
         let (username, password) = decoded
             .split_once(':')

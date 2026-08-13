@@ -1,6 +1,6 @@
 use sea_orm_migration::{
     prelude::*,
-    schema::{double, string, string_null, timestamp, uuid},
+    schema::{json_binary, string, timestamp, uuid, uuid_null},
 };
 
 #[derive(DeriveMigrationName)]
@@ -12,19 +12,18 @@ impl MigrationTrait for Migration {
         manager
             .create_table(
                 Table::create()
-                    .table(StatSnapshot::Table)
+                    .table(AdminEvent::Table)
                     .if_not_exists()
                     .col(
-                        uuid(StatSnapshot::Id)
+                        uuid(AdminEvent::Id)
                             .primary_key()
                             .default(Expr::cust("gen_random_uuid()")),
                     )
-                    .col(timestamp(StatSnapshot::CapturedAt).not_null())
-                    .col(string(StatSnapshot::Metric).not_null())
-                    .col(string_null(StatSnapshot::Dimension))
-                    .col(double(StatSnapshot::Value))
+                    .col(string(AdminEvent::Name).not_null())
+                    .col(uuid_null(AdminEvent::UserId))
+                    .col(json_binary(AdminEvent::Payload).not_null())
                     .col(
-                        timestamp(StatSnapshot::CreatedAt)
+                        timestamp(AdminEvent::CreatedAt)
                             .not_null()
                             .default(Expr::cust("CURRENT_TIMESTAMP")),
                     )
@@ -35,11 +34,19 @@ impl MigrationTrait for Migration {
         manager
             .create_index(
                 Index::create()
-                    .name("idx-stat_snapshot-metric-dimension-captured_at")
-                    .table(StatSnapshot::Table)
-                    .col(StatSnapshot::Metric)
-                    .col(StatSnapshot::Dimension)
-                    .col(StatSnapshot::CapturedAt)
+                    .name("idx-admin_event-created_at")
+                    .table(AdminEvent::Table)
+                    .col(AdminEvent::CreatedAt)
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx-admin_event-name")
+                    .table(AdminEvent::Table)
+                    .col(AdminEvent::Name)
                     .to_owned(),
             )
             .await
@@ -47,18 +54,17 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_table(Table::drop().table(StatSnapshot::Table).to_owned())
+            .drop_table(Table::drop().table(AdminEvent::Table).to_owned())
             .await
     }
 }
 
 #[derive(DeriveIden)]
-enum StatSnapshot {
+enum AdminEvent {
     Table,
     Id,
-    CapturedAt,
-    Metric,
-    Dimension,
-    Value,
+    Name,
+    UserId,
+    Payload,
     CreatedAt,
 }

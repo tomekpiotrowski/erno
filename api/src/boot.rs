@@ -45,6 +45,7 @@ pub struct BootConfig<ExtraConfig = ()> {
     pub sync_registry: SyncRegistry,
     pub job_failure_handler: Option<Arc<dyn JobFailureHandler>>,
     pub user_data_deleter: Option<Arc<dyn UserDataDeleter>>,
+    pub metrics_collectors: crate::metrics::collector::CollectorRegistry,
 }
 
 impl<ExtraConfig> BootConfig<ExtraConfig> {
@@ -63,6 +64,7 @@ impl<ExtraConfig> BootConfig<ExtraConfig> {
             sync_registry: SyncRegistry::new(),
             job_failure_handler: None,
             user_data_deleter: None,
+            metrics_collectors: crate::metrics::collector::CollectorRegistry::default(),
         }
     }
 
@@ -108,6 +110,16 @@ impl<ExtraConfig> BootConfig<ExtraConfig> {
         self.user_data_deleter = Some(deleter);
         self
     }
+
+    /// Register a periodic Prometheus collector (must not `COUNT(*)` large tables).
+    #[must_use]
+    pub fn with_metrics_collector<C>(mut self, collector: C) -> Self
+    where
+        C: crate::metrics::collector::MetricsCollector + 'static,
+    {
+        self.metrics_collectors.add(collector);
+        self
+    }
 }
 
 pub async fn boot<AppMigrator: MigratorTrait, ExtraConfig>(config: BootConfig<ExtraConfig>)
@@ -145,6 +157,7 @@ where
         config.app_info,
         config.job_failure_handler,
         config.user_data_deleter,
+        config.metrics_collectors,
     )
     .await;
 }
@@ -201,6 +214,7 @@ pub async fn handle_command<AppMigrator: MigratorTrait, ExtraConfig>(
     app_info: AppInfo,
     job_failure_handler: Option<Arc<dyn JobFailureHandler>>,
     user_data_deleter: Option<Arc<dyn UserDataDeleter>>,
+    metrics_collectors: crate::metrics::collector::CollectorRegistry,
 ) where
     ExtraConfig: Clone + Default + DeserializeOwned + Send + Sync + 'static,
 {
@@ -235,6 +249,7 @@ pub async fn handle_command<AppMigrator: MigratorTrait, ExtraConfig>(
                 sync_registry,
                 job_failure_handler,
                 user_data_deleter,
+                metrics_collectors,
             )
             .await;
         }

@@ -1,4 +1,4 @@
-//! HTTP admin API for operators (`erno admin` TUI client).
+//! HTTP admin API for the operator web app.
 //!
 //! Docs: docs/src/content/docs/api/console.md
 
@@ -38,21 +38,16 @@ where
                 "/users/{id}/activate",
                 post(handlers::activate_user::<ExtraConfig>),
             )
-            .route(
-                "/users/{id}",
-                delete(handlers::delete_user::<ExtraConfig>),
-            )
-            .route(
-                "/users/{id}/gift",
-                post(handlers::gift_user::<ExtraConfig>),
-            )
+            .route("/users/{id}", delete(handlers::delete_user::<ExtraConfig>))
+            .route("/users/{id}/gift", post(handlers::gift_user::<ExtraConfig>))
             .route("/jobs", get(handlers::list_jobs::<ExtraConfig>))
-            .route(
-                "/jobs/{id}/retry",
-                post(handlers::retry_job::<ExtraConfig>),
-            )
+            .route("/jobs/{id}", get(handlers::get_job::<ExtraConfig>))
+            .route("/jobs/{id}/retry", post(handlers::retry_job::<ExtraConfig>))
+            .route("/emails", get(handlers::list_emails::<ExtraConfig>))
+            .route("/emails/{id}", get(handlers::get_email::<ExtraConfig>))
+            .route("/tables", get(handlers::list_tables::<ExtraConfig>))
+            .route("/events", get(handlers::list_events::<ExtraConfig>))
             .route("/plans", get(handlers::list_plans::<ExtraConfig>))
-            .route("/stats", get(handlers::get_stats::<ExtraConfig>))
             .with_state(app),
     )
 }
@@ -155,6 +150,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn delete_user_keeps_admin_event() {
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        if t.config.admin.as_ref().map(|a| a.password_hash.is_empty()) != Some(false) {
+            return;
+        }
+
+        let u = user::ActiveModel {
+            email: Set("admin-delete@example.com".to_string()),
+            password_hash: Set(Some(hash_password("password123").unwrap())),
+            ..Default::default()
+        }
+        .insert(&t.db)
+        .await
+        .unwrap();
+        let user_id = u.id;
+
+        let auth = basic("admin", "admin");
+        let response = t
+            .server
+            .delete(&format!("/admin/api/users/{user_id}"))
+            .add_header(
+                axum::http::header::AUTHORIZATION,
+                auth.parse::<axum::http::HeaderValue>().unwrap(),
+            )
+            .await;
+        assert_eq!(response.status_code(), 204);
+
+        assert!(user::Entity::find_by_id(user_id)
+            .one(&t.db)
+            .await
+            .unwrap()
+            .is_none());
+
+        let events = crate::database::models::admin_event::Entity::find()
+            .filter(crate::database::models::admin_event::Column::Name.eq("user.deleted"))
+            .filter(crate::database::models::admin_event::Column::UserId.eq(user_id))
+            .all(&t.db)
+            .await
+            .unwrap();
+        assert_eq!(events.len(), 1);
+    }
+
+    #[tokio::test]
     async fn wrong_password_returns_401() {
         let t = setup_test::<Migrator>(test_router, no_fixtures).await;
         if t.config.admin.as_ref().map(|a| a.password_hash.is_empty()) != Some(false) {
@@ -172,5 +212,143 @@ mod tests {
             .await;
         assert_eq!(response.status_code(), 401);
         let _ = json!({});
+    }
+
+    fn auth_header() -> axum::http::HeaderValue {
+        basic("admin", "admin")
+            .parse::<axum::http::HeaderValue>()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn list_users_paginates_and_includes_last_active() {
+        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        if t.config.admin.as_ref().map(|a| a.password_hash.is_empty()) != Some(false) {
+            return;
+        }
+
+        let now = chrono::Utc::now().naive_utc();
+        user::ActiveModel {
+            email: Set("page-a@example.com".to_string()),
+            password_hash: Set(Some(hash_password("password123").unwrap())),
+            last_active_at: Set(Some(now)),
+            ..Default::default()
+        }
+        .insert(&t.db)
+        .await
+        .unwrap();
+        user::ActiveModel {
+            email: Set("page-b@example.com".to_string()),
+            password_hash: Set(Some(hash_password("password123").unwrap())),
+            ..Default::default()
+        }
+        .insert(&t.db)
+        .await
+        .unwrap();
+
+        let response = t
+            .server
+            .get("/admin/api/users?per_page=1&page=1&q=page-")
+            .add_header(axum::http::header::AUTHORIZATION, auth_header())
+            .await;
+        assert_eq!(response.status_code(), 200);
+        let body: serde_json::Value = response.json();
+        assert_eq!(body["users"].as_array().unwrap().len(), 1);
+        assert_eq!(body["per_page"], 1);
+        assert!(body["total"].as_u64().unwrap() >= 2);
+        assert!(body["users"][0].get("last_active_at").is_some());
+    }
+
+    #[tokio::test]
+    async fn emails_and_events_and_tables_and_job_detail() {
+        use crate::database::models::{email_message, job, job_status::JobStatus};
+
+        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        if t.config.admin.as_ref().map(|a| a.password_hash.is_empty()) != Some(false) {
+            return;
+        }
+
+        let response = t
+            .server
+            .post("/api/auth/register")
+            .json(&json!({ "email": "admin-api@example.com", "password": "password123" }))
+            .await;
+        assert_eq!(response.status_code(), 201);
+
+        let events = t
+            .server
+            .get("/admin/api/events?name=user.registered")
+            .add_header(axum::http::header::AUTHORIZATION, auth_header())
+            .await;
+        assert_eq!(events.status_code(), 200);
+        let events_body: serde_json::Value = events.json();
+        assert!(!events_body["events"].as_array().unwrap().is_empty());
+
+        let now = chrono::Utc::now().naive_utc();
+        let mail = email_message::ActiveModel {
+            id: Set(uuid::Uuid::new_v4()),
+            to: Set("admin-api@example.com".to_string()),
+            from: Set("noreply@example.com".to_string()),
+            subject: Set("Hello".to_string()),
+            template: Set(Some("verification".to_string())),
+            user_id: Set(None),
+            job_id: Set(None),
+            status: Set("sent".to_string()),
+            error: Set(None),
+            sent_at: Set(Some(now)),
+            created_at: Set(now),
+        }
+        .insert(&t.db)
+        .await
+        .unwrap();
+
+        let emails = t
+            .server
+            .get("/admin/api/emails?to=admin-api")
+            .add_header(axum::http::header::AUTHORIZATION, auth_header())
+            .await;
+        assert_eq!(emails.status_code(), 200);
+        let emails_body: serde_json::Value = emails.json();
+        assert!(emails_body["total"].as_u64().unwrap() >= 1);
+
+        let email_one = t
+            .server
+            .get(&format!("/admin/api/emails/{}", mail.id))
+            .add_header(axum::http::header::AUTHORIZATION, auth_header())
+            .await;
+        assert_eq!(email_one.status_code(), 200);
+
+        let inserted_job = job::ActiveModel {
+            r#type: Set("send_verification_email".to_string()),
+            arguments: Set(json!({ "email": "admin-api@example.com" })),
+            status: Set(JobStatus::Completed),
+            ..Default::default()
+        }
+        .insert(&t.db)
+        .await
+        .unwrap();
+
+        let job_one = t
+            .server
+            .get(&format!("/admin/api/jobs/{}", inserted_job.id))
+            .add_header(axum::http::header::AUTHORIZATION, auth_header())
+            .await;
+        assert_eq!(job_one.status_code(), 200);
+        let job_body: serde_json::Value = job_one.json();
+        assert!(job_body["arguments"].is_object());
+        assert!(job_body["executions"].is_array());
+
+        let tables = t
+            .server
+            .get("/admin/api/tables")
+            .add_header(axum::http::header::AUTHORIZATION, auth_header())
+            .await;
+        assert_eq!(tables.status_code(), 200);
+        let tables_body: serde_json::Value = tables.json();
+        assert!(tables_body["tables"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| { row["table"] == "users" && row["approx"] == true }));
     }
 }
