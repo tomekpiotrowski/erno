@@ -1,4 +1,5 @@
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
@@ -97,8 +98,10 @@ pub async fn terminate_child(child: &mut Child) {
     }
 }
 
+#[derive(Clone)]
 pub struct Supervisor {
     slot: Arc<Mutex<Option<Child>>>,
+    restart_requested: Arc<AtomicBool>,
 }
 
 impl Supervisor {
@@ -112,7 +115,9 @@ impl Supervisor {
         F: FnMut() -> Child + Send + 'static,
     {
         let slot = Arc::new(Mutex::new(None));
+        let restart_requested = Arc::new(AtomicBool::new(false));
         let slot_task = slot.clone();
+        let restart_flag = restart_requested.clone();
         tokio::spawn(async move {
             let mut backoff = MIN_BACKOFF;
             loop {
@@ -130,6 +135,10 @@ impl Supervisor {
                     _ = wait_slot(&slot_task) => {
                         if *shutdown.borrow() {
                             break;
+                        }
+                        if restart_flag.swap(false, Ordering::SeqCst) {
+                            backoff = MIN_BACKOFF;
+                            continue;
                         }
                         if started.elapsed() >= RESET_AFTER {
                             backoff = MIN_BACKOFF;
@@ -154,7 +163,17 @@ impl Supervisor {
             }
             *slot_task.lock().await = None;
         });
-        Self { slot }
+        Self {
+            slot,
+            restart_requested,
+        }
+    }
+
+    pub async fn restart(&self) {
+        self.restart_requested.store(true, Ordering::SeqCst);
+        if let Some(child) = self.slot.lock().await.as_mut() {
+            terminate_child(child).await;
+        }
     }
 
     pub async fn shutdown(&self) {

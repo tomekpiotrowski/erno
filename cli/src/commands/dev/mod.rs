@@ -4,6 +4,7 @@ mod preflight;
 mod process;
 mod project;
 mod selection;
+mod watch;
 
 use std::sync::Arc;
 
@@ -98,24 +99,17 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) {
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let api = sel.api.then(|| {
-        let use_watch = has_cargo_watch();
-        if !use_watch {
-            println!(
-                "{CYAN}[api]{RESET} cargo-watch not found — run `cargo install cargo-watch` for auto-reload"
-            );
-        }
         let api_dir_spawn = api_dir.clone();
         let api_sink = sink.clone();
         Supervisor::start("api", CYAN, shutdown_rx.clone(), move || {
             let mut cmd = Command::new("cargo");
-            if use_watch {
-                cmd.args(["watch", "-x", "run"]);
-            } else {
-                cmd.arg("run");
-            }
+            cmd.arg("run");
             spawn_labeled(cmd, &api_dir_spawn, CYAN, "api", api_sink.clone())
         })
     });
+    if let Some(api) = api.as_ref() {
+        watch::spawn_api_watcher(api_dir.clone(), api.clone(), shutdown_rx.clone());
+    }
 
     let app = sel.app.then(|| {
         let app_dir_spawn = app_dir.clone();
@@ -171,14 +165,4 @@ fn ensure_npm_deps(dir: &std::path::Path, label: &str) {
         }
         _ => {}
     }
-}
-
-fn has_cargo_watch() -> bool {
-    std::process::Command::new("cargo")
-        .args(["watch", "--version"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
 }

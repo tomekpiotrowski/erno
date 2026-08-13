@@ -25,3 +25,4 @@ argon2 = "0.5"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["serde"] }
 rpassword = "7"
+notify = "8.2.0"

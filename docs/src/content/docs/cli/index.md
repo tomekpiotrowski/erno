@@ -52,7 +52,7 @@ By default only errors and ready events are printed; the full multiplex is writt
 | Product app | HTTP | http://localhost:4200 |
 | Marketing | HTTP | http://localhost:4321 |
 
-The banner reprints whenever a service changes state (`starting` → `ready`). If one process exits, it is restarted (with backoff) without taking the others down. Ctrl+C sends SIGTERM, then SIGKILL after two seconds.
+The banner reprints whenever a service changes state (`starting` → `ready`). If one process exits, it is restarted (with backoff) without taking the others down. The API is rebuilt automatically when `api/` source files change (no `cargo-watch` needed). Ctrl+C sends SIGTERM, then SIGKILL after two seconds.
 
 Before spawning anything, `erno dev` checks that PostgreSQL is running and that ports 3000, 4200, and 4321 are free. If a port is held by a leftover `cargo`/`node`/`erno` process, it offers to kill it.
 
