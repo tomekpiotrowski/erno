@@ -1,5 +1,6 @@
 mod banner;
 mod log;
+mod ports;
 mod preflight;
 mod process;
 mod project;
@@ -11,7 +12,7 @@ use std::sync::Arc;
 use clap::Args;
 use tokio::process::Command;
 
-use banner::{print_banner, spawn_readiness_watcher, starting_snapshot, DevUrls};
+use banner::{print_banner, spawn_readiness_watcher, starting_snapshot};
 use log::LogSink;
 use process::{spawn_labeled, Supervisor};
 use project::resolve_project_root;
@@ -63,17 +64,8 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) {
         std::process::exit(1);
     }
 
-    let mut ports = Vec::new();
-    if sel.api {
-        ports.push(preflight::DEFAULT_API_PORT);
-    }
-    if sel.app {
-        ports.push(preflight::DEFAULT_APP_PORT);
-    }
-    if sel.www {
-        ports.push(preflight::DEFAULT_WWW_PORT);
-    }
-    preflight::run_preflight(sel.api, &ports);
+    let urls = ports::discover_urls(&root, &sel);
+    preflight::run_preflight(sel.api, &ports::ports_to_check(&urls));
 
     if sel.app {
         ensure_npm_deps(&app_dir, "app");
@@ -92,7 +84,6 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) {
         }
     }
 
-    let urls = DevUrls::defaults(sel.api, sel.app, sel.www);
     print_banner(&urls, &starting_snapshot(&urls));
     spawn_readiness_watcher(urls);
 

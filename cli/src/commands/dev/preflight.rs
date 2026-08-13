@@ -1,10 +1,6 @@
 use std::io::{self, IsTerminal, Write};
 use std::process::Command;
 
-pub const DEFAULT_API_PORT: u16 = 3000;
-pub const DEFAULT_APP_PORT: u16 = 4200;
-pub const DEFAULT_WWW_PORT: u16 = 4321;
-
 const FRIENDLY_COMMANDS: &[&str] = &[
     "erno", "cargo", "node", "npm", "ng", "astro", "esbuild", "vite",
 ];

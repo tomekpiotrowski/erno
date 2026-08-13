@@ -46,15 +46,15 @@ By default only errors and ready events are printed; the full multiplex is writt
 
 `erno dev` prints a status banner with each service URL and probes them until they respond:
 
-| Surface | Probe | Default URL |
+| Surface | Probe | Default URL (overridden by project config) |
 |---------|-------|-------------|
-| API | `GET /readiness` (`/liveness` while migrating) | http://localhost:3000 |
-| Product app | HTTP | http://localhost:4200 |
-| Marketing | HTTP | http://localhost:4321 |
+| API | `GET /readiness` (`/liveness` while migrating) | `[server].port` / `api_url` in `api/config/development.toml` |
+| Product app | HTTP | `app_url` or `angular.json` serve port (4200) |
+| Marketing | HTTP | `--port` in `www/package.json` `dev` script (4321) |
 
 The banner reprints whenever a service changes state (`starting` → `ready`). If one process exits, it is restarted (with backoff) without taking the others down. The API is rebuilt automatically when `api/` source files change (no `cargo-watch` needed). Ctrl+C sends SIGTERM, then SIGKILL after two seconds.
 
-Before spawning anything, `erno dev` checks that PostgreSQL is running and that ports 3000, 4200, and 4321 are free. If a port is held by a leftover `cargo`/`node`/`erno` process, it offers to kill it.
+Before spawning anything, `erno dev` checks that PostgreSQL is running (when the API is selected) and that each selected service’s port is free. If a port is held by a leftover `cargo`/`node`/`erno` process, it offers to kill it.
 
 ---
 

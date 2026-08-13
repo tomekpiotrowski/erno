@@ -37,6 +37,7 @@ pub struct DevUrls {
 }
 
 impl DevUrls {
+    #[cfg(test)]
     pub fn defaults(start_api: bool, start_app: bool, start_www: bool) -> Self {
         Self {
             api: start_api.then(|| "http://localhost:3000".to_string()),
