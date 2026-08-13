@@ -1,4 +1,5 @@
 mod banner;
+mod lock;
 mod log;
 mod ports;
 mod preflight;
@@ -45,6 +46,13 @@ pub(crate) const RESET: &str = "\x1b[0m";
 
 pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) {
     let root = resolve_project_root(root);
+    let _lock = match lock::DevLock::acquire(&root) {
+        Ok(lock) => lock,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
     let api_dir = root.join("api");
     let app_dir = root.join("app");
     let www_dir = root.join("www");
