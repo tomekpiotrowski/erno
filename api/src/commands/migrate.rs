@@ -3,7 +3,7 @@ use std::{cmp, error::Error, process};
 use sea_orm::DatabaseConnection;
 
 use crate::{
-    database::setup_database_connection,
+    database::{forget_removed_migrations, setup_database_connection},
     {cli::MigrateAction, config::Config},
 };
 
@@ -15,6 +15,11 @@ pub async fn handle_migrate_command<AppMigrator: sea_orm_migration::MigratorTrai
 {
     // Create a simple connection just for migrations (no background setup)
     let db = setup_database_connection(&config.database).await;
+
+    if let Err(e) = forget_removed_migrations(&db).await {
+        eprintln!("❌ Failed to forget removed migrations: {e}");
+        process::exit(1);
+    }
 
     if let Err(e) = handle_migration_command::<AppMigrator>(&db, action).await {
         eprintln!("❌ Migration failed: {e}");

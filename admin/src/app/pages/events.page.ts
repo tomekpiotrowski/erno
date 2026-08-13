@@ -7,24 +7,39 @@ import { AdminApi, EventsResponse } from '../core/api';
   selector: 'app-events',
   imports: [FormsModule, JsonPipe],
   template: `
-    <h1>Events</h1>
-    <div class="toolbar">
-      <input [(ngModel)]="name" placeholder="name (user.registered)" />
-      <button (click)="load()">Filter</button>
+    <div class="stack">
+      <header class="head">
+        <div>
+          <h1>Audit log</h1>
+          <p class="sub">Admin and system events.</p>
+        </div>
+      </header>
+
+      <div class="toolbar">
+        <input [(ngModel)]="name" placeholder="name (user.registered)" />
+        <button type="button" (click)="load()">Filter</button>
+      </div>
+
+      @if (data(); as d) {
+        <section class="panel flush">
+          <table>
+            <thead>
+              <tr><th>When</th><th>Name</th><th>User</th><th>Payload</th></tr>
+            </thead>
+            <tbody>
+              @for (e of d.events; track e.id) {
+                <tr>
+                  <td class="id">{{ e.created_at }}</td>
+                  <td class="mono">{{ e.name }}</td>
+                  <td class="id">{{ e.user_id || '—' }}</td>
+                  <td><code>{{ e.payload | json }}</code></td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </section>
+      }
     </div>
-    @if (data(); as d) {
-      <table>
-        <tr><th>When</th><th>Name</th><th>User</th><th>Payload</th></tr>
-        @for (e of d.events; track e.id) {
-          <tr>
-            <td>{{ e.created_at }}</td>
-            <td>{{ e.name }}</td>
-            <td>{{ e.user_id || '—' }}</td>
-            <td><code>{{ e.payload | json }}</code></td>
-          </tr>
-        }
-      </table>
-    }
   `,
 })
 export class EventsPage {

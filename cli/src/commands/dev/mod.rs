@@ -52,7 +52,7 @@ pub struct DevArgs {
     /// Live-reload the app on a connected Android device / emulator
     #[arg(long)]
     pub android: bool,
-    /// Do not start Prometheus even if the binary is on PATH
+    /// Skip Prometheus (otherwise required when starting the API)
     #[arg(long)]
     pub no_prometheus: bool,
     /// Do not start the operator admin SPA
@@ -101,6 +101,9 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) {
     }
 
     let mut urls = ports::discover_urls(&root, &sel);
+    if sel.api && !args.no_prometheus {
+        urls.prometheus = Some(prometheus::LISTEN_URL.to_string());
+    }
 
     let device = if args.ios {
         Some(device::DevicePlatform::Ios)
@@ -148,7 +151,11 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) {
         );
     }
 
-    preflight::run_preflight(sel.api, &ports::ports_to_check(&urls));
+    preflight::run_preflight(
+        sel.api,
+        sel.api && !args.no_prometheus,
+        &ports::ports_to_check(&urls),
+    );
 
     if sel.app {
         ensure_npm_deps(&app_dir, "app");
@@ -244,30 +251,31 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) {
         .and_then(|u| ports::port_from_url(Some(u)))
         .unwrap_or(3000);
     let prometheus = if sel.api && !args.no_prometheus {
-        if prometheus::binary_on_path() {
-            let metrics_toml = std::fs::read_to_string(root.join("api/config/development.toml"))
-                .unwrap_or_default();
-            let scrape_token = ports::parse_table_string(&metrics_toml, "metrics", "auth_token");
-            match prometheus::prepare_dir(&root, api_port, scrape_token.as_deref()) {
-                Ok(dir) => {
-                    let prom_sink = sink.clone();
-                    Some(Supervisor::start(
-                        "prom",
-                        YELLOW,
-                        shutdown_rx.clone(),
-                        move || prometheus::spawn(&dir, YELLOW, prom_sink.clone()),
-                    ))
-                }
-                Err(e) => {
-                    eprintln!("Could not prepare Prometheus data dir: {e}");
-                    None
-                }
-            }
-        } else {
+        if !prometheus::binary_on_path() {
+            eprintln!("prometheus not found on PATH.");
             eprintln!(
-                "{DIM}prometheus not on PATH — skip scrape server (erno doctor, or --no-prometheus){RESET}"
+                "Install Prometheus: https://prometheus.io/docs/prometheus/latest/installation/"
             );
-            None
+            eprintln!("Or pass --no-prometheus to start without the scrape server.");
+            std::process::exit(1);
+        }
+        let metrics_toml =
+            std::fs::read_to_string(root.join("api/config/development.toml")).unwrap_or_default();
+        let scrape_token = ports::parse_table_string(&metrics_toml, "metrics", "auth_token");
+        match prometheus::prepare_dir(&root, api_port, scrape_token.as_deref()) {
+            Ok(dir) => {
+                let prom_sink = sink.clone();
+                Some(Supervisor::start(
+                    "prom",
+                    YELLOW,
+                    shutdown_rx.clone(),
+                    move || prometheus::spawn(&dir, YELLOW, prom_sink.clone()),
+                ))
+            }
+            Err(e) => {
+                eprintln!("Could not prepare Prometheus data dir: {e}");
+                std::process::exit(1);
+            }
         }
     } else {
         None

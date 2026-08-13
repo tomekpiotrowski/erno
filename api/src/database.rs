@@ -1,9 +1,9 @@
 use std::fmt::{self, Display, Formatter};
 
-use sea_orm::{ConnectOptions, DbErr};
+use sea_orm::{ConnectOptions, ConnectionTrait, DatabaseConnection, DbErr};
 use sea_orm_migration::MigratorTrait;
 use tokio::sync::oneshot;
-use tracing::debug;
+use tracing::{debug, info, warn};
 
 use crate::config::DatabaseConfig;
 
@@ -42,11 +42,53 @@ pub async fn setup_database<AppMigrator: MigratorTrait>(
     let (sender, receiver) = oneshot::channel();
 
     tokio::spawn(async move {
-        let migration_result = AppMigrator::up(&migrations_connection, None).await;
+        let migration_result = async {
+            forget_removed_migrations(&migrations_connection).await?;
+            AppMigrator::up(&migrations_connection, None).await
+        }
+        .await;
         let _ = sender.send(migration_result);
     });
 
     (connection, receiver)
+}
+
+/// Migrations deleted from the tree after they had already been applied.
+/// SeaORM refuses to start if an applied version has no file; drop the
+/// leftover table (if any) and forget the row so `Migrator::up` can proceed.
+const REMOVED_MIGRATIONS: &[(&str, &str)] =
+    &[("m20260727_030000_create_stat_snapshot", "stat_snapshot")];
+
+/// Forget applied migrations whose files were removed, and drop their tables.
+pub async fn forget_removed_migrations(db: &DatabaseConnection) -> Result<(), DbErr> {
+    let backend = db.get_database_backend();
+    let Some(_) = db
+        .query_one(sea_orm::Statement::from_string(
+            backend,
+            "SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'seaql_migrations'",
+        ))
+        .await?
+    else {
+        return Ok(());
+    };
+
+    for (version, table) in REMOVED_MIGRATIONS {
+        let forgotten = db
+            .execute_unprepared(&format!(
+                "DELETE FROM seaql_migrations WHERE version = '{version}'"
+            ))
+            .await?
+            .rows_affected();
+        if forgotten > 0 {
+            warn!("Forgot removed migration {version} ({forgotten} seaql_migrations row(s))");
+        }
+        db.execute_unprepared(&format!("DROP TABLE IF EXISTS \"{table}\" CASCADE"))
+            .await?;
+        if forgotten > 0 {
+            info!("Dropped leftover table {table} (if it existed)");
+        }
+    }
+    Ok(())
 }
 
 pub async fn setup_database_connection(db_config: &DatabaseConfig) -> sea_orm::DatabaseConnection {

@@ -8,6 +8,9 @@ use super::process::spawn_labeled;
 
 const PROMETHEUS_YML: &str = include_str!("../../../templates/prometheus/prometheus.yml");
 
+pub const LISTEN_ADDR: &str = "127.0.0.1:9090";
+pub const LISTEN_URL: &str = "http://localhost:9090";
+
 pub fn binary_on_path() -> bool {
     StdCommand::new("prometheus")
         .arg("--version")
@@ -49,7 +52,7 @@ pub fn spawn(
         "--storage.tsdb.path={}",
         dir.join("data").display()
     ));
-    cmd.arg("--web.listen-address=127.0.0.1:9090");
+    cmd.arg(format!("--web.listen-address={LISTEN_ADDR}"));
     cmd.arg("--storage.tsdb.retention.time=15d");
     spawn_labeled(cmd, dir, color, "prom", sink)
 }

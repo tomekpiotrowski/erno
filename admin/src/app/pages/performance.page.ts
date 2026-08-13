@@ -7,28 +7,45 @@ import { Sparkline } from '../sparkline';
   selector: 'app-performance',
   imports: [Sparkline],
   template: `
-    <h1>Performance</h1>
-    <div class="toolbar">
-      @for (w of windows; track w.id) {
-        <button (click)="setWindow(w.id)">{{ w.id }}</button>
+    <div class="stack">
+      <header class="head">
+        <div>
+          <h1>Performance</h1>
+          <p class="sub">Request latency and queue depth from Prometheus.</p>
+        </div>
+        <div class="toolbar">
+          @for (w of windows; track w.id) {
+            <button type="button" class="filter" [class.on]="windowId() === w.id" (click)="setWindow(w.id)">
+              {{ w.id }}
+            </button>
+          }
+        </div>
+      </header>
+
+      @if (error()) {
+        <p class="error">{{ error() }}</p>
+      }
+
+      @for (block of blocks(); track block.title) {
+        <section class="panel flush">
+          <header class="phead"><span class="eyebrow">{{ block.title }}</span></header>
+          <table>
+            <thead>
+              <tr><th>Series</th><th class="num">Latest</th><th></th></tr>
+            </thead>
+            <tbody>
+              @for (s of block.series; track $index) {
+                <tr>
+                  <td class="mono">{{ label(s) }}</td>
+                  <td class="num">{{ latest(s) }}</td>
+                  <td><app-sparkline [points]="s.points" /></td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </section>
       }
     </div>
-    @if (error()) {
-      <p class="error">{{ error() }}</p>
-    }
-    @for (block of blocks(); track block.title) {
-      <h2>{{ block.title }}</h2>
-      <table>
-        <tr><th>Series</th><th>Latest</th><th></th></tr>
-        @for (s of block.series; track $index) {
-          <tr>
-            <td>{{ label(s) }}</td>
-            <td>{{ latest(s) }}</td>
-            <td><app-sparkline [points]="s.points" /></td>
-          </tr>
-        }
-      </table>
-    }
   `,
 })
 export class PerformancePage {

@@ -175,11 +175,20 @@ fn check_angular_cli() -> CheckResult {
 }
 
 fn check_ionic_cli() -> CheckResult {
-    match crate::ng::find_ionic_binary().and_then(|ionic| Command::new(ionic).arg("--version").output().ok()) {
+    match crate::ng::find_ionic_binary()
+        .and_then(|ionic| Command::new(ionic).arg("--version").output().ok())
+    {
         None => CheckResult::fail("Ionic CLI", "Install with: npm install -g @ionic/cli"),
         Some(out) => {
             let ver = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            CheckResult::pass("Ionic CLI", if ver.is_empty() { "found".to_string() } else { ver })
+            CheckResult::pass(
+                "Ionic CLI",
+                if ver.is_empty() {
+                    "found".to_string()
+                } else {
+                    ver
+                },
+            )
         }
     }
 }
@@ -309,9 +318,9 @@ fn check_sea_orm_cli() -> CheckResult {
 
 fn check_prometheus() -> CheckResult {
     match run_cmd("prometheus", &["--version"]) {
-        None => CheckResult::warn(
+        None => CheckResult::fail(
             "prometheus not found",
-            "Install Prometheus to scrape /metrics in `erno dev` (https://prometheus.io/docs/prometheus/latest/installation/)",
+            "Install Prometheus for `erno dev` (https://prometheus.io/docs/prometheus/latest/installation/), or pass --no-prometheus",
         ),
         Some(v) => CheckResult::pass("prometheus", v.lines().next().unwrap_or(v.trim()).to_string()),
     }

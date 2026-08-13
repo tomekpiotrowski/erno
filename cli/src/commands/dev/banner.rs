@@ -34,6 +34,7 @@ pub struct DevUrls {
     pub api: Option<String>,
     pub app: Option<String>,
     pub www: Option<String>,
+    pub prometheus: Option<String>,
 }
 
 impl DevUrls {
@@ -43,6 +44,7 @@ impl DevUrls {
             api: start_api.then(|| "http://localhost:3000".to_string()),
             app: start_app.then(|| "http://localhost:4200".to_string()),
             www: start_www.then(|| "http://localhost:4321".to_string()),
+            prometheus: start_api.then(|| super::prometheus::LISTEN_URL.to_string()),
         }
     }
 
@@ -57,6 +59,12 @@ impl DevUrls {
             .as_deref()
             .map(|u| format!("{}/liveness", u.trim_end_matches('/')))
     }
+
+    pub fn prometheus_ready(&self) -> Option<String> {
+        self.prometheus
+            .as_deref()
+            .map(|u| format!("{}/-/ready", u.trim_end_matches('/')))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -64,6 +72,7 @@ pub struct BannerSnapshot {
     pub api: Option<ServiceState>,
     pub app: Option<ServiceState>,
     pub www: Option<ServiceState>,
+    pub prometheus: Option<ServiceState>,
 }
 
 pub fn render_banner(urls: &DevUrls, snap: &BannerSnapshot) -> String {
@@ -81,6 +90,9 @@ pub fn render_banner(urls: &DevUrls, snap: &BannerSnapshot) -> String {
     if let (Some(url), Some(state)) = (urls.api.as_deref(), snap.api) {
         out.push_str(&format_row(CYAN, "api", url, state));
         out.push_str(&hidden_surfaces(url));
+    }
+    if let (Some(url), Some(state)) = (urls.prometheus.as_deref(), snap.prometheus) {
+        out.push_str(&format_row(YELLOW, "prom", url, state));
     }
     out.push('\n');
     out
@@ -110,6 +122,7 @@ pub fn starting_snapshot(urls: &DevUrls) -> BannerSnapshot {
         api: urls.api.as_ref().map(|_| ServiceState::Starting),
         app: urls.app.as_ref().map(|_| ServiceState::Starting),
         www: urls.www.as_ref().map(|_| ServiceState::Starting),
+        prometheus: urls.prometheus.as_ref().map(|_| ServiceState::Starting),
     }
 }
 
@@ -150,7 +163,16 @@ async fn probe_all(client: &Client, urls: &DevUrls) -> BannerSnapshot {
         Some(url) => Some(probe_http(client, url).await),
         None => None,
     };
-    BannerSnapshot { api, app, www }
+    let prometheus = match urls.prometheus_ready() {
+        Some(url) => Some(probe_http(client, &url).await),
+        None => None,
+    };
+    BannerSnapshot {
+        api,
+        app,
+        www,
+        prometheus,
+    }
 }
 
 async fn probe_api(client: &Client, urls: &DevUrls) -> ServiceState {
@@ -196,11 +218,13 @@ mod tests {
             api: Some(ServiceState::Ready),
             app: Some(ServiceState::Starting),
             www: Some(ServiceState::Ready),
+            prometheus: Some(ServiceState::Ready),
         };
         let text = render_banner(&urls, &snap);
         assert!(text.contains("http://localhost:3000"));
         assert!(text.contains("http://localhost:4200"));
         assert!(text.contains("http://localhost:4321"));
+        assert!(text.contains("http://localhost:9090"));
         assert!(text.contains("ready"));
         assert!(text.contains("starting"));
         assert!(text.contains("http://localhost:4300"));
@@ -215,6 +239,7 @@ mod tests {
             api: Some(ServiceState::Migrating),
             app: Some(ServiceState::Starting),
             www: None,
+            prometheus: Some(ServiceState::Starting),
         };
         let text = render_banner(&urls, &snap);
         assert!(text.contains("migrating"));
@@ -243,7 +268,19 @@ mod tests {
         let urls = DevUrls::defaults(true, false, false);
         let text = render_banner(&urls, &starting_snapshot(&urls));
         assert!(text.contains("api"));
+        assert!(text.contains("prom"));
+        assert!(text.contains("http://localhost:9090"));
         assert!(!text.contains("app"));
         assert!(!text.contains("www"));
+    }
+
+    #[test]
+    fn banner_omits_prometheus_when_disabled() {
+        let mut urls = DevUrls::defaults(true, false, false);
+        urls.prometheus = None;
+        let text = render_banner(&urls, &starting_snapshot(&urls));
+        assert!(text.contains("api"));
+        assert!(!text.contains("prom"));
+        assert!(!text.contains("9090"));
     }
 }

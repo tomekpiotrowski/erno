@@ -60,10 +60,11 @@ By default only errors and ready events are printed; the full multiplex is writt
 | API | `GET /readiness` (`/liveness` while migrating) | `[server].port` / `api_url` in `api/config/development.toml` |
 | Product app | HTTP | `app_url` or `angular.json` serve port (4200) |
 | Marketing | HTTP | `--port` in `www/package.json` `dev` script (4321) |
+| Prometheus | `GET /-/ready` | `http://localhost:9090` |
 
-A second `erno dev` in the same project is rejected via `.erno/dev.lock` (stale locks from a crashed session are replaced). When the API is running the banner also lists the admin SPA (`http://localhost:4300`, password `admin`), `/dev/emails`, and `/dev/jobs`. Newly captured mock emails are printed as `[mail] subject → to`. The banner reprints whenever a service changes state (`starting` → `ready`). If one process exits, it is restarted (with backoff) without taking the others down. The API is rebuilt automatically when `api/` source files change (no `cargo-watch` needed). Ctrl+C sends SIGTERM, then SIGKILL after two seconds. Prometheus is started when the `prometheus` binary is on `PATH` (`--no-prometheus` to skip).
+A second `erno dev` in the same project is rejected via `.erno/dev.lock` (stale locks from a crashed session are replaced). When the API is running the banner also lists Prometheus (`http://localhost:9090`), the admin SPA (`http://localhost:4300`, password `admin`), `/dev/emails`, and `/dev/jobs`. Newly captured mock emails are printed as `[mail] subject → to`. The banner reprints whenever a service changes state (`starting` → `ready`). If one process exits, it is restarted (with backoff) without taking the others down. The API is rebuilt automatically when `api/` source files change (no `cargo-watch` needed). Ctrl+C sends SIGTERM, then SIGKILL after two seconds. Prometheus is required when the API is started (`prometheus` must be on `PATH`). Pass `--no-prometheus` to skip — the banner then omits `prom`. A missing binary is an error, not a silent skip.
 
-Before spawning anything, `erno dev` checks that PostgreSQL is running (when the API is selected) and that each selected service’s port is free. If a port is held by a leftover `cargo`/`node`/`erno` process, it offers to kill it.
+Before spawning anything, `erno dev` checks that PostgreSQL is running (when the API is selected), that `prometheus` is on `PATH` (unless `--no-prometheus`), and that each selected service’s port is free. If a port is held by a leftover `cargo`/`node`/`erno` process, it offers to kill it.
 
 ---
 

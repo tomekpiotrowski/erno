@@ -8,25 +8,45 @@ import { Sparkline } from '../sparkline';
   selector: 'app-database',
   imports: [Sparkline],
   template: `
-    <h1>Database</h1>
-    <p class="muted">Approximate live tuples from pg_stat_user_tables (not COUNT(*)).</p>
-    @if (error()) {
-      <p class="error">{{ error() }}</p>
-    }
-    @if (data(); as d) {
-      <table>
-        <tr><th>Table</th><th>≈ rows</th><th>Dead</th><th>Last analyze</th><th>History</th></tr>
-        @for (t of d.tables; track t.table) {
-          <tr>
-            <td>{{ t.table }}</td>
-            <td>{{ t.approx_rows }}</td>
-            <td>{{ t.n_dead_tup }}</td>
-            <td>{{ t.last_analyze || '—' }}</td>
-            <td><app-sparkline [points]="history()[t.table] || []" /></td>
-          </tr>
-        }
-      </table>
-    }
+    <div class="stack">
+      <header class="head">
+        <div>
+          <h1>Database</h1>
+          <p class="sub">Approximate live tuples from pg_stat_user_tables (not COUNT(*)).</p>
+        </div>
+      </header>
+
+      @if (error()) {
+        <p class="error">{{ error() }}</p>
+      }
+
+      @if (data(); as d) {
+        <section class="panel flush">
+          <table>
+            <thead>
+              <tr>
+                <th>Table</th>
+                <th class="num">≈ rows</th>
+                <th class="num">Dead</th>
+                <th>Last analyze</th>
+                <th>History</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (t of d.tables; track t.table) {
+                <tr>
+                  <td class="mono">{{ t.table }}</td>
+                  <td class="num">{{ t.approx_rows }}</td>
+                  <td class="num">{{ t.n_dead_tup }}</td>
+                  <td class="id">{{ t.last_analyze || '—' }}</td>
+                  <td><app-sparkline [points]="history()[t.table] || []" /></td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </section>
+      }
+    </div>
   `,
 })
 export class DatabasePage {

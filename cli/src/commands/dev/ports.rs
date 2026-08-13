@@ -24,6 +24,7 @@ pub fn discover_urls(root: &Path, sel: &ServiceSelection) -> DevUrls {
         api: sel.api.then_some(api_url),
         app: sel.app.then_some(app_url),
         www: sel.www.then_some(www_url),
+        prometheus: None,
     }
 }
 
@@ -37,6 +38,9 @@ pub fn ports_to_check(urls: &DevUrls) -> Vec<u16> {
     }
     if let Some(url) = &urls.www {
         ports.push(port_from_url(Some(url)).unwrap_or(4321));
+    }
+    if let Some(url) = &urls.prometheus {
+        ports.push(port_from_url(Some(url)).unwrap_or(9090));
     }
     ports
 }

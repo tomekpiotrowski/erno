@@ -5,9 +5,12 @@ const FRIENDLY_COMMANDS: &[&str] = &[
     "erno", "cargo", "node", "npm", "ng", "astro", "esbuild", "vite",
 ];
 
-pub fn run_preflight(check_db: bool, ports: &[u16]) {
+pub fn run_preflight(check_db: bool, check_prometheus: bool, ports: &[u16]) {
     if check_db {
         check_postgres();
+    }
+    if check_prometheus {
+        check_prometheus_binary();
     }
     for port in ports {
         check_port(*port);
@@ -28,6 +31,16 @@ fn check_postgres() {
         }
         Ok(_) => {}
     }
+}
+
+fn check_prometheus_binary() {
+    if super::prometheus::binary_on_path() {
+        return;
+    }
+    eprintln!("prometheus not found on PATH.");
+    eprintln!("Install Prometheus: https://prometheus.io/docs/prometheus/latest/installation/");
+    eprintln!("Or pass --no-prometheus to start without the scrape server.");
+    std::process::exit(1);
 }
 
 fn check_port(port: u16) {

@@ -1,0 +1,36 @@
+// _tokens.scss — the design system, ported 1:1 from the prototype's tokens.jsx.
+// This is the single source of truth. Nothing else should declare a hex value.
+
+// Brand accents. `ink` is the text colour ON the accent — light accents (lime,
+// cyan) need dark ink or contrast fails.
+$accents: (
+  'blue':    (a: #2a6ed4, a2: #4f8ef7, ink: #ffffff, shade: #2560ba),
+  'orange':  (a: #fc4c02, a2: #ff8a3d, ink: #ffffff, shade: #de4302),
+  'violet':  (a: #7c5cff, a2: #a78bfa, ink: #ffffff, shade: #6d51e0),
+  'cyan':    (a: #00b8d4, a2: #22d3ee, ink: #04141a, shade: #00a2bb),
+  'lime':    (a: #a3e635, a2: #d9f99d, ink: #16210a, shade: #90ca2f),
+  'magenta': (a: #ff2d75, a2: #ff6fa3, ink: #ffffff, shade: #e02867),
+);
+
+// Semantic colours are theme-aware: no single hue clears 4.5:1 on both a
+// near-black and a white surface, so light mode gets darker values.
+$semantic-dark:  (good: #22c55e, warn: #f5a524, bad: #ff4d4f, info: #00d4ff);
+$semantic-light: (good: #15803d, warn: #b45309, bad: #dc2626, info: #0e7490);
+
+// Type. display = condensed, used for every number; text = UI copy;
+// mono = scrambles and move notation.
+$font-display: ('Barlow Condensed', 'Oswald', sans-serif);
+$font-text:    ('Inter', -apple-system, system-ui, sans-serif);
+$font-mono:    ('JetBrains Mono', ui-monospace, monospace);
+
+$radius: (sm: 6px, md: 9px, lg: 13px, xl: 16px, pill: 999px);
+$space:  (xs: 6px, sm: 9px, md: 12px, lg: 14px, xl: 18px, xxl: 22px);
+
+// Layout constants more than one screen depends on.
+$rail-width: 232px;
+$utility-bar-height: 56px;
+$feed-height: 320px;
+$touch-target: 44px;          // iOS minimum; Android 48dp
+$bp-phone: 768px;
+$bp-tablet: 1024px;
+$bp-wide: 1240px;

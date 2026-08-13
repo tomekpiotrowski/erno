@@ -7,22 +7,34 @@ import { Sparkline } from '../sparkline';
   selector: 'app-business',
   imports: [Sparkline],
   template: `
-    <h1>Business</h1>
-    <div class="toolbar">
-      @for (w of windows; track w.id) {
-        <button (click)="setWindow(w.id)">{{ w.id }}</button>
-      }
-    </div>
-    @if (error()) {
-      <p class="error">{{ error() }}</p>
-    }
-    <div class="grid cards">
-      @for (row of cards(); track row.label) {
-        <div class="card">
-          {{ row.label }}<strong>{{ row.value }}</strong>
-          <app-sparkline [points]="row.points" />
+    <div class="stack">
+      <header class="head">
+        <div>
+          <h1>Statistics</h1>
+          <p class="sub">Business figures from Prometheus. Every number states its window.</p>
         </div>
+        <div class="toolbar">
+          @for (w of windows; track w.id) {
+            <button type="button" class="filter" [class.on]="windowId() === w.id" (click)="setWindow(w.id)">
+              {{ w.id }}
+            </button>
+          }
+        </div>
+      </header>
+
+      @if (error()) {
+        <p class="error">{{ error() }}</p>
       }
+
+      <div class="grid cards">
+        @for (row of cards(); track row.label) {
+          <div class="stat">
+            <span class="label">{{ row.label }}</span>
+            <span class="value">{{ row.value }}</span>
+            <app-sparkline [points]="row.points" />
+          </div>
+        }
+      </div>
     </div>
   `,
 })
