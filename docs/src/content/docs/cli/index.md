@@ -40,7 +40,7 @@ Starts the project’s dev servers (`api/` + `app/`, plus `www/` when present). 
 
 | Surface | Probe | Default URL |
 |---------|-------|-------------|
-| API | `GET /readiness` | http://localhost:3000 |
+| API | `GET /readiness` (`/liveness` while migrating) | http://localhost:3000 |
 | Product app | HTTP | http://localhost:4200 |
 | Marketing | HTTP | http://localhost:4321 |
 

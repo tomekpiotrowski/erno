@@ -55,7 +55,7 @@ my_app/
 
 It also creates `my_app_development` and `my_app_test` databases.
 
-`erno new` starts all three dev servers via `erno dev`:
+The API applies pending migrations on boot. `erno new` starts all three dev servers via `erno dev`:
 
 | Surface | URL |
 |---------|-----|
@@ -73,9 +73,10 @@ erno new my_app --erno-path /path/to/erno
 
 ```sh
 cd api
-cargo run -- migrate up
 cargo run
 ```
+
+`serve` (the default) waits for migrations before accepting traffic. Use `cargo run -- migrate up` only when you want to apply migrations without starting the server.
 
 Health check: `http://localhost:3000/health`.
 
@@ -96,7 +97,7 @@ Built-in app commands (`cargo run --` from `api/`):
 
 ## 5. Run everything
 
-From the project root (after migrations):
+From the project root:
 
 ```sh
 erno dev

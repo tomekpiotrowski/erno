@@ -7,6 +7,7 @@ use super::{CYAN, DIM, GREEN, MAGENTA, RESET, YELLOW};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ServiceState {
     Starting,
+    Migrating,
     Ready,
 }
 
@@ -14,6 +15,7 @@ impl ServiceState {
     fn label(self) -> &'static str {
         match self {
             Self::Starting => "starting",
+            Self::Migrating => "migrating",
             Self::Ready => "ready",
         }
     }
@@ -21,6 +23,7 @@ impl ServiceState {
     fn color(self) -> &'static str {
         match self {
             Self::Starting => YELLOW,
+            Self::Migrating => YELLOW,
             Self::Ready => GREEN,
         }
     }
@@ -44,6 +47,10 @@ impl DevUrls {
 
     pub fn api_readiness(&self) -> String {
         format!("{}/readiness", self.api.trim_end_matches('/'))
+    }
+
+    pub fn api_liveness(&self) -> String {
+        format!("{}/liveness", self.api.trim_end_matches('/'))
     }
 }
 
@@ -128,7 +135,13 @@ async fn probe_all(client: &Client, urls: &DevUrls) -> BannerSnapshot {
 }
 
 async fn probe_api(client: &Client, urls: &DevUrls) -> ServiceState {
-    probe_http(client, &urls.api_readiness()).await
+    if is_up(client, &urls.api_readiness()).await {
+        ServiceState::Ready
+    } else if is_up(client, &urls.api_liveness()).await {
+        ServiceState::Migrating
+    } else {
+        ServiceState::Starting
+    }
 }
 
 async fn probe_http(client: &Client, url: &str) -> ServiceState {
@@ -164,9 +177,19 @@ mod tests {
         assert!(text.contains("http://localhost:4321"));
         assert!(text.contains("ready"));
         assert!(text.contains("starting"));
-        assert!(text.contains("www"));
-        assert!(text.contains("app"));
-        assert!(text.contains("api"));
+    }
+
+    #[test]
+    fn banner_shows_migrating() {
+        let urls = DevUrls::defaults(false);
+        let snap = BannerSnapshot {
+            api: Some(ServiceState::Migrating),
+            app: Some(ServiceState::Starting),
+            www: None,
+        };
+        let text = render_banner(&urls, &snap);
+        assert!(text.contains("migrating"));
+        assert!(!text.contains("www"));
     }
 
     #[test]

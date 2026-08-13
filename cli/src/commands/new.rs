@@ -95,7 +95,7 @@ pub async fn handle_new(name: &str, path: Option<&str>, erno_path: Option<&str>,
         );
     }
 
-    print_next_steps(name, &dest);
+    print_next_steps(name);
     crate::commands::dev::handle_dev(Some(dest)).await;
 }
 
@@ -607,7 +607,7 @@ async fn create_db(client: &tokio_postgres::Client, db: &str) {
 
 // ── Next steps ────────────────────────────────────────────────────────────────
 
-fn print_next_steps(name: &str, dest: &Path) {
+fn print_next_steps(name: &str) {
     println!(
         r#"
 ✅  Created {name}/
@@ -616,14 +616,12 @@ fn print_next_steps(name: &str, dest: &Path) {
   app/  Ionic product app (app.example.com in production)
   www/  Astro marketing site (example.com in production)
 
-Before the API connects, run migrations once:
-  cd {dest}/api && cargo run -- migrate up
+Starting dev servers now (Ctrl+C to stop).
+The API applies pending migrations on boot.
 
-Starting dev servers now (Ctrl+C to stop)...
   www  → http://localhost:4321
   app  → http://localhost:4200
   api  → http://localhost:3000
-"#,
-        dest = dest.display(),
+"#
     );
 }
