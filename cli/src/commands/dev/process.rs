@@ -5,6 +5,7 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
+use super::log::LogSink;
 use super::RESET;
 
 /// Force color and progress through piped stdout. Cargo, npm, and most CLIs
@@ -26,6 +27,7 @@ pub fn spawn_labeled(
     dir: &std::path::Path,
     color: &'static str,
     label: &'static str,
+    sink: Arc<LogSink>,
 ) -> Child {
     apply_child_color_env(&mut cmd);
 
@@ -44,19 +46,19 @@ pub fn spawn_labeled(
 
     let stdout = BufReader::new(child.stdout.take().unwrap());
     let stderr = BufReader::new(child.stderr.take().unwrap());
-    spawn_printer(stdout, color, label);
-    spawn_printer(stderr, color, label);
+    spawn_printer(stdout, color, label, sink.clone());
+    spawn_printer(stderr, color, label, sink);
     child
 }
 
-pub fn spawn_printer<R>(reader: R, color: &'static str, label: &'static str)
+pub fn spawn_printer<R>(reader: R, color: &'static str, label: &'static str, sink: Arc<LogSink>)
 where
     R: AsyncRead + Unpin + Send + 'static,
 {
     let mut lines = BufReader::new(reader).lines();
     tokio::spawn(async move {
         while let Ok(Some(line)) = lines.next_line().await {
-            println!("{color}[{label}]{RESET} {line}");
+            sink.write_line(color, label, &line);
         }
     });
 }

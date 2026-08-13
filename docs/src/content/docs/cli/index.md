@@ -32,9 +32,12 @@ cargo install erno-cli
 
 ```sh
 erno dev
+erno dev --verbose
 ```
 
-Starts the project’s dev servers (`api/` + `app/`, plus `www/` when present). Walks up from the current directory looking for `api/Cargo.toml`, so you can run it from `api/`, `app/`, or any subdirectory. Logs are prefixed by service (`[api]`, `[app]`, `[www]`). Child tools are told to keep color and cargo’s progress bar even though their stdout is piped.
+Starts the project’s dev servers (`api/` + `app/`, plus `www/` when present). Walks up from the current directory looking for `api/Cargo.toml`, so you can run it from `api/`, `app/`, or any subdirectory. Child tools are told to keep color and cargo’s progress bar even though their stdout is piped.
+
+By default only errors and ready events are printed; the full multiplex is written to `.erno/dev.log`. Pass `--verbose` (or `-v`) to stream every child line, prefixed by service (`[api]`, `[app]`, `[www]`).
 
 `erno dev` prints a status banner with each service URL and probes them until they respond:
 

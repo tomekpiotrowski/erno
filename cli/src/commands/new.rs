@@ -96,7 +96,7 @@ pub async fn handle_new(name: &str, path: Option<&str>, erno_path: Option<&str>,
     }
 
     print_next_steps(name);
-    crate::commands::dev::handle_dev(Some(dest)).await;
+    crate::commands::dev::handle_dev(Some(dest), crate::commands::dev::DevArgs::default()).await;
 }
 
 // ── Erno dependency resolution ────────────────────────────────────────────────

@@ -33,7 +33,7 @@ enum Commands {
     /// Configure global Erno settings (~/.erno/config.toml)
     Setup,
     /// Start the api and app dev servers
-    Dev,
+    Dev(commands::dev::DevArgs),
     /// Open the admin TUI (talks to the running API over HTTP)
     Admin {
         /// API base URL (default: api_url from development.toml or http://localhost:3000)
@@ -86,7 +86,7 @@ async fn main() {
             bundle_id,
         } => commands::new::handle_new(&name, path.as_deref(), erno_path.as_deref(), bundle_id.as_deref()).await,
         Commands::Setup => commands::setup::handle_setup().await,
-        Commands::Dev => commands::dev::handle_dev(None).await,
+        Commands::Dev(args) => commands::dev::handle_dev(None, args).await,
         Commands::Admin {
             url,
             user,

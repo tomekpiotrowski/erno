@@ -68,7 +68,7 @@ ALTER USER erno CREATEDB;
 | `src/commands/setup.rs` | Interactive config writer; validates admin connection before saving |
 | `src/commands/doctor.rs` | Environment checks — each returns a `CheckResult` (Pass/Warn/Fail) |
 | `src/commands/new.rs` | Project scaffolding — inline templates, directory creation, database creation |
-| `src/commands/dev/` | `erno dev` — process multiplexer, readiness banner |
+| `src/commands/dev/` | `erno dev` — process multiplexer, readiness banner, quiet logs |
 
 ## Architecture notes
 
