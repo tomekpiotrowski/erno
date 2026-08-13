@@ -80,9 +80,17 @@ pub fn render_banner(urls: &DevUrls, snap: &BannerSnapshot) -> String {
     }
     if let (Some(url), Some(state)) = (urls.api.as_deref(), snap.api) {
         out.push_str(&format_row(CYAN, "api", url, state));
+        out.push_str(&hidden_surfaces(url));
     }
     out.push('\n');
     out
+}
+
+pub fn hidden_surfaces(api_url: &str) -> String {
+    let base = api_url.trim_end_matches('/');
+    format!(
+        "  {DIM}admin{RESET} erno admin                      password: admin\n  {DIM}mail {RESET} {base}/dev/emails\n  {DIM}jobs {RESET} {base}/dev/jobs\n"
+    )
 }
 
 fn format_row(color: &str, name: &str, url: &str, state: ServiceState) -> String {
@@ -195,6 +203,9 @@ mod tests {
         assert!(text.contains("http://localhost:4321"));
         assert!(text.contains("ready"));
         assert!(text.contains("starting"));
+        assert!(text.contains("erno admin"));
+        assert!(text.contains("/dev/emails"));
+        assert!(text.contains("/dev/jobs"));
     }
 
     #[test]
@@ -218,6 +229,13 @@ mod tests {
         assert!(!text.contains("www"));
         assert!(text.contains("api"));
         assert!(urls.www.is_none());
+    }
+
+    #[test]
+    fn hidden_surfaces_use_api_origin() {
+        let text = hidden_surfaces("http://localhost:3010/");
+        assert!(text.contains("http://localhost:3010/dev/emails"));
+        assert!(text.contains("password: admin"));
     }
 
     #[test]

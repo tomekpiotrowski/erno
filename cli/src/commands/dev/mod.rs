@@ -1,6 +1,7 @@
 mod banner;
 mod lock;
 mod log;
+mod mail;
 mod ports;
 mod preflight;
 mod process;
@@ -93,6 +94,9 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) {
     }
 
     print_banner(&urls, &starting_snapshot(&urls));
+    if let Some(api_url) = urls.api.clone() {
+        mail::spawn_mail_watcher(api_url);
+    }
     spawn_readiness_watcher(urls);
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
