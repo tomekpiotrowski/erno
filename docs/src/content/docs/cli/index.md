@@ -34,7 +34,7 @@ cargo install erno-cli
 erno dev
 ```
 
-Starts the project’s dev servers from the project root (`api/` + `app/`, plus `www/` when present). Logs are prefixed by service (`[api]`, `[app]`, `[www]`).
+Starts the project’s dev servers from the project root (`api/` + `app/`, plus `www/` when present). Logs are prefixed by service (`[api]`, `[app]`, `[www]`). Child tools are told to keep color and cargo’s progress bar even though their stdout is piped.
 
 `erno dev` prints a status banner with each service URL and probes them until they respond:
 

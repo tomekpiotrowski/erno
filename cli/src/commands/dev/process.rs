@@ -7,12 +7,28 @@ use tokio::sync::Mutex;
 
 use super::RESET;
 
+/// Force color and progress through piped stdout. Cargo, npm, and most CLIs
+/// disable both when they detect a non-TTY (which is how we capture logs).
+pub fn apply_child_color_env(cmd: &mut Command) {
+    cmd.env("CARGO_TERM_COLOR", "always");
+    cmd.env("CARGO_TERM_PROGRESS_WHEN", "always");
+    cmd.env("CARGO_TERM_PROGRESS_WIDTH", "80");
+    cmd.env("FORCE_COLOR", "1");
+    cmd.env("CLICOLOR_FORCE", "1");
+    cmd.env("npm_config_color", "always");
+    if std::env::var_os("TERM").is_none() {
+        cmd.env("TERM", "xterm-256color");
+    }
+}
+
 pub fn spawn_labeled(
     mut cmd: Command,
     dir: &std::path::Path,
     color: &'static str,
     label: &'static str,
 ) -> Child {
+    apply_child_color_env(&mut cmd);
+
     #[cfg(unix)]
     cmd.process_group(0);
 
