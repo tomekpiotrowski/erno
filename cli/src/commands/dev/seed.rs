@@ -37,12 +37,20 @@ pub async fn maybe_seed(root: &Path, api_url: &str, force: bool) {
         return;
     };
 
-    match seed_demo_user(&db_url, force).await {
+    let configured_email = parse_table_string(&toml, "seed", "email");
+    // A project-specific [seed] user should exist on every `erno dev`, not
+    // only when the users table is empty.
+    let ensure = force || configured_email.is_some();
+    let email = configured_email.unwrap_or_else(|| DEMO_EMAIL.to_string());
+    let password =
+        parse_table_string(&toml, "seed", "password").unwrap_or_else(|| DEMO_PASSWORD.to_string());
+
+    match seed_demo_user(&db_url, &email, &password, ensure).await {
         Ok(SeedResult::Created) => {
-            println!("{GREEN}Seeded demo user{RESET}  {DEMO_EMAIL} / {DEMO_PASSWORD}");
+            println!("{GREEN}Seeded demo user{RESET}  {email} / {password}");
         }
         Ok(SeedResult::AlreadyPresent) if force => {
-            println!("{DIM}Demo user {DEMO_EMAIL} already exists{RESET}");
+            println!("{DIM}Demo user {email} already exists{RESET}");
         }
         Ok(SeedResult::SkippedNotEmpty) => {}
         Ok(SeedResult::AlreadyPresent) => {}
@@ -56,7 +64,12 @@ enum SeedResult {
     SkippedNotEmpty,
 }
 
-async fn seed_demo_user(db_url: &str, force: bool) -> Result<SeedResult, String> {
+async fn seed_demo_user(
+    db_url: &str,
+    email: &str,
+    password: &str,
+    force: bool,
+) -> Result<SeedResult, String> {
     let (client, connection) = tokio_postgres::connect(db_url, tokio_postgres::NoTls)
         .await
         .map_err(|e| e.to_string())?;
@@ -85,19 +98,19 @@ async fn seed_demo_user(db_url: &str, force: bool) -> Result<SeedResult, String>
     }
 
     let existing = client
-        .query_opt("SELECT 1 FROM users WHERE email = $1", &[&DEMO_EMAIL])
+        .query_opt("SELECT 1 FROM users WHERE email = $1", &[&email])
         .await
         .map_err(|e| e.to_string())?;
     if existing.is_some() {
         return Ok(SeedResult::AlreadyPresent);
     }
 
-    let hash = hash_password(DEMO_PASSWORD)?;
+    let hash = hash_password(password)?;
     client
         .execute(
             "INSERT INTO users (email, password_hash, email_verified_at) \
              VALUES ($1, $2, NOW())",
-            &[&DEMO_EMAIL, &hash],
+            &[&email, &hash],
         )
         .await
         .map_err(|e| e.to_string())?;
