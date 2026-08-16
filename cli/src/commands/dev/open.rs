@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use reqwest::Client;
 
-use super::{DIM, RESET};
+use crate::ui;
 
 pub fn url_to_open(www: Option<&str>, app: Option<&str>, api: Option<&str>) -> Option<String> {
     www.or(app).or(api).map(|s| s.to_string())
@@ -13,11 +13,13 @@ pub fn spawn_opener(url: String) {
     tokio::spawn(async move {
         if wait_for_http(&url).await {
             match open_browser(&url) {
-                Ok(()) => println!("{DIM}Opened {url}{RESET}"),
-                Err(e) => eprintln!("Could not open {url}: {e}"),
+                Ok(()) => ui::info(format!("Opened {url}")),
+                Err(e) => ui::warn(format!("could not open {url}: {e}")),
             }
         } else {
-            eprintln!("Timed out waiting for {url} — not opening a browser.");
+            ui::warn(format!(
+                "timed out waiting for {url} — not opening a browser"
+            ));
         }
     });
 }

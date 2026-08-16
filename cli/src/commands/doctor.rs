@@ -1,99 +1,73 @@
 use std::process::Command;
 
 use crate::global_config::GlobalConfig;
+use crate::ui::{self, Row};
 
 const MIN_RUST_MINOR: u32 = 88;
 
-enum Status {
-    Pass,
-    Warn,
-    Fail,
-}
-
+/// A check result is a [`Row`] plus whether its failure is fatal.
 struct CheckResult {
-    status: Status,
-    label: String,
-    detail: Option<String>,
-    hint: Option<String>,
+    row: Row,
     required: bool,
 }
 
 impl CheckResult {
     fn pass(label: impl Into<String>, detail: impl Into<String>) -> Self {
         Self {
-            status: Status::Pass,
-            label: label.into(),
-            detail: Some(detail.into()),
-            hint: None,
+            row: Row::ok(label, detail),
             required: true,
         }
     }
 
-    fn warn(label: impl Into<String>, hint: impl Into<String>) -> Self {
+    /// `label` names the thing checked, `detail` says what is wrong with it,
+    /// and `hint` says what to do. Keeping the label a bare noun is what lets
+    /// every row — passing or not — share one label column.
+    fn warn(label: impl Into<String>, detail: impl Into<String>, hint: impl Into<String>) -> Self {
         Self {
-            status: Status::Warn,
-            label: label.into(),
-            detail: None,
-            hint: Some(hint.into()),
+            row: Row {
+                detail: Some(detail.into()),
+                ..Row::warn(label, hint)
+            },
             required: false,
         }
     }
 
-    fn fail(label: impl Into<String>, hint: impl Into<String>) -> Self {
+    fn fail(label: impl Into<String>, detail: impl Into<String>, hint: impl Into<String>) -> Self {
         Self {
-            status: Status::Fail,
-            label: label.into(),
-            detail: None,
-            hint: Some(hint.into()),
+            row: Row {
+                detail: Some(detail.into()),
+                ..Row::fail(label, hint)
+            },
             required: true,
         }
     }
+
+    /// Only a *required* failure sinks the run — a warning never does.
+    fn is_blocking(&self) -> bool {
+        self.required && self.row.level == ui::Level::Fail
+    }
 }
 
-pub async fn handle_doctor() {
-    println!();
+pub async fn handle_doctor() -> ui::Cmd {
     let results = run_checks().await;
 
-    let mut any_failed = false;
-    for r in &results {
-        match r.status {
-            Status::Pass => {
-                let detail = r.detail.as_deref().unwrap_or("");
-                println!(
-                    "  ✅  {}{}",
-                    r.label,
-                    if detail.is_empty() {
-                        String::new()
-                    } else {
-                        format!(" ({detail})")
-                    }
-                );
-            }
-            Status::Warn => {
-                println!("  ⚠️   {}", r.label);
-                if let Some(h) = &r.hint {
-                    println!("      {h}");
-                }
-            }
-            Status::Fail => {
-                println!("  ❌  {}", r.label);
-                if let Some(h) = &r.hint {
-                    println!("      {h}");
-                }
-                if r.required {
-                    any_failed = true;
-                }
-            }
-        }
-    }
+    ui::section("Environment");
+    ui::blank();
+    let rows: Vec<Row> = results.iter().map(|r| r.row.clone()).collect();
+    ui::print_rows(&rows);
 
-    println!();
-    if any_failed {
-        eprintln!("Some required checks failed. Fix the issues above and run `erno doctor` again.");
-        std::process::exit(1);
-    } else {
-        println!("All required checks passed.");
+    let blocking = results.iter().filter(|r| r.is_blocking()).count();
+    if blocking > 0 {
+        ui::emit(ui::Stream::Err, "");
+        let plural = if blocking == 1 { "check" } else { "checks" };
+        return Err(ui::Failure::Message(format!(
+            "{blocking} required {plural} failed\n\
+             Fix the issues above and run `erno doctor` again."
+        )));
     }
+    ui::blank();
+    ui::ok("All required checks passed.");
+    Ok(())
 }
 
 async fn run_checks() -> Vec<CheckResult> {
@@ -115,7 +89,7 @@ async fn run_checks() -> Vec<CheckResult> {
 fn check_rust() -> CheckResult {
     let out = run_cmd("rustc", &["--version"]);
     match out {
-        None => CheckResult::fail("Rust", "Install from https://rustup.rs"),
+        None => CheckResult::fail("Rust", "not found", "Install from https://rustup.rs"),
         Some(v) => {
             // "rustc 1.88.0 (xxxxxxx YYYY-MM-DD)"
             if let Some(ver) = parse_version_after(&v, "rustc ") {
@@ -129,7 +103,8 @@ fn check_rust() -> CheckResult {
                 } else {
                     CheckResult::fail(
                         "Rust",
-                        format!("Version {ver} is too old — 1.{MIN_RUST_MINOR}+ required. Run: rustup update"),
+                        format!("{ver} is too old — 1.{MIN_RUST_MINOR}+ required"),
+                        "Run: rustup update",
                     )
                 }
             } else {
@@ -141,14 +116,18 @@ fn check_rust() -> CheckResult {
 
 fn check_node() -> CheckResult {
     match run_cmd("node", &["--version"]) {
-        None => CheckResult::fail("Node.js", "Install from https://nodejs.org"),
+        None => CheckResult::fail("Node.js", "not found", "Install from https://nodejs.org"),
         Some(v) => CheckResult::pass("Node.js", v.trim().to_string()),
     }
 }
 
 fn check_npm() -> CheckResult {
     match run_cmd("npm", &["--version"]) {
-        None => CheckResult::fail("npm", "Install Node.js (includes npm): https://nodejs.org"),
+        None => CheckResult::fail(
+            "npm",
+            "not found",
+            "Install Node.js (includes npm): https://nodejs.org",
+        ),
         Some(v) => CheckResult::pass("npm", v.trim().to_string()),
     }
 }
@@ -160,7 +139,11 @@ fn check_angular_cli() -> CheckResult {
         crate::ng::find_ng_binary().and_then(|ng| Command::new(ng).arg("version").output().ok());
 
     match output {
-        None => CheckResult::fail("Angular CLI", "Install with: npm install -g @angular/cli"),
+        None => CheckResult::fail(
+            "Angular CLI",
+            "not found",
+            "Install with: npm install -g @angular/cli",
+        ),
         Some(out) => {
             let text = String::from_utf8_lossy(&out.stdout);
             let ver = text
@@ -178,7 +161,11 @@ fn check_ionic_cli() -> CheckResult {
     match crate::ng::find_ionic_binary()
         .and_then(|ionic| Command::new(ionic).arg("--version").output().ok())
     {
-        None => CheckResult::fail("Ionic CLI", "Install with: npm install -g @ionic/cli"),
+        None => CheckResult::fail(
+            "Ionic CLI",
+            "not found",
+            "Install with: npm install -g @ionic/cli",
+        ),
         Some(out) => {
             let ver = String::from_utf8_lossy(&out.stdout).trim().to_string();
             CheckResult::pass(
@@ -196,7 +183,8 @@ fn check_ionic_cli() -> CheckResult {
 fn check_psql() -> CheckResult {
     match run_cmd("psql", &["--version"]) {
         None => CheckResult::fail(
-            "PostgreSQL client (psql)",
+            "PostgreSQL client",
+            "psql not found",
             "Install PostgreSQL: https://www.postgresql.org/download/",
         ),
         Some(v) => {
@@ -212,15 +200,17 @@ fn check_pg_isready() -> CheckResult {
     match output {
         Err(_) => CheckResult::fail(
             "PostgreSQL server",
-            "pg_isready not found — install PostgreSQL client tools",
+            "pg_isready not found",
+            "Install the PostgreSQL client tools.",
         ),
         Ok(o) => {
             if o.status.success() {
                 CheckResult::pass("PostgreSQL server", "running")
             } else {
                 CheckResult::fail(
-                    "PostgreSQL server not running",
-                    "Start PostgreSQL — e.g.: sudo service postgresql start",
+                    "PostgreSQL server",
+                    "not running",
+                    "Start it — e.g.: sudo service postgresql start",
                 )
             }
         }
@@ -231,7 +221,7 @@ fn check_global_config() -> CheckResult {
     if GlobalConfig::exists() {
         CheckResult::pass("~/.erno/config.toml", "found")
     } else {
-        CheckResult::fail("~/.erno/config.toml not found", "Run: erno setup")
+        CheckResult::fail("~/.erno/config.toml", "not found", "Run: erno setup")
     }
 }
 
@@ -241,7 +231,8 @@ async fn check_postgres_admin() -> CheckResult {
         Err(_) => {
             return CheckResult::fail(
                 "PostgreSQL admin access",
-                "Config missing — run: erno setup",
+                "config missing",
+                "Run: erno setup",
             )
         }
     };
@@ -250,7 +241,8 @@ async fn check_postgres_admin() -> CheckResult {
     match tokio_postgres::connect(url, tokio_postgres::NoTls).await {
         Err(e) => CheckResult::fail(
             "PostgreSQL admin access",
-            format!("Could not connect ({e}) — run: erno setup"),
+            format!("could not connect ({e})"),
+            "Run: erno setup",
         ),
         Ok((client, connection)) => {
             tokio::spawn(async move {
@@ -275,11 +267,13 @@ async fn check_postgres_admin() -> CheckResult {
                         ),
                         (false, _) => CheckResult::fail(
                             "PostgreSQL admin access",
-                            format!("User '{user}' lacks CREATEDB. Fix with: ALTER USER {user} CREATEDB;"),
+                            format!("user '{user}' lacks CREATEDB"),
+                            format!("Fix with: ALTER USER {user} CREATEDB;"),
                         ),
                         (true, false) => CheckResult::fail(
                             "PostgreSQL admin access",
-                            format!("User '{user}' lacks CREATEROLE (needed by `erno new`). Fix with: ALTER USER {user} CREATEROLE;"),
+                            format!("user '{user}' lacks CREATEROLE (needed by `erno new`)"),
+                            format!("Fix with: ALTER USER {user} CREATEROLE;"),
                         ),
                     }
                 }
@@ -290,7 +284,8 @@ async fn check_postgres_admin() -> CheckResult {
                         .unwrap_or_else(|| e.to_string());
                     CheckResult::fail(
                         "PostgreSQL admin access",
-                        format!("Connected but could not check privileges: {msg}"),
+                        "connected, but could not check privileges",
+                        msg,
                     )
                 }
             }
@@ -309,7 +304,8 @@ fn parse_pg_user(url: &str) -> &str {
 fn check_sea_orm_cli() -> CheckResult {
     match run_cmd("sea-orm-cli", &["--version"]) {
         None => CheckResult::warn(
-            "sea-orm-cli not found",
+            "sea-orm-cli",
+            "not found",
             "Install with: cargo install sea-orm-cli",
         ),
         Some(v) => CheckResult::pass("sea-orm-cli", v.trim().to_string()),
@@ -319,10 +315,16 @@ fn check_sea_orm_cli() -> CheckResult {
 fn check_prometheus() -> CheckResult {
     match run_cmd("prometheus", &["--version"]) {
         None => CheckResult::fail(
-            "prometheus not found",
-            "Install Prometheus for `erno dev` (https://prometheus.io/docs/prometheus/latest/installation/), or pass --no-prometheus",
+            "prometheus",
+            "not found",
+            "Install Prometheus for `erno dev`:\n\
+             https://prometheus.io/docs/prometheus/latest/installation/\n\
+             Or pass --no-prometheus to `erno dev`.",
         ),
-        Some(v) => CheckResult::pass("prometheus", v.lines().next().unwrap_or(v.trim()).to_string()),
+        Some(v) => CheckResult::pass(
+            "prometheus",
+            v.lines().next().unwrap_or(v.trim()).to_string(),
+        ),
     }
 }
 

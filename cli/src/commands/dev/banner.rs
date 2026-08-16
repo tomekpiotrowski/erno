@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use reqwest::Client;
 
-use super::{CYAN, DIM, GREEN, MAGENTA, RESET, YELLOW};
+use crate::ui;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ServiceState {
@@ -20,11 +20,10 @@ impl ServiceState {
         }
     }
 
-    fn color(self) -> &'static str {
+    fn style(self) -> anstyle::Style {
         match self {
-            Self::Starting => YELLOW,
-            Self::Migrating => YELLOW,
-            Self::Ready => GREEN,
+            Self::Starting | Self::Migrating => ui::YELLOW,
+            Self::Ready => ui::GREEN,
         }
     }
 }
@@ -75,46 +74,114 @@ pub struct BannerSnapshot {
     pub prometheus: Option<ServiceState>,
 }
 
-pub fn render_banner(urls: &DevUrls, snap: &BannerSnapshot) -> String {
-    let mut out = String::new();
-    out.push('\n');
-    out.push_str(&format!(
-        "  {DIM}Erno{RESET}                                   Ctrl+C to stop\n"
-    ));
+/// One row of the banner: a service (with a readiness state) or a hidden
+/// surface (with a static note).
+struct BannerRow {
+    name: &'static str,
+    url: String,
+    state: Option<ServiceState>,
+    note: Option<&'static str>,
+}
+
+fn banner_rows(urls: &DevUrls, snap: &BannerSnapshot) -> (Vec<BannerRow>, Vec<BannerRow>) {
+    let mut services = Vec::new();
+    let mut surfaces = Vec::new();
+
+    let mut push = |name, url: &str, state| {
+        services.push(BannerRow {
+            name,
+            url: url.to_string(),
+            state: Some(state),
+            note: None,
+        })
+    };
     if let (Some(url), Some(state)) = (urls.www.as_deref(), snap.www) {
-        out.push_str(&format_row(MAGENTA, "www", url, state));
+        push("www", url, state);
     }
     if let (Some(url), Some(state)) = (urls.app.as_deref(), snap.app) {
-        out.push_str(&format_row(GREEN, "app", url, state));
+        push("app", url, state);
     }
     if let (Some(url), Some(state)) = (urls.api.as_deref(), snap.api) {
-        out.push_str(&format_row(CYAN, "api", url, state));
-        out.push_str(&hidden_surfaces(url));
+        push("api", url, state);
     }
     if let (Some(url), Some(state)) = (urls.prometheus.as_deref(), snap.prometheus) {
-        out.push_str(&format_row(YELLOW, "prom", url, state));
+        push("prom", url, state);
+    }
+
+    // The surfaces the API exposes but does not announce. Grouped after the
+    // services rather than wedged between them.
+    if let Some(api) = urls.api.as_deref() {
+        let base = api.trim_end_matches('/');
+        for (name, url, note) in [
+            (
+                "admin",
+                "http://localhost:4300".to_string(),
+                Some("password: admin"),
+            ),
+            ("mail", format!("{base}/dev/emails"), None),
+            ("jobs", format!("{base}/dev/jobs"), None),
+        ] {
+            surfaces.push(BannerRow {
+                name,
+                url,
+                state: None,
+                note,
+            });
+        }
+    }
+
+    (services, surfaces)
+}
+
+pub fn render_banner(urls: &DevUrls, snap: &BannerSnapshot) -> String {
+    render_banner_when(ui::color(), urls, snap)
+}
+
+pub fn render_banner_when(on: bool, urls: &DevUrls, snap: &BannerSnapshot) -> String {
+    let (services, surfaces) = banner_rows(urls, snap);
+
+    // Both columns are sized from the content, across every row, so the state
+    // and note columns line up no matter how long the URLs are.
+    let all = services.iter().chain(surfaces.iter());
+    let name_w = ui::column_width(all.clone().map(|r| r.name));
+    let url_w = ui::column_width(all.map(|r| r.url.as_str()));
+
+    let row = |r: &BannerRow| {
+        let tail = match (r.state, r.note) {
+            (Some(state), _) => ui::paint_when(on, state.style(), state.label()),
+            (None, Some(note)) => ui::paint_when(on, ui::DIM, note),
+            (None, None) => String::new(),
+        };
+        let name = ui::paint_when(on, ui::label_style(r.name), &format!("{:<name_w$}", r.name));
+        format!("  {name}  {:<url_w$}  {tail}\n", r.url)
+            .trim_end()
+            .to_string()
+            + "\n"
+    };
+
+    let mut out = String::from("\n");
+    out.push_str(&format!(
+        "  {}\n",
+        ui::paint_when(on, ui::DIM, "erno — Ctrl+C to stop")
+    ));
+    for r in &services {
+        out.push_str(&row(r));
+    }
+    if !surfaces.is_empty() {
+        out.push('\n');
+        for r in &surfaces {
+            out.push_str(&row(r));
+        }
     }
     out.push('\n');
     out
 }
 
-pub fn hidden_surfaces(api_url: &str) -> String {
-    let base = api_url.trim_end_matches('/');
-    format!(
-        "  {DIM}admin{RESET} http://localhost:4300             password: admin\n  {DIM}mail {RESET} {base}/dev/emails\n  {DIM}jobs {RESET} {base}/dev/jobs\n"
-    )
-}
-
-fn format_row(color: &str, name: &str, url: &str, state: ServiceState) -> String {
-    format!(
-        "  {color}{name:<5}{RESET} {url:<36} {sc}{label}{RESET}\n",
-        sc = state.color(),
-        label = state.label(),
-    )
-}
-
 pub fn print_banner(urls: &DevUrls, snap: &BannerSnapshot) {
-    print!("{}", render_banner(urls, snap));
+    // Narration, like everything else the CLI says about itself.
+    for line in render_banner(urls, snap).lines() {
+        ui::emit(ui::Stream::Err, line);
+    }
 }
 
 pub fn starting_snapshot(urls: &DevUrls) -> BannerSnapshot {
@@ -258,9 +325,46 @@ mod tests {
 
     #[test]
     fn hidden_surfaces_use_api_origin() {
-        let text = hidden_surfaces("http://localhost:3010/");
+        let mut urls = DevUrls::defaults(true, false, false);
+        urls.api = Some("http://localhost:3010/".to_string());
+        let text = render_banner_when(false, &urls, &starting_snapshot(&urls));
         assert!(text.contains("http://localhost:3010/dev/emails"));
+        assert!(text.contains("http://localhost:3010/dev/jobs"));
         assert!(text.contains("password: admin"));
+    }
+
+    #[test]
+    fn banner_has_no_escapes_when_colour_is_off() {
+        let urls = DevUrls::defaults(true, true, true);
+        let text = render_banner_when(false, &urls, &starting_snapshot(&urls));
+        assert!(!text.contains('\u{1b}'));
+    }
+
+    #[test]
+    fn banner_columns_line_up() {
+        let mut urls = DevUrls::defaults(true, true, true);
+        // A long URL must push every row's state column, not just its own.
+        urls.www = Some("http://localhost:4321/a/much/longer/path".to_string());
+        let snap = BannerSnapshot {
+            api: Some(ServiceState::Ready),
+            app: Some(ServiceState::Starting),
+            www: Some(ServiceState::Ready),
+            prometheus: Some(ServiceState::Ready),
+        };
+        let text = render_banner_when(false, &urls, &snap);
+
+        let offsets: Vec<usize> = text
+            .lines()
+            .filter_map(|l| l.find("ready").or_else(|| l.find("starting")))
+            .collect();
+        assert!(
+            offsets.len() >= 4,
+            "expected a state word on every service row"
+        );
+        assert!(
+            offsets.windows(2).all(|w| w[0] == w[1]),
+            "state column ragged: {offsets:?}\n{text}"
+        );
     }
 
     #[test]

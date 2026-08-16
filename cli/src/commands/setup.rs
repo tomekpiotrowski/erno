@@ -1,13 +1,14 @@
-use std::io::{self, Write};
-
 use crate::global_config::{GithubConfig, GlobalConfig};
+use crate::ui;
 
-pub async fn handle_setup() {
+pub async fn handle_setup() -> ui::Cmd {
     let defaults = GlobalConfig::default();
 
-    println!("This will configure your global erno settings at ~/.erno/config.toml.\n");
+    ui::section("Global settings");
+    ui::detail("Configuring ~/.erno/config.toml.");
+    ui::blank();
 
-    let admin_url = prompt(
+    let admin_url = ui::prompt(
         &format!(
             "PostgreSQL admin connection URL [{}]",
             defaults.postgres.admin_url
@@ -15,40 +16,37 @@ pub async fn handle_setup() {
         &defaults.postgres.admin_url,
     );
 
-    print!("Verifying connection... ");
-    io::stdout().flush().unwrap();
+    verify_postgres_connection(&admin_url).await.map_err(|e| {
+        format!(
+            "could not connect to PostgreSQL: {e}\n\
+             Check that PostgreSQL is running and the credentials are correct."
+        )
+    })?;
+    ui::ok("PostgreSQL connection");
 
-    match verify_postgres_connection(&admin_url).await {
-        Ok(()) => println!("ok"),
-        Err(e) => {
-            println!("failed");
-            eprintln!("  Could not connect: {e}");
-            eprintln!("  Check that PostgreSQL is running and the credentials are correct.");
-            std::process::exit(1);
-        }
-    }
-
-    println!("\nGitHub personal access token (optional — enables `erno deploy` automation).");
-    println!("Required scopes: repo, write:packages");
-    println!("Create one at: https://github.com/settings/tokens/new");
-    let github_token_input = prompt("GitHub token [skip]", "");
+    ui::section("GitHub");
+    ui::detail(
+        "Optional — enables `erno deploy` automation.\n\
+         Required scopes: repo, write:packages\n\
+         Create one at: https://github.com/settings/tokens/new",
+    );
+    ui::blank();
+    let github_token_input = ui::prompt("GitHub token [skip]", "");
 
     let github = if github_token_input.is_empty() {
         None
     } else {
-        print!("Verifying GitHub token... ");
-        io::stdout().flush().unwrap();
         match verify_github_token(&github_token_input).await {
             Ok(login) => {
-                println!("ok ({})", login);
+                ui::ok(format!("GitHub token ({login})"));
                 Some(GithubConfig {
                     token: github_token_input,
                 })
             }
             Err(e) => {
-                println!("failed");
-                eprintln!("  Could not verify token: {e}");
-                eprintln!("  Skipping GitHub configuration.");
+                // Not fatal: GitHub is optional, so we save the rest.
+                ui::warn(format!("could not verify the GitHub token: {e}"));
+                ui::detail("Skipping GitHub configuration.");
                 None
             }
         }
@@ -58,37 +56,17 @@ pub async fn handle_setup() {
         postgres: crate::global_config::PostgresConfig { admin_url },
         github,
     };
+    config
+        .save()
+        .map_err(|e| format!("could not write the config: {e}"))?;
 
-    match config.save() {
-        Ok(()) => {
-            println!(
-                "\n✅  Config saved to {}",
-                GlobalConfig::path().unwrap().display()
-            );
-            println!("    Run `erno doctor` to verify your environment.");
-        }
-        Err(e) => {
-            eprintln!("❌  Failed to write config: {e}");
-            std::process::exit(1);
-        }
-    }
-}
-
-fn prompt(label: &str, default: &str) -> String {
-    print!("{label}: ");
-    io::stdout().flush().unwrap();
-
-    let mut input = String::new();
-    io::stdin()
-        .read_line(&mut input)
-        .expect("failed to read stdin");
-    let trimmed = input.trim();
-
-    if trimmed.is_empty() {
-        default.to_string()
-    } else {
-        trimmed.to_string()
-    }
+    let path = GlobalConfig::path()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "~/.erno/config.toml".to_string());
+    ui::section("Done");
+    ui::ok(format!("Config saved to {path}"));
+    ui::detail("Run `erno doctor` to verify your environment.");
+    Ok(())
 }
 
 async fn verify_github_token(token: &str) -> Result<String, String> {

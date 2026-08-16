@@ -3,6 +3,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use crate::ui;
+
 pub struct LogSink {
     verbose: bool,
     file: Option<Mutex<File>>,
@@ -10,7 +12,8 @@ pub struct LogSink {
 }
 
 impl LogSink {
-    pub fn new(root: &Path, verbose: bool) -> Self {
+    pub fn new(root: &Path) -> Self {
+        let verbose = ui::verbose();
         let dir = root.join(".erno");
         let path = dir.join("dev.log");
         let file = fs::create_dir_all(&dir)
@@ -35,14 +38,15 @@ impl LogSink {
         self.path.as_deref()
     }
 
-    pub fn write_line(&self, color: &str, label: &str, line: &str) {
+    pub fn write_line(&self, stream: ui::Stream, label: &str, line: &str) {
         if let Some(file) = &self.file {
             if let Ok(mut f) = file.lock() {
+                // The file copy stays uncoloured so it greps cleanly.
                 let _ = writeln!(f, "[{label}] {line}");
             }
         }
         if should_print_line(line, self.verbose) {
-            println!("{color}[{label}]{RESET} {line}", RESET = super::RESET);
+            ui::prefixed(stream, label, line);
         }
     }
 }
@@ -51,26 +55,11 @@ pub fn should_print_line(line: &str, verbose: bool) -> bool {
     verbose || is_error_line(line) || is_notable_line(line)
 }
 
-fn strip_ansi(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '\u{1b}' && chars.peek() == Some(&'[') {
-            chars.next();
-            for next in chars.by_ref() {
-                if next.is_ascii_alphabetic() {
-                    break;
-                }
-            }
-        } else {
-            out.push(c);
-        }
-    }
-    out
-}
-
+// The emoji these two match on come from the `api` crate's own startup and
+// migration output, not from this CLI — the CLI's no-emoji rule does not reach
+// text it only forwards. Changing these means changing `api/`.
 fn is_error_line(line: &str) -> bool {
-    let plain = strip_ansi(line);
+    let plain = ui::strip_ansi(line);
     let lower = plain.to_ascii_lowercase();
     lower.contains("error")
         || lower.contains("failed")
@@ -80,7 +69,7 @@ fn is_error_line(line: &str) -> bool {
 }
 
 fn is_notable_line(line: &str) -> bool {
-    let plain = strip_ansi(line);
+    let plain = ui::strip_ansi(line);
     plain.contains("Local:")
         || plain.contains("Database is ready")
         || plain.contains("Server starting")

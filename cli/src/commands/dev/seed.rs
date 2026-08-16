@@ -8,7 +8,7 @@ use argon2::{
 use reqwest::Client;
 
 use super::ports::parse_table_string;
-use super::{DIM, GREEN, RESET};
+use crate::ui;
 
 pub const DEMO_EMAIL: &str = "dev@example.com";
 pub const DEMO_PASSWORD: &str = "password";
@@ -16,7 +16,7 @@ pub const DEMO_PASSWORD: &str = "password";
 pub async fn maybe_seed(root: &Path, api_url: &str, force: bool) {
     if !wait_for_api(api_url).await {
         if force {
-            eprintln!("Could not reach {api_url} to seed a demo user.");
+            ui::warn(format!("could not reach {api_url} to seed a demo user"));
         }
         return;
     }
@@ -25,14 +25,14 @@ pub async fn maybe_seed(root: &Path, api_url: &str, force: bool) {
         Ok(s) => s,
         Err(_) => {
             if force {
-                eprintln!("Cannot read api/config/development.toml — skip seed.");
+                ui::warn("cannot read api/config/development.toml — skipping seed");
             }
             return;
         }
     };
     let Some(db_url) = parse_table_string(&toml, "database", "url") else {
         if force {
-            eprintln!("No [database].url in development.toml — skip seed.");
+            ui::warn("no [database].url in development.toml — skipping seed");
         }
         return;
     };
@@ -47,14 +47,14 @@ pub async fn maybe_seed(root: &Path, api_url: &str, force: bool) {
 
     match seed_demo_user(&db_url, &email, &password, ensure).await {
         Ok(SeedResult::Created) => {
-            println!("{GREEN}Seeded demo user{RESET}  {email} / {password}");
+            ui::ok(format!("Seeded demo user  {email} / {password}"));
         }
         Ok(SeedResult::AlreadyPresent) if force => {
-            println!("{DIM}Demo user {email} already exists{RESET}");
+            ui::info(format!("Demo user {email} already exists"));
         }
         Ok(SeedResult::SkippedNotEmpty) => {}
         Ok(SeedResult::AlreadyPresent) => {}
-        Err(e) => eprintln!("Could not seed demo user: {e}"),
+        Err(e) => ui::warn(format!("could not seed the demo user: {e}")),
     }
 }
 

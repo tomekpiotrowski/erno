@@ -18,20 +18,21 @@ pub fn is_project_root(dir: &Path) -> bool {
     dir.join("erno.toml").is_file() || dir.join("api").join("Cargo.toml").is_file()
 }
 
-pub fn resolve_project_root(explicit: Option<PathBuf>) -> PathBuf {
-    let start =
-        explicit.unwrap_or_else(|| std::env::current_dir().expect("cannot read current directory"));
-    match find_project_root(&start) {
-        Some(root) => root,
+pub fn resolve_project_root(explicit: Option<PathBuf>) -> Result<PathBuf, String> {
+    let start = match explicit {
+        Some(path) => path,
         None => {
-            eprintln!(
-                "No Erno project found (looked for erno.toml or api/Cargo.toml from {}).",
-                start.display()
-            );
-            eprintln!("Run `erno dev` inside a project, or create one with `erno new`.");
-            std::process::exit(1);
+            std::env::current_dir().map_err(|e| format!("cannot read current directory: {e}"))?
         }
-    }
+    };
+    find_project_root(&start).ok_or_else(|| {
+        format!(
+            "no Erno project found\n\
+             Looked for erno.toml or api/Cargo.toml from {}.\n\
+             Run this inside a project, or create one with `erno new`.",
+            start.display()
+        )
+    })
 }
 
 #[cfg(test)]

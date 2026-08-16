@@ -4,7 +4,7 @@ use std::time::Duration;
 use reqwest::Client;
 use serde::Deserialize;
 
-use super::{MAGENTA, RESET};
+use crate::ui;
 
 #[derive(Debug, Deserialize)]
 struct MockEmail {
@@ -33,7 +33,11 @@ pub fn spawn_mail_watcher(api_url: String) {
                 } else {
                     for email in list {
                         if seen.insert(email.id.clone()) {
-                            println!("{MAGENTA}[mail]{RESET} {} → {}", email.subject, email.to);
+                            ui::prefixed(
+                                ui::Stream::Err,
+                                "mail",
+                                &format!("{} → {}", email.subject, email.to),
+                            );
                         }
                     }
                 }

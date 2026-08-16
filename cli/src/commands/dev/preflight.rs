@@ -1,51 +1,50 @@
-use std::io::{self, IsTerminal, Write};
+use std::io::IsTerminal;
 use std::process::Command;
+
+use crate::ui;
 
 const FRIENDLY_COMMANDS: &[&str] = &[
     "erno", "cargo", "node", "npm", "ng", "astro", "esbuild", "vite",
 ];
 
-pub fn run_preflight(check_db: bool, check_prometheus: bool, ports: &[u16]) {
+pub fn run_preflight(check_db: bool, check_prometheus: bool, ports: &[u16]) -> Result<(), String> {
     if check_db {
-        check_postgres();
+        check_postgres()?;
     }
     if check_prometheus {
-        check_prometheus_binary();
+        check_prometheus_binary()?;
     }
     for port in ports {
-        check_port(*port);
+        check_port(*port)?;
     }
+    Ok(())
 }
 
-fn check_postgres() {
+fn check_postgres() -> Result<(), String> {
     match Command::new("pg_isready").output() {
-        Err(_) => {
-            eprintln!("PostgreSQL client tools not found (`pg_isready`).");
-            eprintln!("Install PostgreSQL: https://www.postgresql.org/download/");
-            std::process::exit(1);
-        }
-        Ok(out) if !out.status.success() => {
-            eprintln!("PostgreSQL is not running.");
-            eprintln!("Start it — e.g.: sudo service postgresql start");
-            std::process::exit(1);
-        }
-        Ok(_) => {}
+        Err(_) => Err("PostgreSQL client tools not found (`pg_isready`)\n\
+                       Install PostgreSQL: https://www.postgresql.org/download/"
+            .to_string()),
+        Ok(out) if !out.status.success() => Err("PostgreSQL is not running\n\
+                       Start it — e.g.: sudo service postgresql start"
+            .to_string()),
+        Ok(_) => Ok(()),
     }
 }
 
-fn check_prometheus_binary() {
+fn check_prometheus_binary() -> Result<(), String> {
     if super::prometheus::binary_on_path() {
-        return;
+        return Ok(());
     }
-    eprintln!("prometheus not found on PATH.");
-    eprintln!("Install Prometheus: https://prometheus.io/docs/prometheus/latest/installation/");
-    eprintln!("Or pass --no-prometheus to start without the scrape server.");
-    std::process::exit(1);
+    Err("prometheus not found on PATH\n\
+         Install Prometheus: https://prometheus.io/docs/prometheus/latest/installation/\n\
+         Or pass --no-prometheus to start without the scrape server."
+        .to_string())
 }
 
-fn check_port(port: u16) {
+fn check_port(port: u16) -> Result<(), String> {
     if !port_in_use(port) {
-        return;
+        return Ok(());
     }
 
     let pid = pid_listening_on(port);
@@ -54,39 +53,36 @@ fn check_port(port: u16) {
         .unwrap_or_else(|| "unknown".into());
     let pid_label = pid.map(|p| p.to_string()).unwrap_or_else(|| "?".into());
 
-    eprintln!("Port {port} is in use by pid {pid_label} ({comm}).");
+    ui::warn(format!("port {port} is in use by pid {pid_label} ({comm})"));
 
-    if !io::stdin().is_terminal() {
-        eprintln!("Free the port or re-run `erno dev` from a terminal to be prompted.");
-        std::process::exit(1);
+    if !std::io::stdin().is_terminal() {
+        return Err(format!(
+            "port {port} is in use\n\
+             Free it, or re-run from a terminal to be prompted to kill pid {pid_label}."
+        ));
     }
 
-    let default_yes = should_default_kill(&comm);
-    let prompt = if default_yes { "[Y/n]" } else { "[y/N]" };
-    if !confirm(&format!("Kill it? {prompt} "), default_yes) {
-        eprintln!("Aborting.");
-        std::process::exit(1);
+    if !ui::confirm("Kill it?", should_default_kill(&comm)) {
+        return Err("aborted".to_string());
     }
 
-    match pid {
-        Some(pid) => {
-            if !kill_pid(pid) {
-                eprintln!("Could not stop pid {pid}. Free port {port} and try again.");
-                std::process::exit(1);
-            }
-            // Brief wait for the socket to be released.
-            std::thread::sleep(std::time::Duration::from_millis(300));
-            if port_in_use(port) {
-                eprintln!("Port {port} is still in use after killing pid {pid}.");
-                std::process::exit(1);
-            }
-            eprintln!("Freed port {port}.");
-        }
-        None => {
-            eprintln!("Could not identify the process. Free port {port} and try again.");
-            std::process::exit(1);
-        }
+    let pid = pid.ok_or_else(|| {
+        format!("could not identify the process holding port {port}\nFree it and try again.")
+    })?;
+    if !kill_pid(pid) {
+        return Err(format!(
+            "could not stop pid {pid}\nFree port {port} and try again."
+        ));
     }
+    // Brief wait for the socket to be released.
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    if port_in_use(port) {
+        return Err(format!(
+            "port {port} is still in use after killing pid {pid}"
+        ));
+    }
+    ui::ok(format!("Freed port {port}"));
+    Ok(())
 }
 
 pub fn port_in_use(port: u16) -> bool {
@@ -173,21 +169,6 @@ fn kill_pid(pid: u32) -> bool {
             .status()
             .map(|s| s.success())
             .unwrap_or(false)
-    }
-}
-
-fn confirm(prompt: &str, default_yes: bool) -> bool {
-    print!("{prompt}");
-    let _ = io::stdout().flush();
-    let mut input = String::new();
-    if io::stdin().read_line(&mut input).is_err() {
-        return default_yes;
-    }
-    match input.trim().to_ascii_lowercase().as_str() {
-        "" => default_yes,
-        "y" | "yes" => true,
-        "n" | "no" => false,
-        _ => default_yes,
     }
 }
 

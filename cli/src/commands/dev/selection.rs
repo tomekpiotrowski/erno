@@ -58,7 +58,6 @@ mod tests {
 
     fn args(api: bool, app: bool, www: bool, no_www: bool) -> DevArgs {
         DevArgs {
-            verbose: false,
             api,
             app,
             www,

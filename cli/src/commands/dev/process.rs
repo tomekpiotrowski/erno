@@ -7,59 +7,46 @@ use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
 use super::log::LogSink;
-use super::RESET;
-
-/// Force color and progress through piped stdout. Cargo, npm, and most CLIs
-/// disable both when they detect a non-TTY (which is how we capture logs).
-pub fn apply_child_color_env(cmd: &mut Command) {
-    cmd.env("CARGO_TERM_COLOR", "always");
-    cmd.env("CARGO_TERM_PROGRESS_WHEN", "always");
-    cmd.env("CARGO_TERM_PROGRESS_WIDTH", "80");
-    cmd.env("FORCE_COLOR", "1");
-    cmd.env("CLICOLOR_FORCE", "1");
-    cmd.env("npm_config_color", "always");
-    if std::env::var_os("TERM").is_none() {
-        cmd.env("TERM", "xterm-256color");
-    }
-}
+use crate::ui;
 
 pub fn spawn_labeled(
     mut cmd: Command,
     dir: &std::path::Path,
-    color: &'static str,
     label: &'static str,
     sink: Arc<LogSink>,
 ) -> Child {
-    apply_child_color_env(&mut cmd);
+    ui::apply_child_env(&mut cmd);
 
     #[cfg(unix)]
     cmd.process_group(0);
 
+    // This runs inside the `FnMut() -> Child` closure the supervisor owns, so
+    // there is no `Result` to return here — a failure to spawn is terminal.
     let mut child = cmd
         .current_dir(dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap_or_else(|e| {
-            eprintln!("failed to spawn {label} process: {e}");
+            ui::fatal(&format!("failed to spawn the {label} process: {e}"));
             std::process::exit(1);
         });
 
     let stdout = BufReader::new(child.stdout.take().unwrap());
     let stderr = BufReader::new(child.stderr.take().unwrap());
-    spawn_printer(stdout, color, label, sink.clone());
-    spawn_printer(stderr, color, label, sink);
+    spawn_printer(stdout, label, ui::Stream::Out, sink.clone());
+    spawn_printer(stderr, label, ui::Stream::Err, sink);
     child
 }
 
-pub fn spawn_printer<R>(reader: R, color: &'static str, label: &'static str, sink: Arc<LogSink>)
+pub fn spawn_printer<R>(reader: R, label: &'static str, stream: ui::Stream, sink: Arc<LogSink>)
 where
     R: AsyncRead + Unpin + Send + 'static,
 {
     let mut lines = BufReader::new(reader).lines();
     tokio::spawn(async move {
         while let Ok(Some(line)) = lines.next_line().await {
-            sink.write_line(color, label, &line);
+            sink.write_line(stream, label, &line);
         }
     });
 }
@@ -107,7 +94,6 @@ pub struct Supervisor {
 impl Supervisor {
     pub fn start<F>(
         name: &'static str,
-        color: &'static str,
         mut shutdown: tokio::sync::watch::Receiver<bool>,
         mut spawn: F,
     ) -> Self
@@ -143,9 +129,11 @@ impl Supervisor {
                         if started.elapsed() >= RESET_AFTER {
                             backoff = MIN_BACKOFF;
                         }
-                        eprintln!(
-                            "\n{color}[{name}]{RESET} process exited — restarting in {}s",
-                            backoff.as_secs()
+                        ui::emit(ui::Stream::Err, "");
+                        ui::prefixed(
+                            ui::Stream::Err,
+                            name,
+                            &format!("process exited — restarting in {}s", backoff.as_secs()),
                         );
                         tokio::select! {
                             _ = tokio::time::sleep(backoff) => {}

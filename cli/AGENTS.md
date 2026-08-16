@@ -104,16 +104,65 @@ ALTER USER erno CREATEDB;
 
 | File | Responsibility |
 |------|---------------|
-| `src/main.rs` | CLI entry point — clap command definitions and dispatch |
+| `src/main.rs` | CLI entry point — clap command definitions, global flags, and dispatch |
+| `src/ui.rs` | **Every** terminal write — styling, rows, sections, prefixes, prompts, errors |
 | `src/global_config.rs` | `~/.erno/config.toml` read/write via the `config` crate |
 | `src/commands/setup.rs` | Interactive config writer; validates admin connection before saving |
-| `src/commands/doctor.rs` | Environment checks — each returns a `CheckResult` (Pass/Warn/Fail) |
+| `src/commands/doctor.rs` | Environment checks — each returns a `CheckResult` (a `ui::Row` plus whether it is required) |
 | `src/commands/new.rs` | Project scaffolding — inline templates, directory creation, database creation |
 | `src/commands/dev/` | `erno dev` — process multiplexer, readiness banner, quiet logs |
 | `src/commands/packages.rs` | `erno.toml` parsing, package selection, and the sequential phase runner shared by build/lint/test |
 | `src/commands/build.rs` | `erno build` — runs the `build` phase |
 | `src/commands/lint.rs` | `erno lint` — runs the `lint` phase, with `--fix` |
 | `src/commands/test.rs` | `erno test` — the `test` phase, plus test-database setup and e2e orchestration |
+
+## Output style
+
+**All terminal output goes through `src/ui.rs`.** No other file calls `println!`/`eprintln!`, and `tests/output_goes_through_ui.rs` fails the build if one does. If you need to print something, use an existing helper or add one there.
+
+### The visual language
+
+```text
+==> Section header              column 0, `==>` blue+bold, title bold
+  ok    a row                   column 2, marker green
+  warn  another row             marker yellow
+  fail  a third row             marker red
+        a continuation line     column 8, dim
+error: something went wrong     column 0, `error:` red+bold
+[api] a forwarded child line    `[api]` in the service colour, text verbatim
+```
+
+- **Markers are ASCII words, never emoji.** `✅`/`❌` are East-Asian Wide (2 columns) while `⚠️`/`ℹ️` are 1 column plus a variation selector and render at 1 *or* 2 depending on terminal and font — no single pad count aligns them everywhere. Words are one column per character on every terminal, and they survive `--no-color` and piping.
+- **Colour is decoration only.** Nothing is communicated by colour alone.
+- **One indent rule**: rows at 2, their continuations at 8 (`ui::CONTINUATION`), section headers and fatal errors at 0. Nothing else has an indent. Pass multi-line text to `ui::detail` rather than hand-indenting with `\n      `.
+- **Column widths are computed** with `ui::column_width`, never hardcoded.
+- The exception is text the CLI only *forwards*: `dev/log.rs` matches on emoji emitted by the `api/` crate's own startup and migration output. That is not ours to restyle.
+
+### stdout vs stderr
+
+**stdout is the program's output; stderr is the program's narration.** Section headers, rows, banners, prompts, warnings, errors, and summaries all go to stderr. Forwarded subprocess output goes to whichever stream it came from. So `erno doctor > out.txt` is empty by design, and `erno build 2>/dev/null` leaves only what the child tools printed to stdout.
+
+### Global flags
+
+`--no-color`, `--quiet`/`-q`, and `--verbose`/`-v` are `global = true`, so they work on either side of the subcommand. `ui::init` resolves them once in `main` into module state; deep call sites read `ui::color()` / `ui::quiet()` / `ui::verbose()` rather than threading a context struct.
+
+Colour resolution order: `--no-color`, then `NO_COLOR`, then `CLICOLOR_FORCE`, then "is stderr a TTY that understands ANSI".
+
+`--quiet` suppresses section headers, `ok`/`info` rows, and details. It never suppresses warnings, errors, forwarded child output, or a command's final result (the per-package `ok`/`fail` summary).
+
+### Errors and exit codes
+
+Every `handle_*` returns `ui::Cmd` (`Result<(), ui::Failure>`). `main` renders `Failure::Message` through `ui::fatal` and returns `ExitCode::FAILURE`; `Failure::Silent` means the command already reported the details (e.g. `run_phase` printed the summary). Internal helpers keep returning `Result<T, String>` — `From<String>` means a bare `?` works.
+
+Prefer returning `Failure` over exiting: it unwinds, so guards like `DevLock` still run their `Drop`. `ui::abort` exists for the scaffolding helpers in `new`/`deploy`, which are called from deep inside `write`-style chains where there is nothing to clean up.
+
+### Testing output
+
+Everything visible is a pure `render_*(on: bool, …) -> String` with a thin printing wrapper. Test the pure half — that keeps tests free of global state and order-independent. `ui::init` is never called under `cargo test`, so colour defaults to off.
+
+### Deliberate non-goals
+
+The `dev` banner reprints in full on state change. No cursor control, no in-place redraw, no spinners, no `indicatif`. Scrolling is honest and keeps the renderer a testable pure function.
 
 ## Architecture notes
 

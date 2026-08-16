@@ -9,6 +9,7 @@ use crate::commands::packages::{
     SelectionArgs,
 };
 use crate::global_config::GlobalConfig;
+use crate::ui;
 
 fn unquote(v: &str) -> Result<String, String> {
     let v = v.trim();
@@ -19,28 +20,13 @@ fn unquote(v: &str) -> Result<String, String> {
     }
 }
 
-pub async fn handle_test(args: SelectionArgs) {
-    let root = resolve_project_root(None);
-    let all = match load_packages(&root) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("❌  {e}");
-            std::process::exit(1);
-        }
-    };
-    let selected = match select(&all, &args) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("❌  {e}");
-            std::process::exit(1);
-        }
-    };
+pub async fn handle_test(args: SelectionArgs) -> ui::Cmd {
+    let root = resolve_project_root(None)?;
+    let all = load_packages(&root)?;
+    let selected = select(&all, &args)?;
 
     if selected.iter().any(|p| p.database || p.is_e2e()) {
-        if let Err(e) = ensure_test_database(&root).await {
-            eprintln!("❌  {e}");
-            std::process::exit(1);
-        }
+        ensure_test_database(&root).await?;
     }
 
     // The e2e package is not a plain command: it allocates ports, boots the API,
@@ -55,12 +41,15 @@ pub async fn handle_test(args: SelectionArgs) {
             if !package.is_e2e() {
                 return None;
             }
-            println!("\n── {} ──", package.name);
+            ui::section(&package.name);
             Some(run_e2e(&root, &args.rest))
         },
     );
-    if !ok {
-        std::process::exit(1);
+    if ok {
+        Ok(())
+    } else {
+        // `run_phase` already printed the per-package summary.
+        Err(ui::Failure::Silent)
     }
 }
 
@@ -68,14 +57,14 @@ fn run_e2e(root: &Path, rest: &[String]) -> bool {
     let api_port = match free_port() {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("[e2e] {e}");
+            ui::prefixed(ui::Stream::Err, "e2e", &e);
             return false;
         }
     };
     let app_port = match free_port() {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("[e2e] {e}");
+            ui::prefixed(ui::Stream::Err, "e2e", &e);
             return false;
         }
     };
@@ -104,34 +93,50 @@ fn run_e2e(root: &Path, rest: &[String]) -> bool {
     {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("[e2e] failed to start API: {e}");
+            ui::prefixed(
+                ui::Stream::Err,
+                "e2e",
+                &format!("failed to start the API: {e}"),
+            );
             return false;
         }
     };
     if let Some(out) = api.stdout.take() {
-        prefix_pipe(out, "api");
+        prefix_pipe(out, "api", ui::Stream::Out);
     }
     if let Some(err) = api.stderr.take() {
-        prefix_pipe(err, "api");
+        prefix_pipe(err, "api", ui::Stream::Err);
     }
 
     let liveness = format!("{api_url}/liveness");
-    eprintln!("[e2e] API {api_url}");
-    eprintln!("[e2e] app {app_url}");
-    eprintln!("[e2e] waiting for {liveness}");
+    ui::prefixed(ui::Stream::Err, "e2e", &format!("API {api_url}"));
+    ui::prefixed(ui::Stream::Err, "e2e", &format!("app {app_url}"));
+    ui::prefixed(ui::Stream::Err, "e2e", &format!("waiting for {liveness}"));
     let ready = wait_for_http_while(&liveness, 90, || child_running(&mut api));
     if !ready {
         if !child_running(&mut api) {
-            eprintln!("[e2e] API process exited before /liveness answered — not using a leftover listener");
+            ui::prefixed(
+                ui::Stream::Err,
+                "e2e",
+                "API process exited before /liveness answered — not using a leftover listener",
+            );
         } else {
-            eprintln!("[e2e] API did not become ready on {api_url}");
+            ui::prefixed(
+                ui::Stream::Err,
+                "e2e",
+                &format!("API did not become ready on {api_url}"),
+            );
         }
         let _ = api.kill();
         let _ = api.wait();
         return false;
     }
     if !child_running(&mut api) {
-        eprintln!("[e2e] API process exited; /liveness was another process. Refusing to continue.");
+        ui::prefixed(
+            ui::Stream::Err,
+            "e2e",
+            "API process exited; /liveness was another process — refusing to continue",
+        );
         return false;
     }
 
@@ -147,9 +152,14 @@ fn run_e2e(root: &Path, rest: &[String]) -> bool {
     }
     let pw_bin = e2e.join("node_modules").join(".bin").join("playwright");
     if !pw_bin.is_file() {
-        eprintln!(
-            "[e2e] Playwright CLI is missing at {}.\n      Add @playwright/test to e2e/package.json and run: cd e2e && npm install && npx playwright install chromium",
-            pw_bin.display()
+        ui::prefixed(
+            ui::Stream::Err,
+            "e2e",
+            &format!("Playwright CLI is missing at {}", pw_bin.display()),
+        );
+        ui::detail(
+            "Add @playwright/test to e2e/package.json, then run:\n\
+             cd e2e && npm install && npx playwright install chromium",
         );
         let _ = api.kill();
         let _ = api.wait();
@@ -286,7 +296,7 @@ async fn ensure_test_database(root: &Path) -> Result<(), String> {
             None => format!("CREATE DATABASE {db}"),
         };
         match client.execute(&create_sql, &[]).await {
-            Ok(_) => println!("  created database {db}"),
+            Ok(_) => ui::ok(format!("created database {db}")),
             Err(e) => {
                 let msg = e
                     .as_db_error()
@@ -300,7 +310,9 @@ async fn ensure_test_database(root: &Path) -> Result<(), String> {
                         .execute(&format!("CREATE DATABASE {db}"), &[])
                         .await
                         .map_err(|e2| format!("could not create `{db}`: {e2}"))?;
-                    println!("  created database {db} (admin-owned; granting to app role)");
+                    ui::ok(format!(
+                        "created database {db} (admin-owned; granting to app role)"
+                    ));
                 } else {
                     return Err(format!("could not create `{db}`: {msg}"));
                 }

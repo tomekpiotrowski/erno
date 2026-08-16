@@ -38,11 +38,7 @@ pub fn prepare_dir(
     Ok(dir)
 }
 
-pub fn spawn(
-    dir: &Path,
-    color: &'static str,
-    sink: std::sync::Arc<LogSink>,
-) -> tokio::process::Child {
+pub fn spawn(dir: &Path, sink: std::sync::Arc<LogSink>) -> tokio::process::Child {
     let mut cmd = Command::new("prometheus");
     cmd.arg(format!(
         "--config.file={}",
@@ -54,5 +50,5 @@ pub fn spawn(
     ));
     cmd.arg(format!("--web.listen-address={LISTEN_ADDR}"));
     cmd.arg("--storage.tsdb.retention.time=15d");
-    spawn_labeled(cmd, dir, color, "prom", sink)
+    spawn_labeled(cmd, dir, "prom", sink)
 }

@@ -1,14 +1,32 @@
 mod commands;
 mod global_config;
 mod ng;
+mod ui;
 
 use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(name = "erno", about = "CLI tool for the Erno framework")]
 struct Cli {
+    #[command(flatten)]
+    global: GlobalArgs,
     #[command(subcommand)]
     command: Commands,
+}
+
+/// Accepted on either side of the subcommand, so both `erno -q build` and
+/// `erno build -q` work.
+#[derive(Args, Clone, Debug, Default)]
+struct GlobalArgs {
+    /// Disable ANSI colour (also honours NO_COLOR)
+    #[arg(long, global = true)]
+    no_color: bool,
+    /// Print only warnings, errors, and results
+    #[arg(long, short = 'q', global = true, conflicts_with = "verbose")]
+    quiet: bool,
+    /// Print more detail; in `dev`, stream every child log line
+    #[arg(long, short = 'v', global = true)]
+    verbose: bool,
 }
 
 #[derive(Subcommand)]
@@ -70,10 +88,23 @@ enum DeployCommands {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
+    ui::init(cli.global.no_color, cli.global.quiet, cli.global.verbose);
 
-    match cli.command {
+    match dispatch(cli.command).await {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        // `Silent` means the command already reported the details.
+        Err(ui::Failure::Silent) => std::process::ExitCode::FAILURE,
+        Err(ui::Failure::Message(msg)) => {
+            ui::fatal(&msg);
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+async fn dispatch(command: Commands) -> ui::Cmd {
+    match command {
         Commands::Doctor => commands::doctor::handle_doctor().await,
         Commands::New {
             name,

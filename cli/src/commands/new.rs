@@ -6,6 +6,7 @@ use base64::Engine;
 use rand::Rng;
 
 use crate::global_config::GlobalConfig;
+use crate::ui;
 
 // ── Embedded templates ────────────────────────────────────────────────────────
 
@@ -70,7 +71,7 @@ pub async fn handle_new(
     bundle_id: Option<&str>,
     start_dev: bool,
     no_dev: bool,
-) {
+) -> ui::Cmd {
     validate_name(name);
 
     let dest = match path {
@@ -79,8 +80,7 @@ pub async fn handle_new(
     };
 
     if dest.exists() {
-        eprintln!("❌  Directory '{}' already exists.", dest.display());
-        std::process::exit(1);
+        return Err(format!("directory '{}' already exists", dest.display()).into());
     }
 
     let (erno_dep, erno_angular_dep) = resolve_erno_deps(erno_path);
@@ -92,7 +92,10 @@ pub async fn handle_new(
         .map(|s| s.to_string())
         .unwrap_or_else(|| format!("com.example.{}", name.replace('-', "_")));
 
-    println!("Creating {}...", dest.display());
+    ui::section(format!("Creating {name}"));
+    ui::detail(dest.display().to_string());
+
+    ui::section("Scaffolding");
 
     let angular_version = erno_path.and_then(read_angular_version_from_dist);
 
@@ -114,32 +117,32 @@ pub async fn handle_new(
     create_e2e(&dest);
     copy_admin(&dest, erno_path);
 
+    ui::section("Databases");
+
     let config = GlobalConfig::load().ok();
     if let Some(config) = config {
         create_databases(&config.postgres.admin_url, &db_name, &db_password).await;
     } else {
-        println!(
-            "\n  ⚠️   Skipped database creation — no ~/.erno/config.toml found.\n      Run `erno setup` then create databases manually:\n        createdb {db_name}_development\n        createdb {db_name}_test"
-        );
+        ui::warn("Skipped database creation — no ~/.erno/config.toml found");
+        ui::detail(format!(
+            "Run `erno setup`, then create them manually:\n\
+             createdb {db_name}_development\n\
+             createdb {db_name}_test"
+        ));
     }
 
-    let start = match decide_start_dev(
+    let start = decide_start_dev(
         start_dev,
         no_dev,
         std::io::IsTerminal::is_terminal(&std::io::stdin()),
-    ) {
-        Ok(start) => start,
-        Err(msg) => {
-            eprintln!("{msg}");
-            std::process::exit(1);
-        }
-    };
+    )?;
 
     print_next_steps(name, start);
     if start {
         crate::commands::dev::handle_dev(Some(dest), crate::commands::dev::DevArgs::default())
-            .await;
+            .await?;
     }
+    Ok(())
 }
 
 pub fn decide_start_dev(dev: bool, no_dev: bool, is_tty: bool) -> Result<bool, String> {
@@ -155,22 +158,7 @@ pub fn decide_start_dev(dev: bool, no_dev: bool, is_tty: bool) -> Result<bool, S
     if !is_tty {
         return Ok(false);
     }
-    Ok(confirm_start_dev())
-}
-
-fn confirm_start_dev() -> bool {
-    use std::io::{self, Write};
-    print!("Start dev servers now? [Y/n] ");
-    let _ = io::stdout().flush();
-    let mut input = String::new();
-    if io::stdin().read_line(&mut input).is_err() {
-        return true;
-    }
-    match input.trim().to_ascii_lowercase().as_str() {
-        "" | "y" | "yes" => true,
-        "n" | "no" => false,
-        _ => true,
-    }
+    Ok(ui::confirm("Start dev servers now?", true))
 }
 
 // ── Erno dependency resolution ────────────────────────────────────────────────
@@ -182,12 +170,12 @@ fn resolve_erno_deps(erno_path: Option<&str>) -> (String, String) {
             let (repo_root, api_path) = resolve_local_erno_paths(p);
             let angular_dist = repo_root.join("app/dist/erno-angular");
             if !angular_dist.join("package.json").is_file() {
-                eprintln!(
-                    "❌  Could not find a built erno-angular package at {}.\n    Run `cd {}/app && npm install && npm run build -- erno-angular` first.",
+                ui::abort(&format!(
+                    "could not find a built erno-angular package at {}\n\
+                     Run `cd {}/app && npm install && npm run build -- erno-angular` first.",
                     angular_dist.display(),
                     repo_root.display()
-                );
-                std::process::exit(1);
+                ));
             }
             (
                 format!(r#"{{ path = "{}" }}"#, api_path.display()),
@@ -203,8 +191,7 @@ fn resolve_local_erno_paths(path: &str) -> (PathBuf, PathBuf) {
     // project, so a relative --erno-path would be resolved against the wrong
     // directory by cargo and npm. Make it absolute before anything else.
     let input = fs::canonicalize(path).unwrap_or_else(|e| {
-        eprintln!("❌  Invalid --erno-path '{path}': {e}.");
-        std::process::exit(1);
+        ui::abort(&format!("invalid --erno-path '{path}': {e}"));
     });
     let input = input.as_path();
 
@@ -217,11 +204,10 @@ fn resolve_local_erno_paths(path: &str) -> (PathBuf, PathBuf) {
 
     let (repo_root, api_path) = if is_api_path {
         let Some(repo_root) = input.parent() else {
-            eprintln!(
-                "❌  Invalid --erno-path '{}': api directory has no parent.",
+            ui::abort(&format!(
+                "invalid --erno-path '{}': the api directory has no parent",
                 input.display()
-            );
-            std::process::exit(1);
+            ));
         };
         (repo_root.to_path_buf(), input.to_path_buf())
     } else {
@@ -229,12 +215,11 @@ fn resolve_local_erno_paths(path: &str) -> (PathBuf, PathBuf) {
     };
 
     if !api_path.join("Cargo.toml").is_file() {
-        eprintln!(
-            "❌  Invalid --erno-path '{}': could not find {}.",
+        ui::abort(&format!(
+            "invalid --erno-path '{}': could not find {}",
             input.display(),
             api_path.join("Cargo.toml").display()
-        );
-        std::process::exit(1);
+        ));
     }
 
     (repo_root, api_path)
@@ -254,10 +239,7 @@ fn validate_name(name: &str) {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
 
     if !valid {
-        eprintln!(
-            "❌  Invalid name '{name}'. Use lowercase letters, digits, hyphens, or underscores (must start with a letter)."
-        );
-        std::process::exit(1);
+        ui::abort(&format!("invalid name '{name}'. Use lowercase letters, digits, hyphens, or underscores (must start with a letter)"));
     }
 }
 
@@ -273,13 +255,14 @@ fn generate_jwt_secret() -> String {
 fn write(path: &Path, content: &str) {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).unwrap_or_else(|e| {
-            eprintln!("❌  Failed to create directory {}: {e}", parent.display());
-            std::process::exit(1);
+            ui::abort(&format!(
+                "failed to create directory {}: {e}",
+                parent.display()
+            ));
         });
     }
     fs::write(path, content).unwrap_or_else(|e| {
-        eprintln!("❌  Failed to write {}: {e}", path.display());
-        std::process::exit(1);
+        ui::abort(&format!("failed to write {}: {e}", path.display()));
     });
 }
 
@@ -366,7 +349,6 @@ fn create_api(
 
 fn install_app_deps(dest: &Path, use_install_links: bool) {
     let app = dest.join("app");
-    println!("  Installing app dependencies...");
     let mut cmd = std::process::Command::new("npm");
     cmd.arg("install");
     if use_install_links {
@@ -375,28 +357,26 @@ fn install_app_deps(dest: &Path, use_install_links: bool) {
         cmd.arg("--install-links");
     }
     let status = cmd.current_dir(&app).status().unwrap_or_else(|e| {
-        eprintln!("❌  Failed to run npm install: {e}");
-        std::process::exit(1);
+        ui::abort(&format!("failed to run npm install: {e}"));
     });
     if !status.success() {
-        eprintln!("❌  npm install failed");
-        std::process::exit(1);
+        ui::abort("npm install failed");
     }
+    ui::ok("app dependencies");
 }
 
 // ── Marketing site (Astro static) ─────────────────────────────────────────────
 
 fn create_e2e(dest: &Path) {
     let e2e = dest.join("e2e");
-    println!("  Scaffolding Playwright e2e tests (e2e/)...");
     write(&e2e.join("package.json"), E2E_PACKAGE_JSON);
     write(&e2e.join("playwright.config.ts"), E2E_PLAYWRIGHT);
     write(&e2e.join("health.spec.ts"), E2E_HEALTH);
+    ui::ok("Playwright e2e tests (e2e/)");
 }
 
 fn create_www(dest: &Path, name: &str) {
     let www = dest.join("www");
-    println!("  Scaffolding marketing site (www/)...");
 
     write(
         &www.join("package.json"),
@@ -412,6 +392,7 @@ fn create_www(dest: &Path, name: &str) {
     );
     write(&www.join("src/styles/global.css"), WWW_GLOBAL_CSS);
     write(&www.join("public/favicon.svg"), WWW_FAVICON);
+    ui::ok("marketing site (www/)");
 }
 
 fn copy_admin(dest: &Path, erno_path: Option<&str>) {
@@ -423,8 +404,8 @@ fn copy_admin(dest: &Path, erno_path: Option<&str>) {
         return;
     }
     let dst = dest.join("admin");
-    println!("  Copying admin/...");
     copy_dir_filtered(&src, &dst);
+    ui::ok("admin/");
 }
 
 fn copy_dir_filtered(src: &Path, dst: &Path) {
@@ -449,19 +430,17 @@ fn copy_dir_filtered(src: &Path, dst: &Path) {
 
 fn install_www_deps(dest: &Path) {
     let www = dest.join("www");
-    println!("  Installing www dependencies...");
     let status = std::process::Command::new("npm")
         .arg("install")
         .current_dir(&www)
         .status()
         .unwrap_or_else(|e| {
-            eprintln!("❌  Failed to run npm install in www/: {e}");
-            std::process::exit(1);
+            ui::abort(&format!("failed to run npm install in www/: {e}"));
         });
     if !status.success() {
-        eprintln!("❌  npm install failed in www/");
-        std::process::exit(1);
+        ui::abort("npm install failed in www/");
     }
+    ui::ok("www dependencies");
 }
 
 // ── Ionic app scaffold (via ionic start) ──────────────────────────────────────
@@ -470,12 +449,9 @@ fn ionic_new_app(_name: &str, _bundle_id: &str, dest: &Path) {
     let ionic = match crate::ng::find_ionic_binary() {
         Some(p) => p,
         None => {
-            eprintln!("❌  Ionic CLI not found. Run: npm install -g @ionic/cli");
-            std::process::exit(1);
+            ui::abort("Ionic CLI not found\nInstall it with: npm install -g @ionic/cli");
         }
     };
-
-    println!("  Scaffolding Ionic app...");
 
     let status = Command::new(ionic)
         .args([
@@ -491,14 +467,13 @@ fn ionic_new_app(_name: &str, _bundle_id: &str, dest: &Path) {
         .current_dir(dest)
         .status()
         .unwrap_or_else(|e| {
-            eprintln!("❌  Failed to run ionic start: {e}");
-            std::process::exit(1);
+            ui::abort(&format!("failed to run ionic start: {e}"));
         });
 
     if !status.success() {
-        eprintln!("❌  ionic start failed");
-        std::process::exit(1);
+        ui::abort("ionic start failed");
     }
+    ui::ok("Ionic app");
 }
 
 // ── Read Angular version required by local erno-angular dist ─────────────────
@@ -527,12 +502,10 @@ fn patch_app(
 
     let pkg_path = app.join("package.json");
     let pkg_content = fs::read_to_string(&pkg_path).unwrap_or_else(|e| {
-        eprintln!("❌  Failed to read package.json: {e}");
-        std::process::exit(1);
+        ui::abort(&format!("failed to read package.json: {e}"));
     });
     let mut pkg: serde_json::Value = serde_json::from_str(&pkg_content).unwrap_or_else(|e| {
-        eprintln!("❌  Failed to parse package.json: {e}");
-        std::process::exit(1);
+        ui::abort(&format!("failed to parse package.json: {e}"));
     });
 
     pkg["name"] = serde_json::Value::String(format!("{name}-app"));
@@ -696,11 +669,15 @@ fn patch_app(
 async fn create_databases(admin_url: &str, db_name: &str, db_password: &str) {
     match tokio_postgres::connect(admin_url, tokio_postgres::NoTls).await {
         Err(e) => {
-            println!("\n  ⚠️   Could not connect to PostgreSQL to create databases ({e}).");
-            println!("      Create them manually:");
-            println!("        createuser {db_name}");
-            println!("        createdb -O {db_name} {db_name}_development");
-            println!("        createdb -O {db_name} {db_name}_test");
+            ui::warn(format!(
+                "could not connect to PostgreSQL to create databases: {e}"
+            ));
+            ui::detail(format!(
+                "Create them manually:\n\
+                 createuser {db_name}\n\
+                 createdb -O {db_name} {db_name}_development\n\
+                 createdb -O {db_name} {db_name}_test"
+            ));
         }
         Ok((client, connection)) => {
             tokio::spawn(async move {
@@ -726,7 +703,7 @@ async fn create_db_user(client: &tokio_postgres::Client, name: &str, password: &
     );
     match client.execute(&sql, &[]).await {
         Ok(_) => {
-            println!("  ✅  Created database user {name}");
+            ui::ok(format!("user {name}"));
             true
         }
         Err(e) => {
@@ -734,8 +711,8 @@ async fn create_db_user(client: &tokio_postgres::Client, name: &str, password: &
                 .as_db_error()
                 .map(|d| d.message().to_string())
                 .unwrap_or_else(|| e.to_string());
-            println!("  ⚠️   Could not create user {name}: {msg}");
-            println!("      Grant CREATEROLE to your admin user and re-run, or run `erno doctor`.");
+            ui::warn(format!("could not create user {name}: {msg}"));
+            ui::detail("Grant CREATEROLE to your admin user and re-run, or run `erno doctor`.");
             false
         }
     }
@@ -758,26 +735,28 @@ async fn grant_schema_public(admin_url: &str, db: &str, user: &str) {
                 .execute(&format!("GRANT ALL ON SCHEMA public TO {user}"), &[])
                 .await
             {
-                Ok(_) => println!("  ✅  Granted schema permissions to {user} on {db}"),
-                Err(e) => println!("  ⚠️   Could not grant schema permissions on {db}: {e}"),
+                Ok(_) => ui::ok(format!("granted schema permissions to {user} on {db}")),
+                Err(e) => ui::warn(format!("could not grant schema permissions on {db}: {e}")),
             }
         }
-        Err(e) => println!("  ⚠️   Could not connect to {db} to grant permissions: {e}"),
+        Err(e) => ui::warn(format!(
+            "could not connect to {db} to grant permissions: {e}"
+        )),
     }
 }
 
 async fn create_db(client: &tokio_postgres::Client, db: &str) {
     match client.execute(&format!("CREATE DATABASE {db}"), &[]).await {
-        Ok(_) => println!("  ✅  Created database {db}"),
+        Ok(_) => ui::ok(db),
         Err(e) => {
             let msg = e
                 .as_db_error()
                 .map(|d| d.message())
                 .unwrap_or("unknown error");
             if msg.contains("already exists") {
-                println!("  ℹ️   Database {db} already exists");
+                ui::info(format!("{db} already exists"));
             } else {
-                println!("  ⚠️   Could not create {db}: {msg}");
+                ui::warn(format!("could not create {db}: {msg}"));
             }
         }
     }
@@ -786,25 +765,24 @@ async fn create_db(client: &tokio_postgres::Client, db: &str) {
 // ── Next steps ────────────────────────────────────────────────────────────────
 
 fn print_next_steps(name: &str, starting_dev: bool) {
-    println!(
-        r#"
-✅  Created {name}/
-
-  api/  Rust API
-  app/  Ionic product app (app.example.com in production)
-  www/  Astro marketing site (example.com in production)
-"#
+    ui::section("Done");
+    ui::ok(format!("Created {name}/"));
+    ui::detail(
+        "api/  Rust API\n\
+         app/  Ionic product app (app.example.com in production)\n\
+         www/  Astro marketing site (example.com in production)",
     );
+
+    ui::blank();
     if starting_dev {
-        println!(
-            "Starting dev servers now (Ctrl+C to stop).\nThe API applies pending migrations on boot.\n"
-        );
-        println!("  www  → http://localhost:4321");
-        println!("  app  → http://localhost:4200");
-        println!("  api  → http://localhost:3000");
+        ui::info("Starting dev servers now (Ctrl+C to stop).");
+        ui::detail("The API applies pending migrations on boot.");
     } else {
-        println!("Next:  cd {name} && erno test");
-        println!("       cd {name} && erno dev");
+        ui::info("Next:");
+        ui::detail(format!(
+            "cd {name} && erno test\n\
+             cd {name} && erno dev"
+        ));
     }
 }
 

@@ -12,6 +12,8 @@ use std::process::{Command, Stdio};
 use clap::Args;
 use serde::Deserialize;
 
+use crate::ui;
+
 /// Package selection flags, shared by `build`, `lint`, and `test`.
 #[derive(Args, Debug, Default)]
 pub struct SelectionArgs {
@@ -378,7 +380,7 @@ pub fn run_phase(
                 if steps.is_empty() {
                     continue;
                 }
-                println!("\n── {} ──", package.name);
+                ui::section(&package.name);
                 run_steps(root, package, &steps, fix, &args.rest)
             }
         };
@@ -390,21 +392,24 @@ pub fn run_phase(
     }
 
     if results.is_empty() {
-        println!("nothing to {}", phase.label());
+        ui::info(format!("nothing to {}", phase.label()));
         return true;
     }
 
-    println!();
-    let mut failed = false;
+    // The summary is the command's result, not narration, so `--quiet` keeps it
+    // — which is why it goes through `emit` rather than `ui::ok`/`ui::fail`.
+    ui::emit(ui::Stream::Err, "");
     for (name, ok) in &results {
-        if *ok {
-            println!("  {name:<12} ok");
-        } else {
-            println!("  {name:<12} fail");
-            failed = true;
-        }
+        let level = if *ok { ui::Level::Ok } else { ui::Level::Fail };
+        ui::emit(ui::Stream::Err, &ui::render_row(ui::color(), level, name));
     }
-    !failed
+
+    let failures = results.iter().filter(|(_, ok)| !ok).count();
+    if failures > 0 {
+        ui::emit(ui::Stream::Err, "");
+        ui::fatal(&format!("{failures} of {} packages failed", results.len()));
+    }
+    failures == 0
 }
 
 fn run_steps(root: &Path, package: &Package, steps: &[&Step], fix: bool, rest: &[String]) -> bool {
@@ -430,62 +435,65 @@ pub fn ensure_npm_modules(dir: &Path, label: &str) -> bool {
         return true;
     }
     if !dir.join("package.json").is_file() {
-        eprintln!("[{label}] no package.json in {}", dir.display());
+        ui::prefixed(
+            ui::Stream::Err,
+            label,
+            &format!("no package.json in {}", dir.display()),
+        );
         return false;
     }
-    eprintln!("[{label}] npm install in {}", dir.display());
+    ui::prefixed(
+        ui::Stream::Err,
+        label,
+        &format!("npm install in {}", dir.display()),
+    );
     let mut cmd = Command::new("npm");
     cmd.arg("install").current_dir(dir);
     let ok = run_prefixed(&mut cmd, label);
     if !ok {
-        eprintln!("[{label}] npm install failed in {}", dir.display());
+        ui::prefixed(
+            ui::Stream::Err,
+            label,
+            &format!("npm install failed in {}", dir.display()),
+        );
     }
     ok
 }
 
-/// Children see a pipe rather than a TTY, so ask them to keep colour anyway.
-pub fn apply_child_color_env(cmd: &mut Command) {
-    cmd.env("CARGO_TERM_COLOR", "always");
-    cmd.env("FORCE_COLOR", "1");
-    cmd.env("CLICOLOR_FORCE", "1");
-    cmd.env("npm_config_color", "always");
-    if std::env::var_os("TERM").is_none() {
-        cmd.env("TERM", "xterm-256color");
-    }
-}
-
 pub fn run_prefixed(cmd: &mut Command, label: &str) -> bool {
-    apply_child_color_env(cmd);
+    ui::apply_child_env(cmd);
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("[{label}] failed to start: {e}");
+            ui::prefixed(ui::Stream::Err, label, &format!("failed to start: {e}"));
             return false;
         }
     };
     if let Some(out) = child.stdout.take() {
-        prefix_pipe(out, label);
+        prefix_pipe(out, label, ui::Stream::Out);
     }
     if let Some(err) = child.stderr.take() {
-        prefix_pipe(err, label);
+        prefix_pipe(err, label, ui::Stream::Err);
     }
     match child.wait() {
         Ok(status) => status.success(),
         Err(e) => {
-            eprintln!("[{label}] wait failed: {e}");
+            ui::prefixed(ui::Stream::Err, label, &format!("wait failed: {e}"));
             false
         }
     }
 }
 
-pub fn prefix_pipe<R: std::io::Read + Send + 'static>(pipe: R, label: &str) {
+/// Forward a child's pipe, one prefixed line at a time, onto the stream it came
+/// from.
+pub fn prefix_pipe<R: std::io::Read + Send + 'static>(pipe: R, label: &str, stream: ui::Stream) {
     use std::io::BufRead;
     let label = label.to_string();
     std::thread::spawn(move || {
         let reader = std::io::BufReader::new(pipe);
         for line in reader.lines().map_while(Result::ok) {
-            println!("[{label}] {line}");
+            ui::prefixed(stream, &label, &line);
         }
     });
 }

@@ -1,8 +1,8 @@
-use std::io::{self, Write};
 use std::path::Path;
 use std::process::Stdio;
 
 use crate::global_config::GlobalConfig;
+use crate::ui;
 
 const TEMPLATE_API_DOCKERFILE: &str = include_str!("../../templates/deploy/api/Dockerfile");
 const TEMPLATE_APP_DOCKERFILE: &str = include_str!("../../templates/deploy/app/Dockerfile");
@@ -49,14 +49,15 @@ const TEMPLATE_ADMIN_DEPLOYMENT: &str =
 const TEMPLATE_PROMETHEUS_DEPLOYMENT: &str =
     include_str!("../../templates/deploy/chart/templates/prometheus.yaml");
 
-pub async fn handle_deploy_init() {
+pub async fn handle_deploy_init() -> ui::Cmd {
     validate_project_root();
 
     let name = read_project_name();
     let github_repo = read_github_repo();
     let k8s_context = prompt_k8s_context();
 
-    println!("\n📦  Generating deployment files for '{name}'...\n");
+    ui::section(format!("Generating deployment files for '{name}'"));
+    ui::blank();
 
     let (admin_password, admin_password_hash) = generate_admin_password();
 
@@ -161,6 +162,7 @@ pub async fn handle_deploy_init() {
 
     print_admin_password_once(&admin_password);
     print_next_steps(&name, &github_repo);
+    Ok(())
 }
 
 /// Generate a high-entropy admin password and its Argon2 hash.
@@ -187,15 +189,20 @@ fn generate_admin_password() -> (String, String) {
 }
 
 fn print_admin_password_once(password: &str) {
-    println!("\n🔐  Admin password (store in your password manager — shown only once):\n");
-    println!("    {password}\n");
-    println!("    Login:  https://admin.example.com");
-    println!("    Username: admin");
-    println!("    Only the Argon2 hash was written to chart/secrets.example.yaml.");
-    println!("    The plaintext is NOT stored in the cluster or in git.\n");
+    ui::section("Admin password");
+    ui::detail("Store this in your password manager — it is shown only once.");
+    ui::blank();
+    ui::info(password);
+    ui::blank();
+    ui::detail(
+        "login     https://admin.example.com\n\
+         username  admin\n\
+         Only the Argon2 hash was written to chart/secrets.example.yaml.\n\
+         The plaintext is NOT stored in the cluster or in git.",
+    );
 }
 
-pub async fn handle_deploy_install(version: &str, env: &str) {
+pub async fn handle_deploy_install(version: &str, env: &str) -> ui::Cmd {
     validate_project_root();
 
     let name = read_project_name();
@@ -203,18 +210,20 @@ pub async fn handle_deploy_install(version: &str, env: &str) {
 
     let context = read_deploy_context(env);
 
-    println!("🔀  Switching kubectl context to '{context}'...");
+    ui::section(format!("Switching kubectl context to '{context}'"));
     run_command("kubectl", &["config", "use-context", &context]);
 
     let secrets_file = format!("chart/secrets.{env}.yaml");
     if !Path::new(&secrets_file).exists() {
-        eprintln!("❌  Missing {secrets_file}");
-        eprintln!("    Copy chart/secrets.example.yaml to {secrets_file}, fill in values, and encrypt with SOPS.");
-        std::process::exit(1);
+        return Err(format!(
+            "missing {secrets_file}\n\
+             Copy chart/secrets.example.yaml to {secrets_file}, fill in values, and encrypt with SOPS."
+        )
+        .into());
     }
 
     let chart_ref = format!("oci://ghcr.io/{github_repo}/{name}");
-    println!("🚀  Deploying {name} {version} to {env}...");
+    ui::section(format!("Deploying {name} {version} to {env}"));
     run_command(
         "helm",
         &[
@@ -233,7 +242,9 @@ pub async fn handle_deploy_install(version: &str, env: &str) {
         ],
     );
 
-    println!("\n✅  Deployed {name} {version} to {env}.");
+    ui::blank();
+    ui::ok(format!("Deployed {name} {version} to {env}"));
+    Ok(())
 }
 
 fn ensure_production_toml(name: &str) {
@@ -241,11 +252,13 @@ fn ensure_production_toml(name: &str) {
     if path.exists() {
         let content = std::fs::read_to_string(path).unwrap_or_default();
         if content.contains("CHANGE_ME") {
-            println!("  ⚠️  api/config/production.toml — has CHANGE_ME placeholders");
-            println!("     Helm env vars will override database URL, JWT secret, and SMTP.");
-            println!("     Remember to update api_url to your actual API domain.");
+            ui::warn("api/config/production.toml has CHANGE_ME placeholders");
+            ui::detail(
+                "Helm env vars override the database URL, JWT secret, and SMTP.\n\
+                 Update api_url to your actual API domain.",
+            );
         } else {
-            println!("  ✓ api/config/production.toml (existing)");
+            ui::ok("api/config/production.toml (existing)");
         }
         return;
     }
@@ -258,22 +271,23 @@ fn ensure_production_toml(name: &str) {
 
 fn validate_project_root() {
     if !Path::new("api/Cargo.toml").exists() || !Path::new("app/package.json").exists() {
-        eprintln!("❌  Not an erno project root.");
-        eprintln!("    Run this command from the directory that contains api/ and app/.");
-        std::process::exit(1);
+        ui::abort(
+            "not an erno project root\n\
+             Run this command from the directory that contains api/ and app/.",
+        );
     }
     if !Path::new("www/package.json").exists() {
-        eprintln!("⚠️   No www/ marketing site found.");
-        eprintln!("    Newer scaffolds include www/ (Astro). Deploy will still generate www Docker/Helm files.");
-        eprintln!("    Add a www/ package or remove those units from the chart if unused.\n");
+        ui::warn("no www/ marketing site found");
+        ui::detail(
+            "Newer scaffolds include www/ (Astro). Deploy still generates the www Docker/Helm files.\n\
+             Add a www/ package, or remove those units from the chart if unused.",
+        );
     }
 }
 
 fn read_project_name() -> String {
-    let cargo_toml = std::fs::read_to_string("api/Cargo.toml").unwrap_or_else(|_| {
-        eprintln!("❌  Could not read api/Cargo.toml");
-        std::process::exit(1)
-    });
+    let cargo_toml = std::fs::read_to_string("api/Cargo.toml")
+        .unwrap_or_else(|_| ui::abort("could not read api/Cargo.toml"));
 
     for line in cargo_toml.lines() {
         if let Some(rest) = line.strip_prefix("name") {
@@ -283,8 +297,7 @@ fn read_project_name() -> String {
         }
     }
 
-    eprintln!("❌  Could not parse project name from api/Cargo.toml");
-    std::process::exit(1);
+    ui::abort("could not parse the project name from api/Cargo.toml");
 }
 
 fn read_github_repo() -> String {
@@ -308,9 +321,10 @@ fn read_github_repo() -> String {
         }
     }
 
-    eprintln!("⚠️   Could not detect GitHub repo from .git/config remote origin.");
-    eprintln!("    Please ensure a GitHub remote is configured.");
-    std::process::exit(1);
+    ui::abort(
+        "could not detect the GitHub repo from .git/config remote origin\n\
+         Ensure a GitHub remote is configured.",
+    );
 }
 
 fn extract_github_repo(url: &str) -> String {
@@ -324,8 +338,9 @@ fn extract_github_repo(url: &str) -> String {
         return path.to_string();
     }
 
-    eprintln!("❌  Remote origin does not look like a GitHub URL: {url}");
-    std::process::exit(1);
+    ui::abort(&format!(
+        "remote origin does not look like a GitHub URL: {url}"
+    ));
 }
 
 fn prompt_k8s_context() -> String {
@@ -342,21 +357,21 @@ fn prompt_k8s_context() -> String {
                 .collect();
 
             if !contexts.is_empty() {
-                println!("\nAvailable kubectl contexts:");
+                ui::blank();
+                ui::info("Available kubectl contexts:");
                 for (i, ctx) in contexts.iter().enumerate() {
-                    println!("  {}. {}", i + 1, ctx);
+                    ui::detail(format!("{}. {}", i + 1, ctx));
                 }
             }
         }
     }
 
-    prompt("\nKubernetes context for production", "")
+    ui::prompt("Kubernetes context for production", "")
 }
 
 fn read_deploy_context(env: &str) -> String {
     let content = std::fs::read_to_string("chart/deploy.toml").unwrap_or_else(|_| {
-        eprintln!("❌  Missing chart/deploy.toml — run `erno deploy init` first.");
-        std::process::exit(1);
+        ui::abort("missing chart/deploy.toml — run `erno deploy init` first");
     });
 
     let section = format!("[{env}]");
@@ -379,21 +394,22 @@ fn read_deploy_context(env: &str) -> String {
         }
     }
 
-    eprintln!("❌  No kubernetes_context found for environment '{env}' in chart/deploy.toml");
-    std::process::exit(1);
+    ui::abort(&format!(
+        "no kubernetes_context found for environment '{env}' in chart/deploy.toml"
+    ));
 }
 
 async fn setup_sops(name: &str, github_repo: &str) {
     // Generate age keypair
     let output = std::process::Command::new("age-keygen").output();
     let Ok(out) = output else {
-        println!("⚠️   age-keygen not found — skipping SOPS setup.");
-        println!("    Install age (https://age-encryption.org) and re-run `erno deploy init`.");
+        ui::warn("age-keygen not found — skipping SOPS setup");
+        ui::detail("Install age (https://age-encryption.org) and re-run `erno deploy init`.");
         return;
     };
 
     if !out.status.success() {
-        println!("⚠️   age-keygen failed — skipping SOPS setup.");
+        ui::warn("age-keygen failed — skipping SOPS setup");
         return;
     }
 
@@ -409,7 +425,7 @@ async fn setup_sops(name: &str, github_repo: &str) {
     }
 
     if public_key.is_empty() {
-        println!("⚠️   Could not parse age public key — skipping SOPS setup.");
+        ui::warn("could not parse the age public key — skipping SOPS setup");
         return;
     }
 
@@ -428,23 +444,26 @@ async fn setup_sops(name: &str, github_repo: &str) {
     let secret_set =
         try_set_github_secret(github_repo, "SOPS_AGE_KEY", &private_key, github_token).await;
 
-    println!("\n🔑  Age keypair generated.");
-    println!("    Public key:  {public_key}");
-    println!("    Written to:  chart/.sops.yaml");
+    ui::section("SOPS");
+    ui::ok("age keypair generated");
+    ui::detail(format!(
+        "public key:  {public_key}\n\
+         written to:  chart/.sops.yaml"
+    ));
 
     if secret_set {
-        println!("    SOPS_AGE_KEY secret set on GitHub Actions ✅");
+        ui::ok("SOPS_AGE_KEY secret set on GitHub Actions");
     } else {
-        println!("\n    ⚠️   Could not set GitHub Actions secret automatically.");
-        println!("    Run this command to set it manually:");
-        println!(
-            "      gh secret set SOPS_AGE_KEY --repo {github_repo} --body '{}'",
+        ui::warn("could not set the GitHub Actions secret automatically");
+        ui::detail("Run this to set it manually:");
+        ui::detail(format!(
+            "gh secret set SOPS_AGE_KEY --repo {github_repo} --body '{}'",
             private_key.replace('\n', "\\n")
-        );
+        ));
     }
 
-    println!("\n    ⚠️   Back up your private key — it cannot be recovered:");
-    println!("{}", private_key_lines.join("\n"));
+    ui::warn("back up your private key — it cannot be recovered");
+    ui::detail(private_key_lines.join("\n"));
     let _ = name; // used in template vars
 }
 
@@ -536,39 +555,31 @@ async fn set_github_secret_via_api(
     false
 }
 
+/// Counts what `write_file` wrote, so the summary can report a total instead of
+/// thirty near-identical rows. `--verbose` still lists every path.
+static FILES_WRITTEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 fn write_file(path: &str, content: String) {
     let p = Path::new(path);
     if let Some(parent) = p.parent() {
         std::fs::create_dir_all(parent).unwrap_or_else(|e| {
-            eprintln!("❌  Could not create directory {}: {e}", parent.display());
-            std::process::exit(1);
+            ui::abort(&format!(
+                "could not create directory {}: {e}",
+                parent.display()
+            ));
         });
     }
-    std::fs::write(p, content).unwrap_or_else(|e| {
-        eprintln!("❌  Could not write {path}: {e}");
-        std::process::exit(1);
-    });
-    println!("  ✓ {path}");
+    std::fs::write(p, content)
+        .unwrap_or_else(|e| ui::abort(&format!("could not write {path}: {e}")));
+    FILES_WRITTEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if ui::verbose() {
+        ui::ok(path);
+    }
 }
 
 fn render(template: &str, vars: &[(&str, &str)]) -> String {
     vars.iter()
         .fold(template.to_string(), |s, (k, v)| s.replace(k, v))
-}
-
-fn prompt(label: &str, default: &str) -> String {
-    print!("{label}: ");
-    io::stdout().flush().unwrap();
-    let mut input = String::new();
-    io::stdin()
-        .read_line(&mut input)
-        .expect("failed to read stdin");
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        default.to_string()
-    } else {
-        trimmed.to_string()
-    }
 }
 
 fn run_command(program: &str, args: &[&str]) {
@@ -578,42 +589,51 @@ fn run_command(program: &str, args: &[&str]) {
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .status()
-        .unwrap_or_else(|e| {
-            eprintln!("❌  Failed to run {program}: {e}");
-            std::process::exit(1);
-        });
+        .unwrap_or_else(|e| ui::abort(&format!("could not run {program}: {e}")));
 
     if !status.success() {
-        eprintln!("❌  {program} exited with status {status}");
-        std::process::exit(1);
+        ui::abort(&format!("{program} exited with status {status}"));
     }
 }
 
 fn print_next_steps(name: &str, github_repo: &str) {
-    println!("\n✅  Deployment scaffold complete.\n");
-    println!("Next steps:\n");
-    println!("  1. Copy chart/secrets.example.yaml → chart/secrets.production.yaml,");
-    println!("     fill remaining secrets (DB, JWT, SMTP), keep admin_password_hash as generated,");
-    println!("     then encrypt:  sops --encrypt --in-place chart/secrets.production.yaml");
-    println!();
-    println!("  2. Install prerequisites on your cluster (first time only):");
-    println!("     helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx");
-    println!("     helm repo add jetstack https://charts.jetstack.io");
-    println!("     helm install ingress-nginx ingress-nginx/ingress-nginx");
-    println!("     helm install cert-manager jetstack/cert-manager --set installCRDs=true");
-    println!();
-    println!("  3. Push a version tag to trigger the GitHub Actions build:");
-    println!("     git tag v0.1.0 && git push origin v0.1.0");
-    println!();
-    println!("  4. Deploy:");
-    println!("     erno deploy install v0.1.0");
-    println!();
-    println!("  5. Point DNS at the ingress-nginx LoadBalancer IP:");
-    println!("     kubectl get svc -n ingress-nginx ingress-nginx-controller");
-    println!("     example.com          → www (marketing)");
-    println!("     app.example.com      → app (product SPA)");
-    println!("     api.example.com      → api");
-    println!();
-    println!("  GitHub repo: https://github.com/{github_repo}");
+    let written = FILES_WRITTEN.load(std::sync::atomic::Ordering::Relaxed);
+    ui::section("Done");
+    ui::ok(format!("wrote {written} files"));
+    if !ui::verbose() {
+        ui::detail("Re-run with --verbose to list them.");
+    }
+
+    ui::section("Next steps");
+    ui::detail(
+        "1. Copy chart/secrets.example.yaml → chart/secrets.production.yaml,\n\
+            fill remaining secrets (DB, JWT, SMTP), keep admin_password_hash as generated,\n\
+            then encrypt:  sops --encrypt --in-place chart/secrets.production.yaml",
+    );
+    ui::blank();
+    ui::detail(
+        "2. Install prerequisites on your cluster (first time only):\n\
+            helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx\n\
+            helm repo add jetstack https://charts.jetstack.io\n\
+            helm install ingress-nginx ingress-nginx/ingress-nginx\n\
+            helm install cert-manager jetstack/cert-manager --set installCRDs=true",
+    );
+    ui::blank();
+    ui::detail(
+        "3. Push a version tag to trigger the GitHub Actions build:\n\
+            git tag v0.1.0 && git push origin v0.1.0",
+    );
+    ui::blank();
+    ui::detail("4. Deploy:\n   erno deploy install v0.1.0");
+    ui::blank();
+    ui::detail(
+        "5. Point DNS at the ingress-nginx LoadBalancer IP:\n\
+            kubectl get svc -n ingress-nginx ingress-nginx-controller\n\
+            example.com          → www (marketing)\n\
+            app.example.com      → app (product SPA)\n\
+            api.example.com      → api",
+    );
+    ui::blank();
+    ui::detail(format!("GitHub repo: https://github.com/{github_repo}"));
     let _ = name;
 }

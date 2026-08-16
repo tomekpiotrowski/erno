@@ -23,11 +23,10 @@ use log::LogSink;
 use process::{spawn_labeled, Supervisor};
 pub use project::resolve_project_root;
 
+use crate::ui;
+
 #[derive(Args, Default, Clone, Debug)]
 pub struct DevArgs {
-    /// Print every child log line instead of errors and ready events only
-    #[arg(long, short = 'v')]
-    pub verbose: bool,
     /// Start only the API (can be combined with --app / --www)
     #[arg(long)]
     pub api: bool,
@@ -60,44 +59,29 @@ pub struct DevArgs {
     pub no_admin: bool,
 }
 
-pub(crate) const CYAN: &str = "\x1b[36m";
-pub(crate) const GREEN: &str = "\x1b[32m";
-pub(crate) const MAGENTA: &str = "\x1b[35m";
-pub(crate) const YELLOW: &str = "\x1b[33m";
-pub(crate) const DIM: &str = "\x1b[2m";
-pub(crate) const RESET: &str = "\x1b[0m";
-
-pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) {
-    let root = resolve_project_root(root);
-    let _lock = match lock::DevLock::acquire(&root) {
-        Ok(lock) => lock,
-        Err(e) => {
-            eprintln!("{e}");
-            std::process::exit(1);
-        }
-    };
+pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) -> ui::Cmd {
+    let root = resolve_project_root(root)?;
+    // Held for the lifetime of the command; its `Drop` removes .erno/dev.lock,
+    // which is why everything below returns rather than calling `exit`.
+    let _lock = lock::DevLock::acquire(&root)?;
     let api_dir = root.join("api");
     let app_dir = root.join("app");
     let www_dir = root.join("www");
 
     let has_www = www_dir.is_dir() && www_dir.join("package.json").is_file();
-    let sel = match selection::ServiceSelection::resolve(&args, has_www) {
-        Ok(s) => s,
-        Err(msg) => {
-            eprintln!("{msg}");
-            std::process::exit(1);
-        }
-    };
+    let sel = selection::ServiceSelection::resolve(&args, has_www)?;
 
     if args.seed && !sel.api {
-        eprintln!("--seed requires the API (pass --api or omit service flags).");
-        std::process::exit(1);
+        return Err("--seed requires the API (pass --api or omit service flags).".into());
     }
 
     if sel.app && !app_dir.is_dir() {
-        eprintln!("Found project at {} but no app/ directory.", root.display());
-        eprintln!("Pass --api to start only the API, or scaffold an app with `erno new`.");
-        std::process::exit(1);
+        return Err(format!(
+            "found a project at {} but no app/ directory\n\
+             Pass --api to start only the API, or scaffold an app with `erno new`.",
+            root.display()
+        )
+        .into());
     }
 
     let mut urls = ports::discover_urls(&root, &sel);
@@ -116,13 +100,13 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) {
     let mut _url_rewrite = None;
     let mut cors_env = None;
     if let Some(platform) = device {
-        let ip = device::lan_ip().unwrap_or_else(|| {
-            eprintln!(
-                "Could not detect a LAN IP for `--{}`. Connect to a network and try again.",
+        let ip = device::lan_ip().ok_or_else(|| {
+            format!(
+                "could not detect a LAN IP for `--{}`\n\
+                 Connect to a network and try again.",
                 platform.as_str()
-            );
-            std::process::exit(1);
-        });
+            )
+        })?;
         if let Some(api) = urls.api.clone() {
             let api_http = device::rewrite_url_host(&api, ip);
             let api_ws = if api_http.starts_with("https://") {
@@ -134,43 +118,37 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) {
             if let Some(app) = urls.app.clone() {
                 urls.app = Some(device::rewrite_url_host(&app, ip));
             }
-            match device::apply_lan_api_urls(&app_dir, &api_http, &api_ws) {
-                Ok(guard) => _url_rewrite = Some(guard),
-                Err(e) => {
-                    eprintln!("{e}");
-                    std::process::exit(1);
-                }
-            }
+            _url_rewrite = Some(device::apply_lan_api_urls(&app_dir, &api_http, &api_ws)?);
             if let Some(app) = &urls.app {
                 cors_env = Some(device::cors_origins(app));
             }
         }
-        println!(
-            "{DIM}Device live-reload ({}) on {ip}{RESET}",
+        ui::info(format!(
+            "Device live-reload ({}) on {ip}",
             platform.as_str()
-        );
+        ));
     }
 
     preflight::run_preflight(
         sel.api,
         sel.api && !args.no_prometheus,
         &ports::ports_to_check(&urls),
-    );
+    )?;
 
     if sel.app {
-        ensure_npm_deps(&app_dir, "app");
+        ensure_npm_deps(&app_dir, "app")?;
     }
     if sel.www {
-        ensure_npm_deps(&www_dir, "www");
+        ensure_npm_deps(&www_dir, "www")?;
     }
 
-    let sink = Arc::new(LogSink::new(&root, args.verbose));
-    if !args.verbose {
+    let sink = Arc::new(LogSink::new(&root));
+    if !ui::verbose() {
         if let Some(path) = sink.path() {
-            println!(
-                "{DIM}Logs → {}  (use --verbose for the live multiplex){RESET}",
+            ui::info(format!(
+                "Logs → {}  (use --verbose for the live multiplex)",
                 path.display()
-            );
+            ));
         }
     }
 
@@ -201,13 +179,13 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) {
         let api_dir_spawn = api_dir.clone();
         let api_sink = sink.clone();
         let cors_env = cors_env.clone();
-        Supervisor::start("api", CYAN, shutdown_rx.clone(), move || {
+        Supervisor::start("api", shutdown_rx.clone(), move || {
             let mut cmd = Command::new("cargo");
             cmd.arg("run");
             if let Some(origins) = cors_env.as_deref() {
                 cmd.env("ERNO_DEV_CORS_ORIGINS", origins);
             }
-            spawn_labeled(cmd, &api_dir_spawn, CYAN, "api", api_sink.clone())
+            spawn_labeled(cmd, &api_dir_spawn, "api", api_sink.clone())
         })
     });
     if let Some(api) = api.as_ref() {
@@ -222,7 +200,7 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) {
     let app = sel.app.then(|| {
         let app_dir_spawn = app_dir.clone();
         let app_sink = sink.clone();
-        Supervisor::start("app", GREEN, shutdown_rx.clone(), move || {
+        Supervisor::start("app", shutdown_rx.clone(), move || {
             let cmd = if let Some(platform) = device {
                 let mut cmd = Command::new("npx");
                 cmd.args([
@@ -241,7 +219,7 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) {
                 cmd.arg("start");
                 cmd
             };
-            spawn_labeled(cmd, &app_dir_spawn, GREEN, "app", app_sink.clone())
+            spawn_labeled(cmd, &app_dir_spawn, "app", app_sink.clone())
         })
     });
 
@@ -250,33 +228,18 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) {
         .as_deref()
         .and_then(|u| ports::port_from_url(Some(u)))
         .unwrap_or(3000);
+    // `run_preflight` above already exited if the binary was missing under this
+    // exact condition, so there is no second check here.
     let prometheus = if sel.api && !args.no_prometheus {
-        if !prometheus::binary_on_path() {
-            eprintln!("prometheus not found on PATH.");
-            eprintln!(
-                "Install Prometheus: https://prometheus.io/docs/prometheus/latest/installation/"
-            );
-            eprintln!("Or pass --no-prometheus to start without the scrape server.");
-            std::process::exit(1);
-        }
         let metrics_toml =
             std::fs::read_to_string(root.join("api/config/development.toml")).unwrap_or_default();
         let scrape_token = ports::parse_table_string(&metrics_toml, "metrics", "auth_token");
-        match prometheus::prepare_dir(&root, api_port, scrape_token.as_deref()) {
-            Ok(dir) => {
-                let prom_sink = sink.clone();
-                Some(Supervisor::start(
-                    "prom",
-                    YELLOW,
-                    shutdown_rx.clone(),
-                    move || prometheus::spawn(&dir, YELLOW, prom_sink.clone()),
-                ))
-            }
-            Err(e) => {
-                eprintln!("Could not prepare Prometheus data dir: {e}");
-                std::process::exit(1);
-            }
-        }
+        let dir = prometheus::prepare_dir(&root, api_port, scrape_token.as_deref())
+            .map_err(|e| format!("could not prepare the Prometheus data dir: {e}"))?;
+        let prom_sink = sink.clone();
+        Some(Supervisor::start("prom", shutdown_rx.clone(), move || {
+            prometheus::spawn(&dir, prom_sink.clone())
+        }))
     } else {
         None
     };
@@ -284,18 +247,13 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) {
     let admin_dir = find_admin_dir(&root);
     let admin = if !args.no_admin {
         if let Some(admin_dir) = admin_dir {
-            ensure_npm_deps(&admin_dir, "admin");
+            ensure_npm_deps(&admin_dir, "admin")?;
             let admin_sink = sink.clone();
-            Some(Supervisor::start(
-                "admin",
-                YELLOW,
-                shutdown_rx.clone(),
-                move || {
-                    let mut cmd = Command::new("npm");
-                    cmd.arg("start");
-                    spawn_labeled(cmd, &admin_dir, YELLOW, "admin", admin_sink.clone())
-                },
-            ))
+            Some(Supervisor::start("admin", shutdown_rx.clone(), move || {
+                let mut cmd = Command::new("npm");
+                cmd.arg("start");
+                spawn_labeled(cmd, &admin_dir, "admin", admin_sink.clone())
+            }))
         } else {
             None
         }
@@ -306,15 +264,16 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) {
     let www = sel.www.then(|| {
         let www_dir_spawn = www_dir.clone();
         let www_sink = sink.clone();
-        Supervisor::start("www", MAGENTA, shutdown_rx.clone(), move || {
+        Supervisor::start("www", shutdown_rx.clone(), move || {
             let mut cmd = Command::new("npm");
             cmd.args(["run", "dev"]);
-            spawn_labeled(cmd, &www_dir_spawn, MAGENTA, "www", www_sink.clone())
+            spawn_labeled(cmd, &www_dir_spawn, "www", www_sink.clone())
         })
     });
 
     let _ = tokio::signal::ctrl_c().await;
-    eprintln!("\nShutting down...");
+    ui::blank();
+    ui::info("Shutting down...");
     let _ = shutdown_tx.send(true);
     if let Some(api) = api {
         api.shutdown().await;
@@ -331,6 +290,7 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) {
     if let Some(admin) = admin {
         admin.shutdown().await;
     }
+    Ok(())
 }
 
 fn find_admin_dir(root: &std::path::Path) -> Option<std::path::PathBuf> {
@@ -355,24 +315,18 @@ fn find_admin_dir(root: &std::path::Path) -> Option<std::path::PathBuf> {
     None
 }
 
-fn ensure_npm_deps(dir: &std::path::Path, label: &str) {
+fn ensure_npm_deps(dir: &std::path::Path, label: &str) -> Result<(), String> {
     if dir.join("node_modules").exists() {
-        return;
+        return Ok(());
     }
-    println!("Installing {label} npm dependencies...");
+    ui::info(format!("Installing {label} npm dependencies..."));
     let status = std::process::Command::new("npm")
         .arg("install")
         .current_dir(dir)
         .status();
     match status {
-        Err(e) => {
-            eprintln!("Failed to run npm install in {label}/: {e}");
-            std::process::exit(1);
-        }
-        Ok(s) if !s.success() => {
-            eprintln!("npm install failed in {label}/.");
-            std::process::exit(1);
-        }
-        _ => {}
+        Err(e) => Err(format!("could not run npm install in {label}/: {e}")),
+        Ok(s) if !s.success() => Err(format!("npm install failed in {label}/")),
+        _ => Ok(()),
     }
 }

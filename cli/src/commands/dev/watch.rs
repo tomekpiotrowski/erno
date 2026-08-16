@@ -5,7 +5,7 @@ use notify::event::{EventKind, ModifyKind};
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 
 use super::process::Supervisor;
-use super::{CYAN, RESET};
+use crate::ui;
 
 const DEBOUNCE: Duration = Duration::from_millis(400);
 const SETTLE: Duration = Duration::from_secs(1);
@@ -30,15 +30,21 @@ pub fn spawn_api_watcher(
         ) {
             Ok(w) => w,
             Err(e) => {
-                eprintln!(
-                    "{CYAN}[api]{RESET} file watcher unavailable ({e}) — API will not auto-reload"
+                ui::prefixed(
+                    ui::Stream::Err,
+                    "api",
+                    &format!("file watcher unavailable ({e}) — API will not auto-reload"),
                 );
                 return;
             }
         };
 
         if let Err(e) = watch_sources(&mut watcher, &api_dir) {
-            eprintln!("{CYAN}[api]{RESET} cannot watch {}: {e}", api_dir.display());
+            ui::prefixed(
+                ui::Stream::Err,
+                "api",
+                &format!("cannot watch {}: {e}", api_dir.display()),
+            );
             return;
         }
 
@@ -71,7 +77,7 @@ pub fn spawn_api_watcher(
                         continue;
                     }
                     drain_until(&mut async_rx, Instant::now() + DEBOUNCE).await;
-                    eprintln!("{CYAN}[api]{RESET} source changed — rebuilding");
+                    ui::prefixed(ui::Stream::Err, "api", "source changed — rebuilding");
                     api.restart().await;
                     // rustc will reopen every source file; ignore that burst.
                     drain_until(&mut async_rx, Instant::now() + SETTLE).await;

@@ -32,6 +32,35 @@ All three of `build`, `lint`, and `test` read one manifest — [`erno.toml`](#th
 
 ---
 
+## Output conventions
+
+Every command shares one output style.
+
+```text
+==> Section header
+  ok    a passing row
+  warn  something to look at
+  fail  something broken
+        an explanation or fix
+error: the command failed
+```
+
+Status markers are plain words — `ok`, `warn`, `fail`, `error:` — coloured green, yellow, and red. They are never emoji, so columns line up on every terminal and nothing is lost when colour is off.
+
+**stdout carries the output of the tools the CLI runs; stderr carries everything the CLI says about itself.** Headers, rows, banners, prompts, warnings, and errors all go to stderr. So `erno doctor > report.txt` writes an empty file (the report is on stderr), while `erno build 2>/dev/null` shows only what cargo and npm printed to stdout.
+
+### Global flags
+
+These work on either side of the subcommand — `erno -q build` and `erno build -q` are the same.
+
+| Flag | Effect |
+|------|--------|
+| `--no-color` | Disable ANSI colour. `NO_COLOR` and `CLICOLOR_FORCE` are also honoured. |
+| `--quiet`, `-q` | Print only warnings, errors, and results. Never hides a failure. |
+| `--verbose`, `-v` | Print more detail. In `dev`, stream every child log line; in `deploy init`, list every generated file. |
+
+Colour is enabled when stderr is a terminal that understands ANSI, and disabled when it is piped or redirected — no flag needed for CI.
+
 ## dev
 
 ```sh
@@ -46,9 +75,9 @@ erno dev --ios
 erno dev --android
 ```
 
-Starts the project’s dev servers (`api/` + `app/`, plus `www/` when present). Walks up from the current directory looking for `api/Cargo.toml`, so you can run it from `api/`, `app/`, or any subdirectory. Child tools are told to keep color and cargo’s progress bar even though their stdout is piped.
+Starts the project’s dev servers (`api/` + `app/`, plus `www/` when present). Walks up from the current directory looking for `api/Cargo.toml`, so you can run it from `api/`, `app/`, or any subdirectory. Child tools are told to keep colour even though their stdout is piped — and told to drop it when you pass `--no-color`.
 
-By default only errors and ready events are printed; the full multiplex is written to `.erno/dev.log`. Pass `--verbose` (or `-v`) to stream every child line, prefixed by service (`[api]`, `[app]`, `[www]`).
+By default only errors and ready events are printed; the full multiplex is written to `.erno/dev.log`. Pass the global `--verbose` (or `-v`) to stream every child line, prefixed by service (`[api]`, `[app]`, `[www]`). The `.erno/dev.log` copy is always uncoloured, so it greps cleanly.
 
 `--api`, `--app`, and `--www` start only the services you name (combine them). `--no-www` skips the marketing site when you want the default API + app pair. `--api` does not require an `app/` directory.
 
@@ -209,7 +238,20 @@ With no flags, every package with `default = true` runs, and within them every s
 
 `--all` is the only thing that pulls in `default = false` *steps*. Naming a package selects the package, not its slow extras — `erno test --package puzzles` runs the test suite without also starting the multi-minute release guard declared alongside it. A `default = false` *package*, on the other hand, is selected by naming it or by `--all`.
 
-Each command prints a per-package `ok` / `fail` summary and exits non-zero if any package failed.
+Each command prints a per-package `ok` / `fail` summary and exits non-zero if any package failed:
+
+```text
+==> api
+[api]    Compiling erno v0.1.0
+
+==> app
+[app] > app@0.0.1 build
+
+  api  ok
+  app  ok
+```
+
+The summary is a result, not narration, so `--quiet` keeps it.
 
 ## setup
 
@@ -251,7 +293,23 @@ Checks everything needed to build and run Erno projects:
 | Admin user can `CREATE DATABASE` | Yes |
 | `sea-orm-cli` | Recommended |
 
-Exit code is `0` if all required checks pass, `1` otherwise.
+Exit code is `0` if all required checks pass, `1` otherwise. A warning never fails the run.
+
+```text
+==> Environment
+
+  ok    Rust                 1.90.0
+  ok    Node.js              v22.11.0
+  fail  PostgreSQL server    not running
+        Start it — e.g.: sudo service postgresql start
+  warn  sea-orm-cli          not found
+        Install with: cargo install sea-orm-cli
+
+error: 1 required check failed
+  Fix the issues above and run `erno doctor` again.
+```
+
+`erno doctor --quiet` prints only the rows that need attention, so a healthy environment produces no output at all.
 
 ---
 
