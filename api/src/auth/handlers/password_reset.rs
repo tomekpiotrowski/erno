@@ -170,7 +170,7 @@ mod tests {
             models::{user, user_token, user_token_type::UserTokenType},
         },
         password::hash_password,
-        tests::setup_test::setup_test,
+        tests::setup_test::{setup_test, test_boot},
         token::hash_token,
     };
 
@@ -187,7 +187,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_password_reset_request_always_returns_200() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
         let response = t
             .server
             .post("/api/auth/password-reset/request")
@@ -198,7 +198,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_password_reset_request_enqueues_job_for_existing_user() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
 
         user::ActiveModel {
             email: Set("reset_request@example.com".to_string()),
@@ -224,7 +224,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_password_reset_confirm_with_valid_token_logs_in() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
 
         let u = user::ActiveModel {
             email: Set("reset_confirm@example.com".to_string()),
@@ -260,7 +260,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_password_reset_confirm_with_expired_token_returns_422() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
         let response = t
             .server
             .post("/api/auth/password-reset/confirm")

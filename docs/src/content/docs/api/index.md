@@ -16,6 +16,7 @@ Erno is a Rust library that provides shared infrastructure for building REST API
 | [Manual API setup](./getting-started) | Install the library without the full-stack CLI |
 | [Boot & Configuration](./boot) | Application bootstrap, routing, and environment config |
 | [Database](./database) | SeaORM integration with migrations |
+| [Testing](./testing) | Request specs, factories, and `erno test` |
 
 ### Security
 

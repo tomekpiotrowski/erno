@@ -39,6 +39,8 @@ enum Commands {
     Setup,
     /// Start the api and app dev servers
     Dev(commands::dev::DevArgs),
+    /// Run the project's test suites
+    Test(commands::test::TestArgs),
     /// Set up and manage production deployment
     Deploy(DeployArgs),
 }
@@ -89,6 +91,7 @@ async fn main() {
         }
         Commands::Setup => commands::setup::handle_setup().await,
         Commands::Dev(args) => commands::dev::handle_dev(None, args).await,
+        Commands::Test(args) => commands::test::handle_test(args).await,
         Commands::Deploy(args) => match args.command {
             DeployCommands::Init => commands::deploy::handle_deploy_init().await,
             DeployCommands::Install { version, env } => {

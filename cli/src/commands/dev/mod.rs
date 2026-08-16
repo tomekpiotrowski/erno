@@ -21,7 +21,7 @@ use tokio::process::Command;
 use banner::{print_banner, spawn_readiness_watcher, starting_snapshot};
 use log::LogSink;
 use process::{spawn_labeled, Supervisor};
-use project::resolve_project_root;
+pub use project::resolve_project_root;
 
 #[derive(Args, Default, Clone, Debug)]
 pub struct DevArgs {

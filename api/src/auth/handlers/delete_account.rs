@@ -108,7 +108,7 @@ mod tests {
         database::{migrations::Migrator, models::user},
         password::hash_password,
         storage::delete_user_files_job,
-        tests::setup_test::setup_test,
+        tests::setup_test::{setup_test, test_boot},
     };
 
     fn test_router(_app: App) -> Router {
@@ -141,7 +141,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_account_requires_auth() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
         let response = t
             .server
             .delete("/api/account")
@@ -152,7 +152,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_account_missing_password_header_returns_400() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
         let u = create_user(&t.db, "del_noheader@example.com", "correct-password").await;
         let token = generate_token(&t.config, u.id, u.token_version).unwrap();
 
@@ -173,7 +173,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_account_wrong_password_returns_403() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
         let u = create_user(&t.db, "del_wrong@example.com", "correct-password").await;
         let token = generate_token(&t.config, u.id, u.token_version).unwrap();
 
@@ -195,7 +195,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_account_deletes_user_and_enqueues_file_cleanup() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
         let u = create_user(&t.db, "del_ok@example.com", "my-password").await;
         let token = generate_token(&t.config, u.id, u.token_version).unwrap();
 

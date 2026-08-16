@@ -77,17 +77,19 @@ cargo run -- routes
 
 ## Test utilities
 
-The `test-utils` feature exposes helpers for integration tests that spin up an isolated database transaction per test:
+Request-spec helpers (`setup_test`, factories, `TestUtils`) live behind the `test-utils` feature. They boot from your [`BootConfig`](/api/boot/) and wrap each example in a rolled-back transaction. See **[Testing](/api/testing/)** for the full guide.
 
 ```toml
 [dev-dependencies]
-erno = { git = "...", features = ["test-utils"] }
+erno = { git = "https://github.com/tomekpiotrowski/erno", features = ["test-utils"] }
 ```
 
 ```rust
+use erno::tests::{no_fixtures, setup_test};
+
 #[tokio::test]
-async fn test_create_user() {
-    let (app, _guard) = erno::tests::setup_test().await;
-    // Each test runs inside a transaction that is rolled back on drop
+async fn health_is_public() {
+    let t = setup_test::<Migrator, _>(boot_config(), no_fixtures).await;
+    assert_eq!(t.server.get("/api/health").await.status_code(), 200);
 }
 ```

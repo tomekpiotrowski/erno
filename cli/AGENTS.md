@@ -21,6 +21,7 @@ cargo install --path .                   # install globally as `erno`
 | `erno dev` | Also starts Prometheus (if installed) and `admin/` on :4300 |
 | `erno deploy init` | Scaffolds Docker/Helm deploy files; generates admin password hash for production |
 | `erno deploy install` | Installs a chart version to the cluster (`helm secrets upgrade --install`) |
+| `erno test` | Runs API `cargo test`, app Karma, extra `.erno/test.toml` suites, then Playwright e2e |
 
 Narrative docs for the CLI live in `docs/src/content/docs/cli/` (`index.md`, `deploy.md`).
 

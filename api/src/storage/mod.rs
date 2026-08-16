@@ -266,7 +266,11 @@ mod tests {
     use uuid::Uuid;
 
     use super::{file, file_attachment, FileStorage};
-    use crate::{app::App, database::migrations::Migrator, tests::setup_test::setup_test};
+    use crate::{
+        app::App,
+        database::migrations::Migrator,
+        tests::setup_test::{setup_test, test_boot},
+    };
 
     fn no_router(app: App) -> Router {
         Router::new()
@@ -282,7 +286,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_store_creates_file_record() {
-        let t = setup_test::<Migrator>(no_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(no_router), no_fixtures).await;
         let storage = FileStorage::mock();
 
         let file = storage
@@ -306,7 +310,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_attach_creates_attachment_record() {
-        let t = setup_test::<Migrator>(no_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(no_router), no_fixtures).await;
         let storage = FileStorage::mock();
 
         let file = storage
@@ -333,7 +337,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_detach_removes_attachment_and_orphaned_file() {
-        let t = setup_test::<Migrator>(no_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(no_router), no_fixtures).await;
         let storage = FileStorage::mock();
 
         let file = storage
@@ -366,7 +370,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_detach_keeps_file_when_other_attachments_exist() {
-        let t = setup_test::<Migrator>(no_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(no_router), no_fixtures).await;
         let storage = FileStorage::mock();
 
         let file = storage
@@ -407,7 +411,7 @@ mod tests {
     async fn test_detach_all_for_record_removes_every_attachment() {
         use sea_orm::{ColumnTrait, PaginatorTrait, QueryFilter};
 
-        let t = setup_test::<Migrator>(no_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(no_router), no_fixtures).await;
         let storage = FileStorage::mock();
         let user_id = Uuid::new_v4();
 

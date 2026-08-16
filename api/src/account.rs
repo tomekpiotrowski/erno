@@ -139,7 +139,7 @@ mod tests {
         database::migrations::Migrator,
         job_queue::JobQueue,
         password::hash_password,
-        tests::setup_test::setup_test,
+        tests::setup_test::{setup_test, test_boot},
     };
 
     fn no_router(_app: crate::app::App) -> axum::Router {
@@ -249,7 +249,7 @@ mod tests {
 
     #[tokio::test]
     async fn purge_invokes_deleter_and_deletes_user() {
-        let t = setup_test::<Migrator>(no_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(no_router), no_fixtures).await;
         let u = create_user(&t.db, "purge_ok@example.com").await;
 
         let calls = Arc::new(AtomicUsize::new(0));
@@ -279,7 +279,7 @@ mod tests {
 
     #[tokio::test]
     async fn purge_aborts_when_deleter_errs() {
-        let t = setup_test::<Migrator>(no_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(no_router), no_fixtures).await;
         let u = create_user(&t.db, "purge_abort@example.com").await;
 
         let deleter: Arc<dyn UserDataDeleter> = Arc::new(FailingDeleter);
@@ -305,7 +305,7 @@ mod tests {
 
     #[tokio::test]
     async fn purge_enqueues_stripe_cancel_when_subscription_exists() {
-        let t = setup_test::<Migrator>(no_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(no_router), no_fixtures).await;
         let u = create_user(&t.db, "purge_stripe@example.com").await;
 
         insert_subscription(
@@ -341,7 +341,7 @@ mod tests {
 
     #[tokio::test]
     async fn purge_cancels_every_active_subscription_not_just_the_newest() {
-        let t = setup_test::<Migrator>(no_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(no_router), no_fixtures).await;
         let u = create_user(&t.db, "purge_multi@example.com").await;
 
         // Two live subscriptions (one per checkout) plus an already-canceled
@@ -389,7 +389,7 @@ mod tests {
 
     #[tokio::test]
     async fn purge_rolls_back_partial_deleter_writes_on_error() {
-        let t = setup_test::<Migrator>(no_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(no_router), no_fixtures).await;
         let u = create_user(&t.db, "purge_rollback@example.com").await;
 
         let deleter: Arc<dyn UserDataDeleter> = Arc::new(WriteThenFailDeleter);

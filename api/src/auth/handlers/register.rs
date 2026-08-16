@@ -131,7 +131,11 @@ mod tests {
     use axum::Router;
     use serde_json::json;
 
-    use crate::{app::App, database::migrations::Migrator, tests::setup_test::setup_test};
+    use crate::{
+        app::App,
+        database::migrations::Migrator,
+        tests::setup_test::{setup_test, test_boot},
+    };
 
     fn test_router(_app: App) -> Router {
         Router::new()
@@ -146,7 +150,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_creates_user_and_enqueues_email() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
 
         let response = t
             .server
@@ -168,7 +172,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_duplicate_unverified_email_resends_verification() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
 
         t.server
             .post("/api/auth/register")
@@ -199,7 +203,7 @@ mod tests {
 
         use crate::{database::models::user, password::hash_password};
 
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
 
         user::ActiveModel {
             email: Set("verified@example.com".to_string()),

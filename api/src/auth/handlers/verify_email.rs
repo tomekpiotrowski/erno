@@ -109,7 +109,7 @@ mod tests {
             models::{user, user_token, user_token_type::UserTokenType},
         },
         password::hash_password,
-        tests::setup_test::setup_test,
+        tests::setup_test::{setup_test, test_boot},
         token::hash_token,
     };
 
@@ -126,7 +126,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_verify_email_with_valid_token_returns_jwt() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
 
         let u = user::ActiveModel {
             email: Set("verify_valid@example.com".to_string()),
@@ -170,7 +170,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_verify_email_with_invalid_token_returns_422() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
         let response = t
             .server
             .post("/api/auth/email/verify")

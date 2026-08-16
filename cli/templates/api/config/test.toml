@@ -5,7 +5,8 @@ log_level = "warn"
 
 [database]
 url = "postgres://{{db_name}}:{{db_password}}@localhost/{{db_name}}_test"
-pool_size = 2
+# Live `APP_ENVIRONMENT=test` boots workers + scheduler; 2 is too small.
+pool_size = 10
 
 [server]
 port = 3001

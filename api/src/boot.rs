@@ -68,6 +68,13 @@ impl<ExtraConfig> BootConfig<ExtraConfig> {
         }
     }
 
+    /// Replace the sync registry (tests that build a registry by hand).
+    #[must_use]
+    pub fn with_sync_registry(mut self, sync_registry: SyncRegistry) -> Self {
+        self.sync_registry = sync_registry;
+        self
+    }
+
     /// Register a syncable entity in the sync registry.
     #[must_use]
     pub fn with_sync<E>(mut self) -> Self
@@ -195,7 +202,11 @@ where
 
     ConfigRs::builder()
         .add_source(config_rs::File::with_name(&config_file_name))
-        .add_source(config_rs::Environment::with_prefix("APP"))
+        .add_source(
+            config_rs::Environment::with_prefix("APP")
+                .separator("__")
+                .try_parsing(true),
+        )
         .build()
         .unwrap()
         .try_deserialize()

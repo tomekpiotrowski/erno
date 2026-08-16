@@ -11,26 +11,41 @@ use crate::global_config::GlobalConfig;
 
 const GITIGNORE: &str = include_str!("../../templates/.gitignore");
 const API_CARGO_TOML: &str = include_str!("../../templates/api/Cargo.toml");
+const API_LIB_RS: &str = include_str!("../../templates/api/src/lib.rs");
 const API_MAIN_RS: &str = include_str!("../../templates/api/src/main.rs");
 const API_MIGRATIONS_MOD_RS: &str = include_str!("../../templates/api/src/migrations/mod.rs");
+const API_TESTS_COMMON: &str = include_str!("../../templates/api/tests/common/mod.rs");
+const API_TESTS_HEALTH: &str = include_str!("../../templates/api/tests/health.rs");
 const API_DEVELOPMENT_TOML: &str = include_str!("../../templates/api/config/development.toml");
 const API_PRODUCTION_TOML: &str = include_str!("../../templates/api/config/production.toml");
 const API_TEST_TOML: &str = include_str!("../../templates/api/config/test.toml");
 const APP_MODULE_TS: &str = include_str!("../../templates/app/app.module.ts");
-const APP_ENVIRONMENT_TS: &str = include_str!("../../templates/app/src/environments/environment.ts");
+const APP_ENVIRONMENT_TS: &str =
+    include_str!("../../templates/app/src/environments/environment.ts");
 const APP_COMPONENT_HTML: &str = include_str!("../../templates/app/app.component.html");
-const APP_ROUTING_MODULE_TS: &str = include_str!("../../templates/app/src/app/app-routing.module.ts");
+const APP_ROUTING_MODULE_TS: &str =
+    include_str!("../../templates/app/src/app/app-routing.module.ts");
 const AUTH_GUARD_TS: &str = include_str!("../../templates/app/src/app/auth/auth.guard.ts");
-const LOGIN_COMPONENT_TS: &str = include_str!("../../templates/app/src/app/auth/login/login.component.ts");
-const LOGIN_COMPONENT_HTML: &str = include_str!("../../templates/app/src/app/auth/login/login.component.html");
-const REGISTER_COMPONENT_TS: &str = include_str!("../../templates/app/src/app/auth/register/register.component.ts");
-const REGISTER_COMPONENT_HTML: &str = include_str!("../../templates/app/src/app/auth/register/register.component.html");
-const FORGOT_PASSWORD_COMPONENT_TS: &str = include_str!("../../templates/app/src/app/auth/forgot-password/forgot-password.component.ts");
-const FORGOT_PASSWORD_COMPONENT_HTML: &str = include_str!("../../templates/app/src/app/auth/forgot-password/forgot-password.component.html");
-const RESET_PASSWORD_COMPONENT_TS: &str = include_str!("../../templates/app/src/app/auth/reset-password/reset-password.component.ts");
-const RESET_PASSWORD_COMPONENT_HTML: &str = include_str!("../../templates/app/src/app/auth/reset-password/reset-password.component.html");
-const VERIFY_EMAIL_COMPONENT_TS: &str = include_str!("../../templates/app/src/app/auth/verify-email/verify-email.component.ts");
-const VERIFY_EMAIL_COMPONENT_HTML: &str = include_str!("../../templates/app/src/app/auth/verify-email/verify-email.component.html");
+const LOGIN_COMPONENT_TS: &str =
+    include_str!("../../templates/app/src/app/auth/login/login.component.ts");
+const LOGIN_COMPONENT_HTML: &str =
+    include_str!("../../templates/app/src/app/auth/login/login.component.html");
+const REGISTER_COMPONENT_TS: &str =
+    include_str!("../../templates/app/src/app/auth/register/register.component.ts");
+const REGISTER_COMPONENT_HTML: &str =
+    include_str!("../../templates/app/src/app/auth/register/register.component.html");
+const FORGOT_PASSWORD_COMPONENT_TS: &str =
+    include_str!("../../templates/app/src/app/auth/forgot-password/forgot-password.component.ts");
+const FORGOT_PASSWORD_COMPONENT_HTML: &str =
+    include_str!("../../templates/app/src/app/auth/forgot-password/forgot-password.component.html");
+const RESET_PASSWORD_COMPONENT_TS: &str =
+    include_str!("../../templates/app/src/app/auth/reset-password/reset-password.component.ts");
+const RESET_PASSWORD_COMPONENT_HTML: &str =
+    include_str!("../../templates/app/src/app/auth/reset-password/reset-password.component.html");
+const VERIFY_EMAIL_COMPONENT_TS: &str =
+    include_str!("../../templates/app/src/app/auth/verify-email/verify-email.component.ts");
+const VERIFY_EMAIL_COMPONENT_HTML: &str =
+    include_str!("../../templates/app/src/app/auth/verify-email/verify-email.component.html");
 const HOME_PAGE_TS: &str = include_str!("../../templates/app/src/app/home/home.page.ts");
 const HOME_PAGE_HTML: &str = include_str!("../../templates/app/src/app/home/home.page.html");
 const APP_CAPACITOR_CONFIG_TS: &str = include_str!("../../templates/app/capacitor.config.ts");
@@ -42,6 +57,9 @@ const WWW_LAYOUT: &str = include_str!("../../templates/www/src/layouts/Layout.as
 const WWW_INDEX: &str = include_str!("../../templates/www/src/pages/index.astro");
 const WWW_GLOBAL_CSS: &str = include_str!("../../templates/www/src/styles/global.css");
 const WWW_FAVICON: &str = include_str!("../../templates/www/public/favicon.svg");
+const E2E_PLAYWRIGHT: &str = include_str!("../../templates/e2e/playwright.config.ts");
+const E2E_HEALTH: &str = include_str!("../../templates/e2e/health.spec.ts");
+const E2E_PACKAGE_JSON: &str = include_str!("../../templates/e2e/package.json");
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -93,6 +111,7 @@ pub async fn handle_new(
     install_app_deps(&dest, erno_angular_dep.starts_with("file:"));
     create_www(&dest, name);
     install_www_deps(&dest);
+    create_e2e(&dest);
     copy_admin(&dest, erno_path);
 
     let config = GlobalConfig::load().ok();
@@ -104,7 +123,11 @@ pub async fn handle_new(
         );
     }
 
-    let start = match decide_start_dev(start_dev, no_dev, std::io::IsTerminal::is_terminal(&std::io::stdin())) {
+    let start = match decide_start_dev(
+        start_dev,
+        no_dev,
+        std::io::IsTerminal::is_terminal(&std::io::stdin()),
+    ) {
         Ok(start) => start,
         Err(msg) => {
             eprintln!("{msg}");
@@ -114,7 +137,8 @@ pub async fn handle_new(
 
     print_next_steps(name, start);
     if start {
-        crate::commands::dev::handle_dev(Some(dest), crate::commands::dev::DevArgs::default()).await;
+        crate::commands::dev::handle_dev(Some(dest), crate::commands::dev::DevArgs::default())
+            .await;
     }
 }
 
@@ -170,10 +194,7 @@ fn resolve_erno_deps(erno_path: Option<&str>) -> (String, String) {
                 format!("file:{}", angular_dist.display()),
             )
         }
-        None => (
-            format!(r#"{{ git = "{ERNO_GIT}" }}"#),
-            "^0.0.1".to_string(),
-        ),
+        None => (format!(r#"{{ git = "{ERNO_GIT}" }}"#), "^0.0.1".to_string()),
     }
 }
 
@@ -262,6 +283,15 @@ fn write(path: &Path, content: &str) {
     });
 }
 
+fn with_test_utils_feature(dep: &str) -> String {
+    let trimmed = dep.trim();
+    if let Some(inner) = trimmed.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
+        format!("{{ {}, features = [\"test-utils\"] }}", inner.trim())
+    } else {
+        format!("{trimmed}, features = [\"test-utils\"]")
+    }
+}
+
 fn render(template: &str, vars: &[(&str, &str)]) -> String {
     vars.iter().fold(template.to_string(), |s, (k, v)| {
         s.replace(&format!("{{{{{k}}}}}"), v)
@@ -279,15 +309,33 @@ fn create_api(
     erno_dep: &str,
 ) {
     let api = dest.join("api");
+    let crate_name = name.replace('-', "_");
+    let erno_dep_test = with_test_utils_feature(erno_dep);
 
     write(
         &api.join("Cargo.toml"),
-        &render(API_CARGO_TOML, &[("name", name), ("erno_dep", erno_dep)]),
+        &render(
+            API_CARGO_TOML,
+            &[
+                ("name", name),
+                ("erno_dep", erno_dep),
+                ("erno_dep_test", &erno_dep_test),
+            ],
+        ),
+    );
+    write(
+        &api.join("src/lib.rs"),
+        &render(API_LIB_RS, &[("name", name)]),
     );
     write(
         &api.join("src/main.rs"),
-        &render(API_MAIN_RS, &[("name", name)]),
+        &render(API_MAIN_RS, &[("crate_name", &crate_name)]),
     );
+    write(
+        &api.join("tests/common/mod.rs"),
+        &render(API_TESTS_COMMON, &[("crate_name", &crate_name)]),
+    );
+    write(&api.join("tests/health.rs"), API_TESTS_HEALTH);
     write(&api.join("src/migrations/mod.rs"), API_MIGRATIONS_MOD_RS);
     write(
         &api.join("config/development.toml"),
@@ -337,6 +385,14 @@ fn install_app_deps(dest: &Path, use_install_links: bool) {
 }
 
 // ── Marketing site (Astro static) ─────────────────────────────────────────────
+
+fn create_e2e(dest: &Path) {
+    let e2e = dest.join("e2e");
+    println!("  Scaffolding Playwright e2e tests (e2e/)...");
+    write(&e2e.join("package.json"), E2E_PACKAGE_JSON);
+    write(&e2e.join("playwright.config.ts"), E2E_PLAYWRIGHT);
+    write(&e2e.join("health.spec.ts"), E2E_HEALTH);
+}
 
 fn create_www(dest: &Path, name: &str) {
     let www = dest.join("www");
@@ -481,6 +537,8 @@ fn patch_app(
 
     pkg["name"] = serde_json::Value::String(format!("{name}-app"));
     pkg["dependencies"]["erno-angular"] = serde_json::Value::String(erno_angular_dep.to_string());
+    pkg["scripts"]["test:ci"] =
+        serde_json::Value::String("ng test --watch=false --browsers=ChromeHeadless".to_string());
 
     // Capacitor — added here rather than via `ionic start --capacitor` to avoid
     // that step running bun install, which conflicts with our npm-only workflow.
@@ -571,26 +629,65 @@ fn patch_app(
     let _ = fs::remove_file(app.join("src/app/home/home-routing.module.ts"));
 
     // Replace ionic-generated files with erno versions
-    write(&app.join("src/environments/environment.ts"), APP_ENVIRONMENT_TS);
+    write(
+        &app.join("src/environments/environment.ts"),
+        APP_ENVIRONMENT_TS,
+    );
     write(&app.join("src/app/app.module.ts"), APP_MODULE_TS);
     write(&app.join("src/app/app.component.html"), APP_COMPONENT_HTML);
-    write(&app.join("src/app/app-routing.module.ts"), APP_ROUTING_MODULE_TS);
+    write(
+        &app.join("src/app/app-routing.module.ts"),
+        APP_ROUTING_MODULE_TS,
+    );
     write(&app.join("src/app/auth/auth.guard.ts"), AUTH_GUARD_TS);
-    write(&app.join("src/app/auth/login/login.component.ts"), LOGIN_COMPONENT_TS);
-    write(&app.join("src/app/auth/login/login.component.html"), LOGIN_COMPONENT_HTML);
-    write(&app.join("src/app/auth/register/register.component.ts"), REGISTER_COMPONENT_TS);
-    write(&app.join("src/app/auth/register/register.component.html"), REGISTER_COMPONENT_HTML);
-    write(&app.join("src/app/auth/forgot-password/forgot-password.component.ts"), FORGOT_PASSWORD_COMPONENT_TS);
-    write(&app.join("src/app/auth/forgot-password/forgot-password.component.html"), FORGOT_PASSWORD_COMPONENT_HTML);
-    write(&app.join("src/app/auth/reset-password/reset-password.component.ts"), RESET_PASSWORD_COMPONENT_TS);
-    write(&app.join("src/app/auth/reset-password/reset-password.component.html"), RESET_PASSWORD_COMPONENT_HTML);
-    write(&app.join("src/app/auth/verify-email/verify-email.component.ts"), VERIFY_EMAIL_COMPONENT_TS);
-    write(&app.join("src/app/auth/verify-email/verify-email.component.html"), VERIFY_EMAIL_COMPONENT_HTML);
+    write(
+        &app.join("src/app/auth/login/login.component.ts"),
+        LOGIN_COMPONENT_TS,
+    );
+    write(
+        &app.join("src/app/auth/login/login.component.html"),
+        LOGIN_COMPONENT_HTML,
+    );
+    write(
+        &app.join("src/app/auth/register/register.component.ts"),
+        REGISTER_COMPONENT_TS,
+    );
+    write(
+        &app.join("src/app/auth/register/register.component.html"),
+        REGISTER_COMPONENT_HTML,
+    );
+    write(
+        &app.join("src/app/auth/forgot-password/forgot-password.component.ts"),
+        FORGOT_PASSWORD_COMPONENT_TS,
+    );
+    write(
+        &app.join("src/app/auth/forgot-password/forgot-password.component.html"),
+        FORGOT_PASSWORD_COMPONENT_HTML,
+    );
+    write(
+        &app.join("src/app/auth/reset-password/reset-password.component.ts"),
+        RESET_PASSWORD_COMPONENT_TS,
+    );
+    write(
+        &app.join("src/app/auth/reset-password/reset-password.component.html"),
+        RESET_PASSWORD_COMPONENT_HTML,
+    );
+    write(
+        &app.join("src/app/auth/verify-email/verify-email.component.ts"),
+        VERIFY_EMAIL_COMPONENT_TS,
+    );
+    write(
+        &app.join("src/app/auth/verify-email/verify-email.component.html"),
+        VERIFY_EMAIL_COMPONENT_HTML,
+    );
     write(&app.join("src/app/home/home.page.ts"), HOME_PAGE_TS);
     write(&app.join("src/app/home/home.page.html"), HOME_PAGE_HTML);
     write(
         &app.join("capacitor.config.ts"),
-        &render(APP_CAPACITOR_CONFIG_TS, &[("bundle_id", bundle_id), ("name", name)]),
+        &render(
+            APP_CAPACITOR_CONFIG_TS,
+            &[("bundle_id", bundle_id), ("name", name)],
+        ),
     );
 }
 
@@ -670,10 +767,7 @@ async fn grant_schema_public(admin_url: &str, db: &str, user: &str) {
 }
 
 async fn create_db(client: &tokio_postgres::Client, db: &str) {
-    match client
-        .execute(&format!("CREATE DATABASE {db}"), &[])
-        .await
-    {
+    match client.execute(&format!("CREATE DATABASE {db}"), &[]).await {
         Ok(_) => println!("  ✅  Created database {db}"),
         Err(e) => {
             let msg = e
@@ -709,7 +803,8 @@ fn print_next_steps(name: &str, starting_dev: bool) {
         println!("  app  → http://localhost:4200");
         println!("  api  → http://localhost:3000");
     } else {
-        println!("Next:  cd {name} && erno dev");
+        println!("Next:  cd {name} && erno test");
+        println!("       cd {name} && erno dev");
     }
 }
 

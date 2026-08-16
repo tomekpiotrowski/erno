@@ -21,7 +21,7 @@ use crate::{
     sync::delta::sync_delta_shared,
     sync::registry::SyncRegistry,
     sync::syncable::Syncable,
-    tests::setup_test::{setup_test_with_registry, TestUtils},
+    tests::setup_test::{setup_test, test_boot, TestUtils},
     token::hash_token,
 };
 
@@ -205,7 +205,11 @@ fn no_fixtures(
 }
 
 async fn setup() -> TestUtils {
-    let t = setup_test_with_registry::<Migrator>(test_router, no_fixtures, registry()).await;
+    let t = setup_test::<Migrator, _>(
+        test_boot(test_router).with_sync_registry(registry()),
+        no_fixtures,
+    )
+    .await;
     t.db.execute_unprepared(
         "CREATE TABLE share_test_notes (
             id UUID PRIMARY KEY,

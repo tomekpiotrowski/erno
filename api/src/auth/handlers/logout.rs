@@ -65,7 +65,7 @@ mod tests {
             models::{user, user_token, user_token_type::UserTokenType},
         },
         password::hash_password,
-        tests::setup_test::setup_test,
+        tests::setup_test::{setup_test, test_boot},
         token::hash_token,
     };
 
@@ -82,7 +82,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_logout_invalidates_token() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
 
         let u = user::ActiveModel {
             email: Set("logout@example.com".to_string()),
@@ -113,7 +113,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_logout_deletes_refresh_token() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
 
         let u = user::ActiveModel {
             email: Set("logout_refresh@example.com".to_string()),
@@ -156,14 +156,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_logout_requires_auth() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
         let response = t.server.post("/api/auth/logout").await;
         assert_eq!(response.status_code(), 401);
     }
 
     #[tokio::test]
     async fn test_password_reset_invalidates_previous_token() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
 
         let u = user::ActiveModel {
             email: Set("reset_invalidates@example.com".to_string()),

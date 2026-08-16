@@ -615,8 +615,8 @@ mod tests {
             }
         }
 
-        let t = crate::tests::setup_test::setup_test::<crate::database::migrations::Migrator>(
-            no_router,
+        let t = crate::tests::setup_test::setup_test::<crate::database::migrations::Migrator, _>(
+            crate::tests::setup_test::test_boot(no_router),
             no_fixtures,
         )
         .await;
@@ -676,8 +676,8 @@ mod tests {
             }
         }
 
-        let t = crate::tests::setup_test::setup_test::<crate::database::migrations::Migrator>(
-            no_router,
+        let t = crate::tests::setup_test::setup_test::<crate::database::migrations::Migrator, _>(
+            crate::tests::setup_test::test_boot(no_router),
             no_fixtures,
         )
         .await;

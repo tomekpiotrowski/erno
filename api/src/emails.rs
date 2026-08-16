@@ -225,7 +225,7 @@ mod tests {
         app::App,
         database::migrations::Migrator,
         jobs::send_verification_email_job::{SendVerificationEmailArgs, SendVerificationEmailJob},
-        tests::setup_test::setup_test,
+        tests::setup_test::{setup_test, test_boot},
     };
 
     fn test_router(_app: App) -> Router {
@@ -241,7 +241,7 @@ mod tests {
 
     #[tokio::test]
     async fn send_html_email_inserts_sent_outbox_row() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
         let app = crate::app::App {
             config: t.config.clone(),
             environment: t.environment,
@@ -285,7 +285,7 @@ mod tests {
 
         use crate::{database::models::user, password::hash_password};
 
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
         let u = user::ActiveModel {
             email: Set("verify-outbox@example.com".to_string()),
             password_hash: Set(Some(hash_password("password123").unwrap())),

@@ -212,7 +212,11 @@ mod tests {
     use axum::Router;
 
     use super::*;
-    use crate::{app::App, database::migrations::Migrator, tests::setup_test::setup_test};
+    use crate::{
+        app::App,
+        database::migrations::Migrator,
+        tests::setup_test::{setup_test, test_boot},
+    };
 
     fn test_router(_app: App) -> Router {
         Router::new()
@@ -227,7 +231,7 @@ mod tests {
 
     #[tokio::test]
     async fn table_counts_use_pg_stat_not_full_count() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
         let config = MetricsConfig {
             table_counts: vec!["users".to_string()],
             ..MetricsConfig::default()

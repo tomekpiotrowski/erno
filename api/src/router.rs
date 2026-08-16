@@ -59,8 +59,9 @@ where
         auth_token: app.config.metrics.auth_token.clone(),
     };
     let metrics_path = app.config.metrics.path.clone();
-    let is_dev_mock = app.environment == Environment::Development
-        && matches!(&app.config.email, EmailConfig::Mock);
+    // Mock inbox is for local/test only. Production must never expose it, even
+    // if someone sets `email.type = "mock"` by mistake.
+    let expose_dev_inbox = expose_dev_inbox(&app.config.email, app.environment);
 
     // WebSocket route needs App state resolved before merging into the rate-limited group
     let ws_router = Router::new()
@@ -108,7 +109,7 @@ where
         );
     }
 
-    if is_dev_mock {
+    if expose_dev_inbox {
         base = base.merge(dev::router::dev_router(app_for_dev));
     }
 
@@ -138,6 +139,14 @@ pub fn cors_origin_list(configured: &[String]) -> Vec<HeaderValue> {
         .collect()
 }
 
+fn expose_dev_inbox(email: &EmailConfig, environment: Environment) -> bool {
+    matches!(email, EmailConfig::Mock)
+        && matches!(
+            environment,
+            Environment::Development | Environment::Test
+        )
+}
+
 pub fn parse_extra_cors_origins(raw: &str) -> Vec<String> {
     raw.split(',')
         .map(str::trim)
@@ -160,5 +169,73 @@ mod extra_cors_tests {
             ]
         );
         assert!(parse_extra_cors_origins("").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod dev_inbox_tests {
+    use axum::Router;
+    use axum_test::TestServer;
+
+    use super::{expose_dev_inbox, router};
+    use crate::app::App;
+    use crate::config::EmailConfig;
+    use crate::database::migrations::Migrator;
+    use crate::environment::Environment;
+    use crate::metrics::collector::CollectorRegistry;
+    use crate::metrics::setup_metrics;
+    use crate::rate_limiting::RateLimitState;
+    use crate::storage::FileStorage;
+    use crate::sync::queue::SyncQueue;
+    use crate::sync::registry::SyncRegistry;
+    use crate::tests::{no_fixtures, setup_test, test_boot};
+    use crate::websocket::connections::Connections;
+    use std::sync::Arc;
+
+    fn empty_router(_app: App) -> Router {
+        Router::new()
+    }
+
+    #[test]
+    fn mock_inbox_is_dev_and_test_only() {
+        assert!(expose_dev_inbox(&EmailConfig::Mock, Environment::Test));
+        assert!(expose_dev_inbox(
+            &EmailConfig::Mock,
+            Environment::Development
+        ));
+        assert!(!expose_dev_inbox(
+            &EmailConfig::Mock,
+            Environment::Production
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_environment_serves_the_mock_inbox() {
+        let t = setup_test::<Migrator, _>(test_boot(empty_router), no_fixtures).await;
+        assert_eq!(t.server.get("/dev/emails").await.status_code(), 200);
+    }
+
+    #[tokio::test]
+    async fn production_does_not_serve_the_mock_inbox() {
+        let t = setup_test::<Migrator, _>(test_boot(empty_router), no_fixtures).await;
+        let app = App {
+            config: t.config.clone(),
+            environment: Environment::Production,
+            db: t.db.clone(),
+            mailer: t.mailer.clone(),
+            job_queue: t.job_queue.clone(),
+            sync_queue: SyncQueue::mock(),
+            sync_registry: Arc::new(SyncRegistry::new()),
+            rate_limit_state: RateLimitState::new(t.config.rate_limiting.clone()),
+            websocket_connections: Connections::new(),
+            storage: FileStorage::mock(),
+            prometheus_handle: setup_metrics(),
+            metrics_collectors: Arc::new(CollectorRegistry::default()),
+            job_failure_handler: None,
+            user_data_deleter: None,
+        };
+        let server = TestServer::new(router(app, empty_router)).expect("test server");
+        assert_eq!(server.get("/dev/emails").await.status_code(), 404);
+        assert_eq!(server.get("/dev/jobs").await.status_code(), 404);
     }
 }

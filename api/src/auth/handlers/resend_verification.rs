@@ -62,7 +62,7 @@ mod tests {
         app::App,
         database::{migrations::Migrator, models::user},
         password::hash_password,
-        tests::setup_test::setup_test,
+        tests::setup_test::{setup_test, test_boot},
     };
 
     fn test_router(_app: App) -> Router {
@@ -78,7 +78,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resend_always_returns_200() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
         let response = t
             .server
             .post("/api/auth/email/resend-verification")
@@ -89,7 +89,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resend_for_unverified_user_enqueues_job() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
 
         user::ActiveModel {
             email: Set("resend_unverified@example.com".to_string()),

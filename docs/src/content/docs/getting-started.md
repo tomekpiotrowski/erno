@@ -69,7 +69,15 @@ When developing against a local erno checkout:
 erno new my_app --erno-path /path/to/erno
 ```
 
-## 4. Run the API
+## 4. Run the tests
+
+```sh
+erno test
+```
+
+Creates the test database if needed, then runs API request specs, the app Karma suite, and Playwright e2e tests (`e2e/`). See [Testing](/api/testing/).
+
+## 5. Run the API
 
 ```sh
 cd api
@@ -95,7 +103,7 @@ Built-in app commands (`cargo run --` from `api/`):
 | `generate-jwt-secret` | Print a random secret for `[auth].secret` |
 | `version` | Show version and build info |
 
-## 5. Run everything
+## 6. Run everything
 
 From the project root:
 

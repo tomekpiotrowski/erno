@@ -84,7 +84,7 @@ mod tests {
         app::App,
         database::{migrations::Migrator, models::user},
         password::hash_password,
-        tests::setup_test::setup_test,
+        tests::setup_test::{setup_test, test_boot},
     };
 
     fn test_router(_app: App) -> Router {
@@ -100,7 +100,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_login_with_valid_credentials_returns_token() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
         user::ActiveModel {
             email: Set("verified@example.com".to_string()),
             password_hash: Set(Some(hash_password("password123").unwrap())),
@@ -124,7 +124,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_login_with_wrong_password_returns_401() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
         user::ActiveModel {
             email: Set("verified2@example.com".to_string()),
             password_hash: Set(Some(hash_password("password123").unwrap())),
@@ -145,7 +145,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_login_unverified_user_returns_403() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
         t.server
             .post("/api/auth/register")
             .json(&json!({ "email": "unverified@example.com", "password": "password123" }))

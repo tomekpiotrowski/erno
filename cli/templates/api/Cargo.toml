@@ -3,6 +3,9 @@ name = "{{name}}"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+path = "src/lib.rs"
+
 [[bin]]
 name = "{{name}}"
 path = "src/main.rs"
@@ -15,3 +18,7 @@ async-trait = "0.1"
 axum = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[dev-dependencies]
+erno = {{erno_dep_test}}
+

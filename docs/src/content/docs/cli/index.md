@@ -23,6 +23,7 @@ cargo install erno-cli
 | [`erno doctor`](#doctor) | Verify that your environment is ready to develop Erno apps |
 | [`erno new <name>`](#new) | Scaffold a new full-stack Erno project |
 | [`erno dev`](#dev) | Start the API, app, www, Prometheus, and admin SPA |
+| [`erno test`](#test) | Run API, app, extra, and e2e suites |
 | [`erno deploy`](/cli/deploy/) | Scaffold Docker/Helm files and install releases |
 
 ---
@@ -75,6 +76,22 @@ A second `erno dev` in the same project is rejected via `.erno/dev.lock` (stale 
 Before spawning anything, `erno dev` checks that PostgreSQL is running (when the API is selected), that `prometheus` is on `PATH` (unless `--no-prometheus`), and that each selected service’s port is free. If a port is held by a leftover `cargo`/`node`/`erno` process, it offers to kill it.
 
 ---
+
+## test
+
+```sh
+erno test
+erno test --api
+erno test --app
+erno test --e2e
+erno test --no-e2e
+erno test --suite puzzles
+erno test --api -- health
+```
+
+Walks up to the project root (`api/Cargo.toml`). Ensures the test database from `api/config/test.toml` exists. Runs default suites in order: API `cargo test`, app `npm run test:ci` (or headless `ng test`), extras from `.erno/test.toml` with `default = true`, then Playwright if `e2e/playwright.config.ts` exists.
+
+`--api` / `--app` / `--e2e` / `--suite` select subsets. Pass-through after `--` is allowed only when a single suite is selected. See [Testing](/api/testing/).
 
 ## setup
 

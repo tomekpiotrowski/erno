@@ -41,7 +41,9 @@ pub async fn handle_setup() {
         match verify_github_token(&github_token_input).await {
             Ok(login) => {
                 println!("ok ({})", login);
-                Some(GithubConfig { token: github_token_input })
+                Some(GithubConfig {
+                    token: github_token_input,
+                })
             }
             Err(e) => {
                 println!("failed");

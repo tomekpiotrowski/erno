@@ -63,7 +63,7 @@ mod tests {
         app::App,
         database::{migrations::Migrator, models::user},
         password::hash_password,
-        tests::setup_test::setup_test,
+        tests::setup_test::{setup_test, test_boot},
     };
 
     fn test_router(_app: App) -> Router {
@@ -84,7 +84,7 @@ mod tests {
 
     #[tokio::test]
     async fn dashboard_requires_auth() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
         let response = t.server.get("/admin/api/dashboard").await;
         // Without password_hash in test config, admin routes are not mounted → 404
         // With hash, would be 401. Either way unauthenticated access is denied.
@@ -98,7 +98,7 @@ mod tests {
     #[tokio::test]
     async fn dashboard_with_valid_basic_auth() {
         // setup_test loads config/test.toml which we configure with a known hash
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
         if t.config.admin.as_ref().map(|a| a.password_hash.is_empty()) != Some(false) {
             // Admin not enabled in this config — skip functional check
             return;
@@ -120,7 +120,7 @@ mod tests {
 
     #[tokio::test]
     async fn activate_user_via_admin_api() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
         if t.config.admin.as_ref().map(|a| a.password_hash.is_empty()) != Some(false) {
             return;
         }
@@ -153,7 +153,7 @@ mod tests {
     async fn delete_user_keeps_admin_event() {
         use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
         if t.config.admin.as_ref().map(|a| a.password_hash.is_empty()) != Some(false) {
             return;
         }
@@ -196,7 +196,7 @@ mod tests {
 
     #[tokio::test]
     async fn wrong_password_returns_401() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
         if t.config.admin.as_ref().map(|a| a.password_hash.is_empty()) != Some(false) {
             return;
         }
@@ -222,7 +222,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_users_paginates_and_includes_last_active() {
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
         if t.config.admin.as_ref().map(|a| a.password_hash.is_empty()) != Some(false) {
             return;
         }
@@ -263,7 +263,7 @@ mod tests {
     async fn emails_and_events_and_tables_and_job_detail() {
         use crate::database::models::{email_message, job, job_status::JobStatus};
 
-        let t = setup_test::<Migrator>(test_router, no_fixtures).await;
+        let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
         if t.config.admin.as_ref().map(|a| a.password_hash.is_empty()) != Some(false) {
             return;
         }
