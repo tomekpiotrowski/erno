@@ -347,7 +347,6 @@ where
                 subject: info["sub"].as_str().unwrap_or("").to_string(),
                 email: info["email"].as_str().unwrap_or("").to_string(),
                 email_verified: info["email_verified"].as_bool().unwrap_or(true),
-                display_name: info["name"].as_str().map(|s| s.to_string()),
             })
         }
         OauthProvider::Discord => {
@@ -390,10 +389,6 @@ where
                 subject: info["id"].as_str().unwrap_or("").to_string(),
                 email,
                 email_verified: info["verified"].as_bool().unwrap_or(false),
-                display_name: info["global_name"]
-                    .as_str()
-                    .or_else(|| info["username"].as_str())
-                    .map(|s| s.to_string()),
             })
         }
         OauthProvider::Apple => {
@@ -441,7 +436,6 @@ where
                 subject: sub,
                 email,
                 email_verified,
-                display_name: None,
             })
         }
     }

@@ -50,5 +50,4 @@ pub struct OauthProfile {
     pub email: String,
     /// When true (or unknown-but-provider-trusted), we mark email verified.
     pub email_verified: bool,
-    pub display_name: Option<String>,
 }
