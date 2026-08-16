@@ -23,8 +23,12 @@ cargo install erno-cli
 | [`erno doctor`](#doctor) | Verify that your environment is ready to develop Erno apps |
 | [`erno new <name>`](#new) | Scaffold a new full-stack Erno project |
 | [`erno dev`](#dev) | Start the API, app, www, Prometheus, and admin SPA |
-| [`erno test`](#test) | Run API, app, extra, and e2e suites |
+| [`erno build`](#build) | Build every package, in dependency order |
+| [`erno lint`](#lint) | Format-check, lint, and typecheck every package |
+| [`erno test`](#test) | Run each package's tests, then e2e |
 | [`erno deploy`](/cli/deploy/) | Scaffold Docker/Helm files and install releases |
+
+All three of `build`, `lint`, and `test` read one manifest — [`erno.toml`](#the-package-manifest) in the project root.
 
 ---
 
@@ -77,6 +81,101 @@ Before spawning anything, `erno dev` checks that PostgreSQL is running (when the
 
 ---
 
+## The package manifest
+
+`erno.toml` in the project root declares every package once. `erno build`, `erno lint`, and `erno test` are the same runner over three different phases.
+
+```toml
+[[package]]
+name = "puzzles"
+dir  = "puzzles"
+
+  [[package.build]]
+  command = "./build.sh"
+
+  [[package.lint]]
+  command = "cargo"
+  args    = ["fmt", "--check"]
+  fix     = ["fmt"]
+
+  [[package.lint]]
+  command = "cargo"
+  args    = ["clippy", "--all-targets", "--", "-D", "warnings"]
+  fix     = ["clippy", "--all-targets", "--fix", "--allow-dirty"]
+
+  [[package.test]]
+  command = "cargo"
+  args    = ["test"]
+
+  # A slow guard nobody wants on every run.
+  [[package.test]]
+  command = "cargo"
+  args    = ["test", "--release", "--", "--ignored"]
+  default = false
+
+[[package]]
+name = "app"
+dir  = "app"
+
+  [[package.build]]
+  command = "npm"
+  args    = ["run", "build"]
+```
+
+**Declaration order is execution order.** Packages run top to bottom, sequentially, which is how build dependency order is expressed — put the package that generates an artifact above the package that consumes it. There is no dependency graph and no parallelism.
+
+| Package key | Default | Meaning |
+|-------------|---------|---------|
+| `name` | — | Required. The selector for `--package`. |
+| `dir` | — | Required. Working directory for every step, relative to the project root. |
+| `default` | `true` | `false` means opt in with `--package <name>` or `--all`. |
+| `database` | `false` | Ensure the test database exists before this package's test phase. |
+| `kind` | — | Only `"e2e"` is recognised. The CLI orchestrates that package itself and ignores its declared test steps. |
+
+| Step key | Default | Meaning |
+|----------|---------|---------|
+| `command` | — | Required. |
+| `args` | `[]` | Arguments to `command`. |
+| `fix` | `[]` | Lint only: substituted for `args` under `--fix`. A step without `fix` runs its check form unchanged. |
+| `default` | `true` | `false` makes the step itself opt-in, without splitting the package. |
+
+Unknown keys are an error, so a typo like `defualt = false` fails loudly instead of being silently ignored.
+
+If `erno.toml` is missing, the CLI falls back to the layout `erno new` scaffolds — `api/Cargo.toml`, `app/package.json`, and `e2e/playwright.config.ts` — so a new project works without one.
+
+Every command walks up from the current directory to find the project root, so they can be run from any subdirectory. `node_modules` is installed automatically for any package that has a `package.json` but no `node_modules`.
+
+---
+
+## build
+
+```sh
+erno build
+erno build --package puzzles
+erno build --all
+erno build --api
+erno build --fail-fast
+```
+
+Runs each selected package's `build` steps in declaration order. A package with no `build` steps is skipped silently.
+
+---
+
+## lint
+
+```sh
+erno lint
+erno lint --fix
+erno lint --package api
+erno lint --all
+```
+
+Runs each selected package's `lint` steps. `--fix` swaps in each step's `fix` arguments — typically `cargo fmt` in place of `cargo fmt --check`, and `clippy --fix` in place of `clippy -D warnings`. Steps that define no `fix` still run in check mode, so `--fix` never silently skips a check.
+
+Exits non-zero if any step fails.
+
+---
+
 ## test
 
 ```sh
@@ -85,13 +184,32 @@ erno test --api
 erno test --app
 erno test --e2e
 erno test --no-e2e
-erno test --suite puzzles
+erno test --package puzzles
 erno test --api -- health
 ```
 
-Walks up to the project root (`api/Cargo.toml`). Ensures the test database from `api/config/test.toml` exists. Runs default suites in order: API `cargo test`, app `npm run test:ci` (or headless `ng test`), extras from `.erno/test.toml` with `default = true`, then Playwright if `e2e/playwright.config.ts` exists.
+Runs each selected package's `test` steps. Ensures the test database from `api/config/test.toml` exists first when any selected package sets `database = true` or is the e2e package. The e2e package is special-cased: the CLI allocates two free ports, boots the API against the test database, waits for `/liveness`, runs Playwright, and tears the API down. See [Testing](/api/testing/).
 
-`--api` / `--app` / `--e2e` / `--suite` select subsets. Pass-through after `--` is allowed only when a single suite is selected. See [Testing](/api/testing/).
+---
+
+## Selecting packages
+
+These flags are shared by `build`, `lint`, and `test`:
+
+| Flag | Effect |
+|------|--------|
+| `--package <name>` | Select this package. Repeatable. Required for a package marked `default = false`. |
+| `--api`, `--app`, `--e2e` | Shorthand for `--package api` / `app` / `e2e`. |
+| `--all` | Include packages *and* steps marked `default = false`. |
+| `--no-e2e` | Drop the e2e package from the selection. |
+| `--fail-fast` | Stop after the first failing package. |
+| `-- <args>` | Forwarded to the selected package's steps. Requires exactly one package. |
+
+With no flags, every package with `default = true` runs, and within them every step with `default = true`.
+
+`--all` is the only thing that pulls in `default = false` *steps*. Naming a package selects the package, not its slow extras — `erno test --package puzzles` runs the test suite without also starting the multi-minute release guard declared alongside it. A `default = false` *package*, on the other hand, is selected by naming it or by `--all`.
+
+Each command prints a per-package `ok` / `fail` summary and exits non-zero if any package failed.
 
 ## setup
 

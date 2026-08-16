@@ -81,15 +81,16 @@ Also exported: `unverified_user`, `no_fixtures`.
 From the project root (or any subdirectory):
 
 ```sh
-erno test                 # api + app + extras + e2e last
+erno test                    # every default package, e2e last
 erno test --api
-erno test --app           # Karma unit + feature
-erno test --e2e           # Playwright against a live test API
+erno test --app              # Karma unit + feature
+erno test --e2e              # Playwright against a live test API
 erno test --no-e2e
-erno test --api -- health # pass-through; one suite only
+erno test --package puzzles  # one package by name
+erno test --api -- health    # pass-through; one package only
 ```
 
-The test database in `api/config/test.toml` is created if missing. Extra suites live in optional `.erno/test.toml`.
+The test database in `api/config/test.toml` is created if missing. Which packages exist, and what each one runs, comes from [`erno.toml`](/cli/#the-package-manifest) in the project root.
 
 `erno test --e2e` binds the API and `ng serve` to unused ports (not `3000`/`4200`) and passes `API_URL` / `APP_URL` into Playwright and the app bundle. A leftover `erno dev` on the usual ports cannot satisfy `/liveness`.
 

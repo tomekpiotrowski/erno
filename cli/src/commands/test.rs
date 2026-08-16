@@ -1,191 +1,14 @@
 use std::net::TcpListener;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-use clap::Args;
-use serde::Deserialize;
-
 use crate::commands::dev::resolve_project_root;
+use crate::commands::packages::{
+    ensure_npm_modules, load_packages, prefix_pipe, run_phase, run_prefixed, select, Phase,
+    SelectionArgs,
+};
 use crate::global_config::GlobalConfig;
-
-#[derive(Args, Debug, Default)]
-pub struct TestArgs {
-    /// Run only the API `cargo test` suite
-    #[arg(long)]
-    pub api: bool,
-    /// Run only the app Karma suite (unit + feature)
-    #[arg(long)]
-    pub app: bool,
-    /// Run only Playwright end-to-end tests
-    #[arg(long)]
-    pub e2e: bool,
-    /// Skip Playwright even when `e2e/` exists
-    #[arg(long)]
-    pub no_e2e: bool,
-    /// Named extra suite from `.erno/test.toml` (repeatable)
-    #[arg(long)]
-    pub suite: Vec<String>,
-    /// Stop after the first failing suite
-    #[arg(long)]
-    pub fail_fast: bool,
-    /// Arguments forwarded to the single selected suite's runner
-    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-    pub rest: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Suite {
-    pub name: String,
-    pub kind: SuiteKind,
-    pub default: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SuiteKind {
-    Api,
-    App,
-    E2e,
-    Extra {
-        dir: PathBuf,
-        command: String,
-        args: Vec<String>,
-    },
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct ExtraFile {
-    #[serde(default)]
-    suite: Vec<ExtraSuite>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ExtraSuite {
-    name: String,
-    dir: String,
-    command: String,
-    #[serde(default)]
-    args: Vec<String>,
-    #[serde(default = "default_true")]
-    default: bool,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-pub fn discover_suites(root: &Path) -> Result<Vec<Suite>, String> {
-    let mut suites = Vec::new();
-    if root.join("api").join("Cargo.toml").is_file() {
-        suites.push(Suite {
-            name: "api".into(),
-            kind: SuiteKind::Api,
-            default: true,
-        });
-    }
-    if root.join("app").join("package.json").is_file() {
-        suites.push(Suite {
-            name: "app".into(),
-            kind: SuiteKind::App,
-            default: true,
-        });
-    }
-    suites.extend(load_extras(root)?);
-    if playwright_config(root).is_some() {
-        suites.push(Suite {
-            name: "e2e".into(),
-            kind: SuiteKind::E2e,
-            default: true,
-        });
-    }
-    Ok(suites)
-}
-
-fn playwright_config(root: &Path) -> Option<PathBuf> {
-    for rel in ["e2e/playwright.config.ts", "playwright.config.ts"] {
-        let p = root.join(rel);
-        if p.is_file() {
-            return Some(p);
-        }
-    }
-    None
-}
-
-fn load_extras(root: &Path) -> Result<Vec<Suite>, String> {
-    let path = root.join(".erno").join("test.toml");
-    if !path.is_file() {
-        return Ok(Vec::new());
-    }
-    let raw = std::fs::read_to_string(&path)
-        .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
-    let parsed: ExtraFile =
-        toml_from_str(&raw).map_err(|e| format!("failed to parse {}: {e}", path.display()))?;
-    Ok(parsed
-        .suite
-        .into_iter()
-        .map(|s| Suite {
-            name: s.name,
-            kind: SuiteKind::Extra {
-                dir: root.join(s.dir),
-                command: s.command,
-                args: s.args,
-            },
-            default: s.default,
-        })
-        .collect())
-}
-
-/// Minimal TOML table parser for `[[suite]]` files — avoids a CLI toml crate.
-fn toml_from_str(raw: &str) -> Result<ExtraFile, String> {
-    // Use config-rs: write to a temp-less in-memory approach via File source
-    // is path-based. Parse by hand for the small schema.
-    let mut suites = Vec::new();
-    let mut current: Option<ExtraSuite> = None;
-    for line in raw.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if line == "[[suite]]" {
-            if let Some(s) = current.take() {
-                suites.push(s);
-            }
-            current = Some(ExtraSuite {
-                name: String::new(),
-                dir: String::new(),
-                command: String::new(),
-                args: Vec::new(),
-                default: true,
-            });
-            continue;
-        }
-        let Some(entry) = current.as_mut() else {
-            return Err(format!("unexpected line outside [[suite]]: {line}"));
-        };
-        let Some((k, v)) = line.split_once('=') else {
-            return Err(format!("expected key = value, got {line}"));
-        };
-        let k = k.trim();
-        let v = v.trim();
-        match k {
-            "name" => entry.name = unquote(v)?,
-            "dir" => entry.dir = unquote(v)?,
-            "command" => entry.command = unquote(v)?,
-            "default" => entry.default = v.parse::<bool>().map_err(|e| e.to_string())?,
-            "args" => entry.args = parse_string_array(v)?,
-            _ => return Err(format!("unknown suite key {k}")),
-        }
-    }
-    if let Some(s) = current {
-        suites.push(s);
-    }
-    for s in &suites {
-        if s.name.is_empty() || s.dir.is_empty() || s.command.is_empty() {
-            return Err("each [[suite]] needs name, dir, and command".into());
-        }
-    }
-    Ok(ExtraFile { suite: suites })
-}
 
 fn unquote(v: &str) -> Result<String, String> {
     let v = v.trim();
@@ -196,66 +19,16 @@ fn unquote(v: &str) -> Result<String, String> {
     }
 }
 
-fn parse_string_array(v: &str) -> Result<Vec<String>, String> {
-    let v = v.trim();
-    let inner = v
-        .strip_prefix('[')
-        .and_then(|s| s.strip_suffix(']'))
-        .ok_or_else(|| format!("expected array, got {v}"))?;
-    if inner.trim().is_empty() {
-        return Ok(Vec::new());
-    }
-    inner.split(',').map(|part| unquote(part.trim())).collect()
-}
-
-pub fn select_suites<'a>(all: &'a [Suite], args: &TestArgs) -> Result<Vec<&'a Suite>, String> {
-    let names: Vec<&str> = all.iter().map(|s| s.name.as_str()).collect();
-    for asked in &args.suite {
-        if !all.iter().any(|s| s.name == *asked) {
-            return Err(format!(
-                "unknown suite '{asked}'. Known: {}",
-                names.join(", ")
-            ));
-        }
-    }
-    let filtered: Vec<&Suite> = if args.api || args.app || args.e2e || !args.suite.is_empty() {
-        all.iter()
-            .filter(|s| match s.kind {
-                SuiteKind::Api => args.api || args.suite.iter().any(|n| n == "api"),
-                SuiteKind::App => args.app || args.suite.iter().any(|n| n == "app"),
-                SuiteKind::E2e => {
-                    (args.e2e || args.suite.iter().any(|n| n == "e2e")) && !args.no_e2e
-                }
-                SuiteKind::Extra { .. } => args.suite.iter().any(|n| n == &s.name),
-            })
-            .collect()
-    } else {
-        all.iter()
-            .filter(|s| s.default && !(args.no_e2e && matches!(s.kind, SuiteKind::E2e)))
-            .collect()
-    };
-    if filtered.is_empty() {
-        return Err("no suites selected".into());
-    }
-    if !args.rest.is_empty() && filtered.len() != 1 {
-        return Err(
-            "pass-through arguments require exactly one suite (use --api, --app, --e2e, or --suite)"
-                .into(),
-        );
-    }
-    Ok(filtered)
-}
-
-pub async fn handle_test(args: TestArgs) {
+pub async fn handle_test(args: SelectionArgs) {
     let root = resolve_project_root(None);
-    let all = match discover_suites(&root) {
-        Ok(s) => s,
+    let all = match load_packages(&root) {
+        Ok(p) => p,
         Err(e) => {
             eprintln!("❌  {e}");
             std::process::exit(1);
         }
     };
-    let selected = match select_suites(&all, &args) {
+    let selected = match select(&all, &args) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("❌  {e}");
@@ -263,127 +36,32 @@ pub async fn handle_test(args: TestArgs) {
         }
     };
 
-    let needs_db = selected
-        .iter()
-        .any(|s| matches!(s.kind, SuiteKind::Api | SuiteKind::E2e));
-    if needs_db {
+    if selected.iter().any(|p| p.database || p.is_e2e()) {
         if let Err(e) = ensure_test_database(&root).await {
             eprintln!("❌  {e}");
             std::process::exit(1);
         }
     }
 
-    let mut results: Vec<(String, bool)> = Vec::new();
-    for suite in &selected {
-        println!("\n── {} ──", suite.name);
-        let ok = run_suite(&root, suite, &args.rest);
-        results.push((suite.name.clone(), ok));
-        if !ok && args.fail_fast {
-            break;
-        }
-    }
-
-    println!();
-    let mut failed = false;
-    for (name, ok) in &results {
-        if *ok {
-            println!("  {name:<12} ok");
-        } else {
-            println!("  {name:<12} fail");
-            failed = true;
-        }
-    }
-    if failed {
+    // The e2e package is not a plain command: it allocates ports, boots the API,
+    // and tears it down again. Everything else runs its declared steps.
+    let ok = run_phase(
+        &root,
+        &selected,
+        Phase::Test,
+        false,
+        &args,
+        &mut |package| {
+            if !package.is_e2e() {
+                return None;
+            }
+            println!("\n── {} ──", package.name);
+            Some(run_e2e(&root, &args.rest))
+        },
+    );
+    if !ok {
         std::process::exit(1);
     }
-}
-
-fn run_suite(root: &Path, suite: &Suite, rest: &[String]) -> bool {
-    match &suite.kind {
-        SuiteKind::Api => {
-            let mut cmd = Command::new("cargo");
-            cmd.arg("test").current_dir(root.join("api"));
-            cmd.args(rest);
-            run_prefixed(&mut cmd, "api")
-        }
-        SuiteKind::App => {
-            let app = root.join("app");
-            if !ensure_npm_modules(&app, "app") {
-                return false;
-            }
-            let pkg = std::fs::read_to_string(app.join("package.json")).unwrap_or_default();
-            let mut cmd = Command::new("npm");
-            if pkg.contains("\"test:ci\"") {
-                cmd.args(["run", "test:ci"]);
-            } else {
-                cmd.args(["test", "--", "--watch=false", "--browsers=ChromeHeadless"]);
-            }
-            cmd.current_dir(&app);
-            if !rest.is_empty() {
-                cmd.arg("--").args(rest);
-            }
-            run_prefixed(&mut cmd, "app")
-        }
-        SuiteKind::E2e => run_e2e(root, rest),
-        SuiteKind::Extra { dir, command, args } => {
-            let mut cmd = Command::new(command);
-            cmd.args(args).args(rest).current_dir(dir);
-            run_prefixed(&mut cmd, &suite.name)
-        }
-    }
-}
-
-fn ensure_npm_modules(dir: &Path, label: &str) -> bool {
-    if dir.join("node_modules").is_dir() {
-        return true;
-    }
-    if !dir.join("package.json").is_file() {
-        eprintln!("[{label}] no package.json in {}", dir.display());
-        return false;
-    }
-    eprintln!("[{label}] npm install in {}", dir.display());
-    let mut cmd = Command::new("npm");
-    cmd.arg("install").current_dir(dir);
-    let ok = run_prefixed(&mut cmd, label);
-    if !ok {
-        eprintln!("[{label}] npm install failed in {}", dir.display());
-    }
-    ok
-}
-
-fn run_prefixed(cmd: &mut Command, label: &str) -> bool {
-    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("[{label}] failed to start: {e}");
-            return false;
-        }
-    };
-    if let Some(out) = child.stdout.take() {
-        prefix_pipe(out, label);
-    }
-    if let Some(err) = child.stderr.take() {
-        prefix_pipe(err, label);
-    }
-    match child.wait() {
-        Ok(status) => status.success(),
-        Err(e) => {
-            eprintln!("[{label}] wait failed: {e}");
-            false
-        }
-    }
-}
-
-fn prefix_pipe<R: std::io::Read + Send + 'static>(pipe: R, label: &str) {
-    use std::io::BufRead;
-    let label = label.to_string();
-    std::thread::spawn(move || {
-        let reader = std::io::BufReader::new(pipe);
-        for line in reader.lines().map_while(Result::ok) {
-            println!("[{label}] {line}");
-        }
-    });
 }
 
 fn run_e2e(root: &Path, rest: &[String]) -> bool {
@@ -586,10 +264,7 @@ async fn ensure_test_database(root: &Path) -> Result<(), String> {
         database_name(&url).ok_or_else(|| format!("could not parse database name from {url}"))?;
     let owner = database_user(&url);
 
-    let config = match GlobalConfig::load() {
-        Ok(c) => Some(c),
-        Err(_) => None,
-    };
+    let config = GlobalConfig::load().ok();
 
     let exists = tokio_postgres::connect(&url, tokio_postgres::NoTls)
         .await
@@ -683,66 +358,6 @@ async fn grant_public_schema(admin_url: &str, db: &str, user: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-
-    fn temp(suffix: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "erno-test-{}-{}-{suffix}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let _ = fs::remove_dir_all(&dir);
-        dir
-    }
-
-    #[test]
-    fn discovers_api_and_app() {
-        let root = temp("disc");
-        fs::create_dir_all(root.join("api")).unwrap();
-        fs::write(root.join("api/Cargo.toml"), "[package]\nname=\"x\"\n").unwrap();
-        fs::create_dir_all(root.join("app")).unwrap();
-        fs::write(root.join("app/package.json"), "{}\n").unwrap();
-        let suites = discover_suites(&root).unwrap();
-        assert_eq!(
-            suites.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
-            ["api", "app"]
-        );
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn extras_run_before_e2e() {
-        let root = temp("order");
-        fs::create_dir_all(root.join("api")).unwrap();
-        fs::write(root.join("api/Cargo.toml"), "[package]\nname=\"x\"\n").unwrap();
-        fs::create_dir_all(root.join("app")).unwrap();
-        fs::write(root.join("app/package.json"), "{}\n").unwrap();
-        fs::create_dir_all(root.join("e2e")).unwrap();
-        fs::write(root.join("e2e/playwright.config.ts"), "export default {}\n").unwrap();
-        fs::create_dir_all(root.join(".erno")).unwrap();
-        fs::write(
-            root.join(".erno/test.toml"),
-            r#"
-[[suite]]
-name = "puzzles"
-dir = "puzzles"
-command = "cargo"
-args = ["test"]
-default = true
-"#,
-        )
-        .unwrap();
-        let names: Vec<_> = discover_suites(&root)
-            .unwrap()
-            .into_iter()
-            .map(|s| s.name)
-            .collect();
-        assert_eq!(names, ["api", "app", "puzzles", "e2e"]);
-        let _ = fs::remove_dir_all(&root);
-    }
 
     #[test]
     fn free_port_is_nonzero_and_two_calls_differ() {
@@ -751,102 +366,6 @@ default = true
         assert_ne!(a, 0);
         assert_ne!(b, 0);
         assert_ne!(a, b);
-    }
-
-    #[test]
-    fn extras_default_and_opt_in() {
-        let raw = r#"
-[[suite]]
-name = "puzzles"
-dir = "puzzles"
-command = "cargo"
-args = ["test"]
-default = true
-
-[[suite]]
-name = "vision"
-dir = "vision"
-command = "cargo"
-args = ["test"]
-default = false
-"#;
-        let parsed = toml_from_str(raw).unwrap();
-        assert_eq!(parsed.suite.len(), 2);
-        assert!(parsed.suite[0].default);
-        assert!(!parsed.suite[1].default);
-        assert_eq!(parsed.suite[0].args, ["test"]);
-    }
-
-    #[test]
-    fn select_default_skips_opt_in_and_no_e2e() {
-        let all = vec![
-            Suite {
-                name: "api".into(),
-                kind: SuiteKind::Api,
-                default: true,
-            },
-            Suite {
-                name: "e2e".into(),
-                kind: SuiteKind::E2e,
-                default: true,
-            },
-            Suite {
-                name: "vision".into(),
-                kind: SuiteKind::Extra {
-                    dir: PathBuf::from("vision"),
-                    command: "cargo".into(),
-                    args: vec!["test".into()],
-                },
-                default: false,
-            },
-        ];
-        let selected = select_suites(
-            &all,
-            &TestArgs {
-                no_e2e: true,
-                ..TestArgs::default()
-            },
-        )
-        .unwrap();
-        assert_eq!(
-            selected.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
-            ["api"]
-        );
-    }
-
-    #[test]
-    fn pass_through_requires_one_suite() {
-        let all = vec![
-            Suite {
-                name: "api".into(),
-                kind: SuiteKind::Api,
-                default: true,
-            },
-            Suite {
-                name: "app".into(),
-                kind: SuiteKind::App,
-                default: true,
-            },
-        ];
-        let err = select_suites(
-            &all,
-            &TestArgs {
-                rest: vec!["health".into()],
-                ..TestArgs::default()
-            },
-        )
-        .unwrap_err();
-        assert!(err.contains("pass-through"));
-        let ok = select_suites(
-            &all,
-            &TestArgs {
-                api: true,
-                rest: vec!["health".into()],
-                ..TestArgs::default()
-            },
-        )
-        .unwrap();
-        assert_eq!(ok.len(), 1);
     }
 
     #[test]
@@ -862,21 +381,25 @@ default = false
     }
 
     #[test]
-    fn unknown_suite_lists_known() {
-        let all = vec![Suite {
-            name: "api".into(),
-            kind: SuiteKind::Api,
-            default: true,
-        }];
-        let err = select_suites(
-            &all,
-            &TestArgs {
-                suite: vec!["nope".into()],
-                ..TestArgs::default()
-            },
+    fn reads_the_database_url_out_of_test_config() {
+        let root = std::env::temp_dir().join(format!(
+            "erno-test-cfg-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("api/config")).unwrap();
+        std::fs::write(
+            root.join("api/config/test.toml"),
+            "[server]\nport = 3000\n\n[database]\nurl = \"postgres://u:p@localhost/x_test\"\n",
         )
-        .unwrap_err();
-        assert!(err.contains("nope"));
-        assert!(err.contains("api"));
+        .unwrap();
+        assert_eq!(
+            test_database_url(&root).as_deref(),
+            Some("postgres://u:p@localhost/x_test")
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

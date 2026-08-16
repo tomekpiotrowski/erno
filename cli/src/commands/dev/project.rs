@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
-/// Walk `start` and its parents looking for an Erno project (`api/Cargo.toml`).
+/// Walk `start` and its parents looking for an Erno project (`erno.toml`, or an
+/// `api/Cargo.toml` for projects that have not declared a manifest).
 pub fn find_project_root(start: &Path) -> Option<PathBuf> {
     let mut dir = start.to_path_buf();
     loop {
@@ -14,7 +15,7 @@ pub fn find_project_root(start: &Path) -> Option<PathBuf> {
 }
 
 pub fn is_project_root(dir: &Path) -> bool {
-    dir.join("api").join("Cargo.toml").is_file()
+    dir.join("erno.toml").is_file() || dir.join("api").join("Cargo.toml").is_file()
 }
 
 pub fn resolve_project_root(explicit: Option<PathBuf>) -> PathBuf {
@@ -24,7 +25,7 @@ pub fn resolve_project_root(explicit: Option<PathBuf>) -> PathBuf {
         Some(root) => root,
         None => {
             eprintln!(
-                "No Erno project found (looked for api/Cargo.toml from {}).",
+                "No Erno project found (looked for erno.toml or api/Cargo.toml from {}).",
                 start.display()
             );
             eprintln!("Run `erno dev` inside a project, or create one with `erno new`.");
@@ -71,10 +72,24 @@ mod tests {
     }
 
     #[test]
-    fn requires_api_cargo_toml() {
+    fn requires_a_manifest_or_api_cargo_toml() {
         let tmp = temp_tree("no-cargo");
         fs::create_dir_all(tmp.join("api")).unwrap();
         assert!(find_project_root(&tmp).is_none());
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn erno_toml_alone_marks_the_root() {
+        let tmp = temp_tree("manifest-only");
+        let nested = tmp.join("proj/puzzles/src");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(
+            tmp.join("proj/erno.toml"),
+            "[[package]]\nname = \"x\"\ndir = \"x\"\n",
+        )
+        .unwrap();
+        assert_eq!(find_project_root(&nested).unwrap(), tmp.join("proj"));
         let _ = fs::remove_dir_all(&tmp);
     }
 }

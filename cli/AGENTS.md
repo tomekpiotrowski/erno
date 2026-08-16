@@ -21,9 +21,49 @@ cargo install --path .                   # install globally as `erno`
 | `erno dev` | Also starts Prometheus (if installed) and `admin/` on :4300 |
 | `erno deploy init` | Scaffolds Docker/Helm deploy files; generates admin password hash for production |
 | `erno deploy install` | Installs a chart version to the cluster (`helm secrets upgrade --install`) |
-| `erno test` | Runs API `cargo test`, app Karma, extra `.erno/test.toml` suites, then Playwright e2e |
+| `erno build` | Builds every package declared in `erno.toml`, in declaration order |
+| `erno lint` | Format-checks, lints, and typechecks every package; `--fix` applies fixes |
+| `erno test` | Runs each package's test steps, then Playwright e2e |
 
 Narrative docs for the CLI live in `docs/src/content/docs/cli/` (`index.md`, `deploy.md`).
+
+## The package manifest: `erno.toml`
+
+`build`, `lint`, and `test` all read one file in the project root. Each `[[package]]` declares its own steps per phase, and **declaration order is execution order** — that is how build dependency order is expressed, which is why there is no dependency graph and no parallelism.
+
+```toml
+[[package]]
+name = "puzzles"
+dir  = "puzzles"
+
+  [[package.build]]
+  command = "./build.sh"
+
+  [[package.lint]]
+  command = "cargo"
+  args    = ["fmt", "--check"]
+  fix     = ["fmt"]
+
+  [[package.test]]
+  command = "cargo"
+  args    = ["test"]
+```
+
+| Package key | Meaning |
+|-------------|---------|
+| `name`, `dir` | Required. `dir` is relative to the project root. |
+| `default` | `false` means opt in with `--package <name>` or `--all`. Defaults to `true`. |
+| `database` | Ensure the test database exists before this package's test phase. |
+| `kind` | Only `"e2e"` is recognised — the CLI runs its own port-allocating orchestration and ignores declared test steps. |
+
+| Step key | Meaning |
+|----------|---------|
+| `command` | Required. Run with `dir` as the working directory. |
+| `args` | Defaults to `[]`. |
+| `fix` | Lint only: the argument vector substituted under `--fix`. A step without `fix` runs its check form unchanged. |
+| `default` | `false` makes the step itself opt-in — used for slow guards and optional bundles. |
+
+Unknown keys are rejected, so typos fail loudly. When `erno.toml` is absent the CLI falls back to the conventional layout (`api/Cargo.toml`, `app/package.json`, `e2e/playwright.config.ts`), so a freshly scaffolded project needs no manifest.
 
 ### `erno new` options
 
@@ -70,10 +110,15 @@ ALTER USER erno CREATEDB;
 | `src/commands/doctor.rs` | Environment checks — each returns a `CheckResult` (Pass/Warn/Fail) |
 | `src/commands/new.rs` | Project scaffolding — inline templates, directory creation, database creation |
 | `src/commands/dev/` | `erno dev` — process multiplexer, readiness banner, quiet logs |
+| `src/commands/packages.rs` | `erno.toml` parsing, package selection, and the sequential phase runner shared by build/lint/test |
+| `src/commands/build.rs` | `erno build` — runs the `build` phase |
+| `src/commands/lint.rs` | `erno lint` — runs the `lint` phase, with `--fix` |
+| `src/commands/test.rs` | `erno test` — the `test` phase, plus test-database setup and e2e orchestration |
 
 ## Architecture notes
 
 - **No dependency on `api/`**: the CLI does not depend on the `erno` library crate. Admin uses `reqwest` + `ratatui` as an HTTP client. Keeping it decoupled avoids version skew and circular concerns.
+- **One manifest, three commands**: `build`, `lint`, and `test` differ only in which phase they run and whether `--fix` applies. The shared engine lives in `packages.rs`; the command modules are thin. `test.rs` is the only one that needs more, because the e2e package is orchestrated rather than shelled out — it passes a callback that `run_phase` gives first refusal on each package.
 - **Templates are inline strings**: `new.rs` holds all scaffold templates as Rust string constants/functions. `{{name}}` is substituted via `.replace()` — no template engine dependency.
 - **`erno_migrations()` helper**: scaffolded apps call `erno::database::migrations::erno_migrations()` in their `Migrator` to include all built-in framework migrations (users, jobs, sync, billing, storage) before their own.
 - **Database creation**: `erno new` connects with the admin URL from `~/.erno/config.toml` and issues `CREATE DATABASE` for `<name>_development` and `<name>_test`.
