@@ -26,7 +26,7 @@ Override at runtime with the standard `RUST_LOG` environment variable:
 RUST_LOG=debug cargo run -- serve
 ```
 
-CLI subcommands (`migrate`, `routes`, etc.) automatically reduce log level to `warn` or `error` to keep output clean.
+CLI subcommands (`db`, `routes`, etc.) automatically reduce log level to `warn` or `error` to keep output clean.
 
 ### Log format
 

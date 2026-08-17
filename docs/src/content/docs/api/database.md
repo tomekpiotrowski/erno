@@ -66,13 +66,25 @@ impl MigratorTrait for Migrator {
 
 ```bash
 # Apply pending migrations
-cargo run -- migrate
+cargo run -- db migrate up
 
-# Reset database (drops all tables, re-runs migrations)
-cargo run -- db-reset
+# Roll back one migration
+cargo run -- db migrate down
 
-# Show registered routes
-cargo run -- routes
+# Show applied and pending migrations
+cargo run -- db migrate status
+
+# Roll back all migrations, then apply them again
+cargo run -- db migrate reset
+
+# Reapply the last migration (down, then up)
+cargo run -- db migrate reapply
+
+# Open a psql session
+cargo run -- db console
+
+# Drop and recreate the database, then migrate up
+cargo run -- db reset
 ```
 
 ## Test utilities

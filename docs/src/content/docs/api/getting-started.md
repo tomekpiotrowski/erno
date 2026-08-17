@@ -117,10 +117,11 @@ Every Erno application exposes these commands via `cargo run --`:
 | Command | Description |
 |---------|-------------|
 | `serve` (default) | Start the HTTP server |
-| `migrate up` | Run pending migrations |
-| `migrate down --steps N` | Roll back N migrations |
-| `migrate status` | Show applied and pending migrations |
-| `migrate reset` | Roll back all, then migrate up |
+| `db migrate up` | Run pending migrations |
+| `db migrate down --steps N` | Roll back N migrations |
+| `db migrate status` | Show applied and pending migrations |
+| `db migrate reset` | Roll back all, then migrate up |
+| `db migrate reapply` | Roll back and reapply recent migrations |
 | `db console` | Open a psql session |
 | `db reset` | Drop and recreate the database |
 | `routes` | List all registered routes |

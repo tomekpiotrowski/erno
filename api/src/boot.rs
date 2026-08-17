@@ -230,15 +230,15 @@ pub async fn handle_command<AppMigrator: MigratorTrait, ExtraConfig>(
     ExtraConfig: Clone + Default + DeserializeOwned + Send + Sync + 'static,
 {
     match cli.command {
-        Some(Commands::Migrate { action }) => {
-            migrate::handle_migrate_command::<AppMigrator, ExtraConfig>(&config, action).await;
-        }
         Some(Commands::Db { action }) => match action {
             Some(crate::cli::DbAction::Console) | None => {
                 db::handle_db_console_command(&config);
             }
             Some(crate::cli::DbAction::Reset) => {
                 db_reset::handle_db_reset_command::<AppMigrator, ExtraConfig>(&config).await;
+            }
+            Some(crate::cli::DbAction::Migrate { action }) => {
+                migrate::handle_migrate_command::<AppMigrator, ExtraConfig>(&config, action).await;
             }
         },
         Some(Commands::GenerateJwtSecret) => {

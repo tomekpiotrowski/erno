@@ -36,7 +36,7 @@ Marketing (`www/`) is a separate static site for SEO. It does not talk to the AP
 ## Boot path (API)
 
 1. Your binary calls `boot::<Migrator>(boot_config())`.
-2. Erno parses CLI args (`serve`, `migrate`, …), loads `config/{environment}.toml`, and connects to Postgres.
+2. Erno parses CLI args (`serve`, `db`, …), loads `config/{environment}.toml`, and connects to Postgres.
 3. Framework migrations run first (`erno_migrations()`), then your migrator.
 4. Job workers, WebSocket/sync listeners, and the Axum router start.
 
