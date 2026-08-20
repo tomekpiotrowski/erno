@@ -9,7 +9,7 @@ description: Inventory and update Erno-managed packages in an existing project
 erno upgrade           # print the plan, confirm, run
 erno upgrade --dry-run # print the plan and exit
 erno upgrade --yes     # skip the confirm prompt
-erno upgrade --force   # allow a dirty git worktree
+erno upgrade --force   # allow a dirty tree, or skip the git requirement
 ```
 
 Walk up from the current directory until `erno.toml` or `api/Cargo.toml` is found.
@@ -31,12 +31,12 @@ Absent trees are omitted. A project with no `admin/` does not get an admin row.
 
 ## Order
 
-1. Refuse if Node is too old, git is missing, or the worktree is dirty (unless `--force`).
+1. Refuse if Node is too old, git is missing, the directory is not a repo, or the worktree is dirty (unless `--force`). Missing git is reported as such, not as a dirty tree.
 2. App Angular majors, then Ionic, then erno-angular.
 3. Admin Angular majors.
 4. `cargo update -p erno`. If the crate moved, run `cargo run -- db migrate up` in `api/` afterwards — the command reminds you; it does not migrate.
 
-Children run with `CI=true` so they cannot prompt.
+Children run with `CI=true` so they cannot prompt. After the CLI has accepted the tree, `ng update` gets `--allow-dirty` and `@ionic/migrate` gets `--force`, because each earlier step in the same run writes files. Git remains the undo; the command does not commit.
 
 ## Future versions
 

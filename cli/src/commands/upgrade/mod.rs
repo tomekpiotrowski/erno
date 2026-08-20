@@ -10,7 +10,9 @@ use crate::commands::dev::resolve_project_root;
 use crate::commands::packages::run_prefixed;
 use crate::ui;
 
-pub use plan::{angular_majors, plan_upgrade, ProjectSnapshot, StepKind, TARGET_ERNO_ANGULAR};
+pub use plan::{
+    angular_majors, plan_upgrade, GitStatus, ProjectSnapshot, StepKind, TARGET_ERNO_ANGULAR,
+};
 
 #[derive(Args, Debug, Default)]
 pub struct UpgradeArgs {
@@ -63,7 +65,7 @@ pub async fn handle_upgrade(args: UpgradeArgs) -> ui::Cmd {
 
     for step in &plan.steps {
         ui::section(&step.label);
-        if !execute_step(&root, step, args.force) {
+        if !execute_step(&root, step) {
             return Err(ui::Failure::Message(format!(
                 "{} failed — earlier steps were applied; git is the undo",
                 step.label
@@ -109,7 +111,7 @@ fn print_plan(plan: &plan::UpgradePlan) {
 fn snapshot(root: &Path, force: bool) -> Result<ProjectSnapshot, ui::Failure> {
     Ok(ProjectSnapshot {
         node: run_text("node", &["--version"]),
-        git_clean: git_clean(root),
+        git: inspect_git(root),
         force,
         app_package: read_if(root.join("app/package.json")),
         admin_package: read_if(root.join("admin/package.json")),
@@ -131,27 +133,40 @@ fn run_text(program: &str, args: &[&str]) -> Option<String> {
         .map(|s| s.trim().to_string())
 }
 
-fn git_clean(root: &Path) -> bool {
-    Command::new("git")
-        .args(["-C", root.to_str().unwrap_or("."), "status", "--porcelain"])
+fn inspect_git(root: &Path) -> GitStatus {
+    let dir = root.to_str().unwrap_or(".");
+    let inside = match Command::new("git")
+        .args(["-C", dir, "rev-parse", "--is-inside-work-tree"])
         .output()
-        .ok()
-        .map(|o| o.status.success() && o.stdout.is_empty())
-        .unwrap_or(false)
+    {
+        Err(_) => return GitStatus::GitMissing,
+        Ok(o) => o,
+    };
+    if !inside.status.success() {
+        return GitStatus::NotARepo;
+    }
+    match Command::new("git")
+        .args(["-C", dir, "status", "--porcelain"])
+        .output()
+    {
+        Ok(o) if o.status.success() && o.stdout.is_empty() => GitStatus::Clean,
+        Ok(o) if o.status.success() => GitStatus::Dirty,
+        _ => GitStatus::NotARepo,
+    }
 }
 
-fn execute_step(root: &Path, step: &plan::UpgradeStep, force: bool) -> bool {
+fn execute_step(root: &Path, step: &plan::UpgradeStep) -> bool {
     match &step.kind {
         StepKind::Angular { dir, from_major } => {
             let dir = root.join(dir);
             for major in angular_majors(*from_major) {
-                if !ng_update(&dir, major, force) {
+                if !ng_update(&dir, major) {
                     return false;
                 }
             }
             true
         }
-        StepKind::Ionic { dir, .. } => ionic_migrate(&root.join(dir), force),
+        StepKind::Ionic { dir, .. } => ionic_migrate(&root.join(dir)),
         StepKind::ErnoAngular { .. } => {
             let dir = root.join("app");
             let mut cmd = Command::new("npm");
@@ -176,31 +191,29 @@ fn execute_step(root: &Path, step: &plan::UpgradeStep, force: bool) -> bool {
     }
 }
 
-fn ng_update(dir: &Path, major: u32, force: bool) -> bool {
+fn ng_update(dir: &Path, major: u32) -> bool {
     let ng = local_ng(dir).unwrap_or_else(|| PathBuf::from("npx"));
     let mut cmd = Command::new(&ng);
     if ng.file_name().and_then(|s| s.to_str()) == Some("npx") {
         cmd.args(["--yes", "ng"]);
     }
+    // The CLI already refused a dirty tree (or the user passed --force). Later
+    // majors in this same run dirtied the tree; --allow-dirty is how we continue.
     cmd.args([
         "update",
         &format!("@angular/core@{major}"),
         &format!("@angular/cli@{major}"),
+        "--allow-dirty",
     ]);
-    if force {
-        cmd.arg("--allow-dirty");
-    }
     cmd.current_dir(dir);
     apply_ci(&mut cmd);
     run_prefixed(&mut cmd, "ng")
 }
 
-fn ionic_migrate(dir: &Path, force: bool) -> bool {
+fn ionic_migrate(dir: &Path) -> bool {
     let mut cmd = Command::new("npx");
-    cmd.args(["--yes", "@ionic/migrate"]);
-    if force {
-        cmd.arg("--force");
-    }
+    // Same reason as ng update --allow-dirty: prior steps in this run write files.
+    cmd.args(["--yes", "@ionic/migrate", "--force"]);
     cmd.current_dir(dir);
     apply_ci(&mut cmd);
     run_prefixed(&mut cmd, "ionic")
@@ -215,4 +228,58 @@ fn apply_ci(cmd: &mut Command) {
     cmd.env("CI", "true")
         .env("NG_CLI_ANALYTICS", "false")
         .stdin(Stdio::null());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(suffix: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "erno-upgrade-git-{}-{}-{suffix}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn git(dir: &Path, args: &[&str]) -> bool {
+        Command::new("git")
+            .args(["-c", "init.defaultBranch=main"])
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
+    #[test]
+    fn inspect_git_clean_after_init() {
+        let dir = temp_dir("clean");
+        assert!(git(&dir, &["init", "--quiet"]));
+        assert_eq!(inspect_git(&dir), GitStatus::Clean);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn inspect_git_dirty_with_untracked_file() {
+        let dir = temp_dir("dirty");
+        assert!(git(&dir, &["init", "--quiet"]));
+        fs::write(dir.join("x"), "x").unwrap();
+        assert_eq!(inspect_git(&dir), GitStatus::Dirty);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn inspect_git_not_a_repo() {
+        let dir = temp_dir("norepo");
+        assert_eq!(inspect_git(&dir), GitStatus::NotARepo);
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

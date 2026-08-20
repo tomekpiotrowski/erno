@@ -22,6 +22,34 @@ pub fn node_is_supported(major: u32, minor: u32, patch: u32) -> bool {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum GitStatus {
+    #[default]
+    Clean,
+    Dirty,
+    /// `git` is not on PATH.
+    GitMissing,
+    /// Directory is not inside a git work tree.
+    NotARepo,
+}
+
+impl GitStatus {
+    pub fn blocking_message(&self) -> Option<&'static str> {
+        match self {
+            GitStatus::Clean => None,
+            GitStatus::Dirty => {
+                Some("working tree is dirty — commit or stash, or pass --force")
+            }
+            GitStatus::GitMissing => {
+                Some("git not found — erno upgrade requires git so you can undo; pass --force to skip")
+            }
+            GitStatus::NotARepo => {
+                Some("not a git repository — erno upgrade requires git so you can undo; pass --force to skip")
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CrateSpec {
     Git,
@@ -63,7 +91,7 @@ impl UpgradePlan {
 #[derive(Debug, Default)]
 pub struct ProjectSnapshot {
     pub node: Option<String>,
-    pub git_clean: bool,
+    pub git: GitStatus,
     pub force: bool,
     pub app_package: Option<String>,
     pub admin_package: Option<String>,
@@ -72,8 +100,10 @@ pub struct ProjectSnapshot {
 
 pub fn plan_upgrade(snap: &ProjectSnapshot) -> UpgradePlan {
     let mut blocking = Vec::new();
-    if !snap.force && !snap.git_clean {
-        blocking.push("working tree is dirty — commit or stash, or pass --force".to_string());
+    if !snap.force {
+        if let Some(msg) = snap.git.blocking_message() {
+            blocking.push(msg.to_string());
+        }
     }
     match parse_node(snap.node.as_deref()) {
         None => blocking.push("Node.js not found — install Node 22.22.3 or later".into()),
@@ -355,7 +385,7 @@ erno = { path = "/home/me/erno/api" }
     fn snap() -> ProjectSnapshot {
         ProjectSnapshot {
             node: Some("v22.23.2".into()),
-            git_clean: true,
+            git: GitStatus::Clean,
             force: false,
             ..ProjectSnapshot::default()
         }
@@ -444,10 +474,29 @@ erno = { path = "/home/me/erno/api" }
     #[test]
     fn dirty_git_blocks_unless_force() {
         let mut s = snap();
-        s.git_clean = false;
+        s.git = GitStatus::Dirty;
         s.app_package = Some(APP_20.into());
         let plan = plan_upgrade(&s);
         assert!(plan.blocking.iter().any(|b| b.contains("dirty")));
+        s.force = true;
+        let plan = plan_upgrade(&s);
+        assert!(plan.blocking.is_empty());
+    }
+
+    #[test]
+    fn missing_git_is_not_called_dirty() {
+        let mut s = snap();
+        s.git = GitStatus::GitMissing;
+        let plan = plan_upgrade(&s);
+        assert!(plan.blocking.iter().any(|b| b.contains("git not found")));
+        assert!(plan.blocking.iter().all(|b| !b.contains("dirty")));
+        s.git = GitStatus::NotARepo;
+        let plan = plan_upgrade(&s);
+        assert!(plan
+            .blocking
+            .iter()
+            .any(|b| b.contains("not a git repository")));
+        assert!(plan.blocking.iter().all(|b| !b.contains("dirty")));
         s.force = true;
         let plan = plan_upgrade(&s);
         assert!(plan.blocking.is_empty());
