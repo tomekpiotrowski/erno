@@ -95,6 +95,14 @@ password = "password"
 
 `--ios` / `--android` start the API plus `ionic cap run` with live reload on the machine’s LAN IP. The app is rewritten for the session to call `http://<lan>:api-port`, extra CORS origins are passed to the API as `ERNO_DEV_CORS_ORIGINS`, and the original environment file is restored on exit.
 
+The native project must already exist (`cd app && npx cap add android`), and the Ionic CLI is taken from `app/node_modules/.bin/ionic`, then `PATH`, and only then fetched with `npx --yes @ionic/cli`. Projects scaffolded by `erno new` carry `@ionic/cli` as a devDependency.
+
+The device is resolved before anything starts — `ionic` itself runs non-interactively, because a child of `erno dev` cannot answer a prompt. A single attached device or emulator is used automatically; when several are attached, `erno dev` lists them and asks for `--target <id>`:
+
+```sh
+erno dev --android --target emulator-5554
+```
+
 `erno dev` prints a status banner with each service URL and probes them until they respond:
 
 | Surface | Probe | Default URL (overridden by project config) |

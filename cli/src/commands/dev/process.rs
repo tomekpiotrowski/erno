@@ -2,7 +2,7 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
+use tokio::io::{AsyncRead, AsyncReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
@@ -39,16 +39,52 @@ pub fn spawn_labeled(
     child
 }
 
+/// How long a partial line may sit unterminated before it is emitted anyway.
+/// A prompt ("Ok to proceed? (y) ") never carries a newline, so a plain line
+/// reader would hold it until the child dies — which reads as a silent hang.
+const PARTIAL_FLUSH: std::time::Duration = std::time::Duration::from_millis(750);
+
 pub fn spawn_printer<R>(reader: R, label: &'static str, stream: ui::Stream, sink: Arc<LogSink>)
 where
     R: AsyncRead + Unpin + Send + 'static,
 {
-    let mut lines = BufReader::new(reader).lines();
+    let mut reader = BufReader::new(reader);
     tokio::spawn(async move {
-        while let Ok(Some(line)) = lines.next_line().await {
-            sink.write_line(stream, label, &line);
+        let mut pending: Vec<u8> = Vec::new();
+        let mut buf = [0u8; 8192];
+        loop {
+            match tokio::time::timeout(PARTIAL_FLUSH, reader.read(&mut buf)).await {
+                // Idle with something buffered: the child is most likely waiting
+                // on stdin. Emit what it wrote and start a fresh line.
+                Err(_) => flush_pending(&mut pending, stream, label, &sink),
+                Ok(Ok(0)) => {
+                    flush_pending(&mut pending, stream, label, &sink);
+                    break;
+                }
+                Ok(Ok(n)) => {
+                    pending.extend_from_slice(&buf[..n]);
+                    while let Some(end) = pending.iter().position(|b| *b == b'\n') {
+                        let line: Vec<u8> = pending.drain(..=end).collect();
+                        emit_bytes(&line[..end], stream, label, &sink);
+                    }
+                }
+                Ok(Err(_)) => break,
+            }
         }
     });
+}
+
+fn flush_pending(pending: &mut Vec<u8>, stream: ui::Stream, label: &str, sink: &Arc<LogSink>) {
+    if pending.is_empty() {
+        return;
+    }
+    emit_bytes(pending, stream, label, sink);
+    pending.clear();
+}
+
+fn emit_bytes(bytes: &[u8], stream: ui::Stream, label: &str, sink: &Arc<LogSink>) {
+    let text = String::from_utf8_lossy(bytes);
+    sink.write_line(stream, label, text.trim_end_matches('\r'));
 }
 
 const GRACEFUL_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
@@ -202,6 +238,28 @@ async fn wait_shutdown(rx: &mut tokio::sync::watch::Receiver<bool>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A prompt arrives without a trailing newline; it must still be forwarded.
+    #[tokio::test(flavor = "current_thread")]
+    async fn an_unterminated_prompt_is_flushed_when_the_child_goes_quiet() {
+        let root = std::env::temp_dir().join("erno-dev-printer-test");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let sink = Arc::new(LogSink::new(&root));
+
+        let (mut writer, reader) = tokio::io::duplex(64);
+        spawn_printer(reader, "app", ui::Stream::Out, sink);
+        tokio::io::AsyncWriteExt::write_all(&mut writer, b"done\nOk to proceed? (y) ")
+            .await
+            .unwrap();
+
+        tokio::time::sleep(PARTIAL_FLUSH + std::time::Duration::from_millis(250)).await;
+
+        let log = std::fs::read_to_string(root.join(".erno/dev.log")).unwrap();
+        assert!(log.contains("[app] done\n"), "{log}");
+        assert!(log.contains("[app] Ok to proceed? (y) \n"), "{log}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn backoff_doubles_and_caps() {

@@ -17,7 +17,7 @@ cargo install --path .                   # install globally as `erno`
 | `erno setup` | Interactive wizard — writes `~/.erno/config.toml` with PostgreSQL admin credentials |
 | `erno doctor` | Checks the local environment: Rust, Node, Angular CLI, PostgreSQL, `~/.erno/config.toml`, admin DB access |
 | `erno new <name>` | Scaffolds a full-stack Erno project (Rust API + Ionic app + Astro www) |
-| `erno dev` | Starts api + app + www dev servers, readiness banner, `--ios`/`--android` live reload |
+| `erno dev` | Starts api + app + www dev servers, readiness banner, `--ios`/`--android` live reload (`--target <id>` picks the device) |
 | `erno dev` | Also starts Prometheus (if installed) and `admin/` on :4300 |
 | `erno deploy init` | Scaffolds Docker/Helm deploy files; generates admin password hash for production |
 | `erno deploy install` | Installs a chart version to the cluster (`helm secrets upgrade --install`) |
@@ -171,6 +171,7 @@ The `dev` banner reprints in full on state change. No cursor control, no in-plac
 - **Templates are inline strings**: `new.rs` holds all scaffold templates as Rust string constants/functions. `{{name}}` is substituted via `.replace()` — no template engine dependency.
 - **`erno_migrations()` helper**: scaffolded apps call `erno::database::migrations::erno_migrations()` in their `Migrator` to include all built-in framework migrations (users, jobs, sync, billing, storage) before their own.
 - **Database creation**: `erno new` connects with the admin URL from `~/.erno/config.toml` and issues `CREATE DATABASE` for `<name>_development` and `<name>_test`.
+- **`dev` children can never be interactive**: every child is spawned into its own process group with piped stdio, so reading the terminal raises `SIGTTIN` and stops it — a hang with an unanswerable question buried in a pipe. Anything a child would prompt for must be decided by the CLI beforehand and passed as a flag (`npx --yes`, `ionic --no-interactive --target`). As a backstop, `dev/process.rs` flushes an unterminated line once the stream goes quiet and `dev/log.rs` forwards prompt-shaped lines even in quiet mode.
 
 ## Adding a new command
 

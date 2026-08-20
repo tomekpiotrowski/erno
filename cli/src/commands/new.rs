@@ -521,6 +521,9 @@ fn patch_app(
     pkg["dependencies"]["@capacitor/keyboard"] = serde_json::Value::String("^7.0.0".to_string());
     pkg["dependencies"]["@capacitor/status-bar"] = serde_json::Value::String("^7.0.0".to_string());
     pkg["devDependencies"]["@capacitor/cli"] = serde_json::Value::String("^7.0.0".to_string());
+    // `erno dev --ios/--android` shells out to `ionic cap run`; vendoring the CLI
+    // keeps that working without a global install or an npx fetch.
+    pkg["devDependencies"]["@ionic/cli"] = serde_json::Value::String("^7.2.0".to_string());
 
     // When erno-angular is installed as a symlink (file: directory dep), npm does
     // not hoist its dependencies into the consumer's node_modules. Inject them

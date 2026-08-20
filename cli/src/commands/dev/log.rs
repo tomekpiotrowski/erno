@@ -52,7 +52,24 @@ impl LogSink {
 }
 
 pub fn should_print_line(line: &str, verbose: bool) -> bool {
-    verbose || is_error_line(line) || is_notable_line(line)
+    verbose || is_error_line(line) || is_notable_line(line) || is_prompt_line(line)
+}
+
+/// A child waiting on stdin must never be invisible: quiet mode still forwards
+/// anything shaped like a question, or `erno dev` looks like it hung.
+fn is_prompt_line(line: &str) -> bool {
+    let plain = ui::strip_ansi(line);
+    let text = plain.trim();
+    if text.is_empty() {
+        return false;
+    }
+    let lower = text.to_ascii_lowercase();
+    // A leading `?` is the inquirer/Ionic prompt marker.
+    text.starts_with('?')
+        || text.ends_with('?')
+        || ["(y)", "(y/n)", "[y/n]", "(yes)", "(use arrow keys)"]
+            .iter()
+            .any(|suffix| lower.ends_with(suffix))
 }
 
 // The emoji these two match on come from the `api` crate's own startup and
@@ -93,6 +110,17 @@ mod tests {
         assert!(should_print_line("error[E0433]: failed to resolve", false));
         assert!(should_print_line("thread panicked at foo.rs", false));
         assert!(should_print_line("\u{1b}[31mERROR\u{1b}[0m boom", false));
+    }
+
+    #[test]
+    fn prompts_print_in_quiet_mode() {
+        assert!(should_print_line("Ok to proceed? (y) ", false));
+        assert!(should_print_line(
+            "? Which device would you like to target: (Use arrow keys)",
+            false
+        ));
+        assert!(should_print_line("Overwrite the file [y/N]", false));
+        assert!(!should_print_line("Building app...", false));
     }
 
     #[test]

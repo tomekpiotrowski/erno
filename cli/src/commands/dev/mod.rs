@@ -51,6 +51,9 @@ pub struct DevArgs {
     /// Live-reload the app on a connected Android device / emulator
     #[arg(long)]
     pub android: bool,
+    /// Device / emulator id for --ios or --android (only needed when several are attached)
+    #[arg(long, value_name = "ID")]
+    pub target: Option<String>,
     /// Skip Prometheus (otherwise required when starting the API)
     #[arg(long)]
     pub no_prometheus: bool,
@@ -97,9 +100,33 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) -> ui::
         None
     };
 
+    if args.target.is_some() && device.is_none() {
+        return Err("--target requires --ios or --android.".into());
+    }
+
     let mut _url_rewrite = None;
     let mut cors_env = None;
+    let mut ionic = None;
+    let mut device_target = None;
     if let Some(platform) = device {
+        // Everything that can fail cheaply runs before `apply_lan_api_urls`,
+        // which edits a file in app/ and only restores it on drop.
+        device::ensure_platform_added(&app_dir, platform)?;
+        let cli = device::resolve_ionic(&app_dir);
+        if cli.is_npx() {
+            ui::warn("Ionic CLI not found in app/node_modules or on PATH");
+            ui::detail(
+                "Fetching it with npx for this run.\n\
+                 Install it once with `npm install --save-dev @ionic/cli` in app/.",
+            );
+        }
+        let target = match args.target.clone() {
+            Some(target) => target,
+            None => device::choose_target(&device::list_targets(&app_dir, platform)?, platform)?,
+        };
+        ionic = Some(cli);
+        device_target = Some(target);
+
         let ip = device::lan_ip().ok_or_else(|| {
             format!(
                 "could not detect a LAN IP for `--{}`\n\
@@ -124,8 +151,9 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) -> ui::
             }
         }
         ui::info(format!(
-            "Device live-reload ({}) on {ip}",
-            platform.as_str()
+            "Device live-reload ({}) on {ip} → {}",
+            platform.as_str(),
+            device_target.as_deref().unwrap_or("?"),
         ));
     }
 
@@ -200,24 +228,20 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) -> ui::
     let app = sel.app.then(|| {
         let app_dir_spawn = app_dir.clone();
         let app_sink = sink.clone();
+        let ionic = ionic.clone();
+        let device_target = device_target.clone();
         Supervisor::start("app", shutdown_rx.clone(), move || {
-            let cmd = if let Some(platform) = device {
-                let mut cmd = Command::new("npx");
-                cmd.args([
-                    "ionic",
-                    "cap",
-                    "run",
-                    platform.as_str(),
-                    "--livereload",
-                    "--external",
-                    "--port",
-                    &app_port.to_string(),
-                ]);
-                cmd
-            } else {
-                let mut cmd = Command::new("npm");
-                cmd.arg("start");
-                cmd
+            let cmd = match (device, ionic.as_ref(), device_target.as_deref()) {
+                (Some(platform), Some(ionic), Some(target)) => {
+                    let mut cmd = Command::new(&ionic.program);
+                    cmd.args(ionic.cap_run_args(platform, app_port, target));
+                    cmd
+                }
+                _ => {
+                    let mut cmd = Command::new("npm");
+                    cmd.arg("start");
+                    cmd
+                }
             };
             spawn_labeled(cmd, &app_dir_spawn, "app", app_sink.clone())
         })
