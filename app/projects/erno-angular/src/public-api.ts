@@ -3,6 +3,7 @@
  */
 
 export * from './lib/erno.module';
+export * from './lib/erno.providers';
 export * from './lib/erno.config';
 export * from './lib/auth/erno-auth.service';
 export * from './lib/app-state/erno-app-state.service';
