@@ -1,13 +1,11 @@
 import { NgModule, ModuleWithProviders } from '@angular/core';
-import { CommonModule } from '@angular/common';
 
 import { ErnoConfig } from './erno.config';
 import { provideErno } from './erno.providers';
 import { ErnoDevtoolsComponent } from './devtools/erno-devtools.component';
 
 @NgModule({
-  imports: [CommonModule],
-  declarations: [ErnoDevtoolsComponent],
+  imports: [ErnoDevtoolsComponent],
   exports: [ErnoDevtoolsComponent],
 })
 export class ErnoModule {

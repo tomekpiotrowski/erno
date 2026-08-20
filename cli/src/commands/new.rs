@@ -20,12 +20,12 @@ const API_TESTS_HEALTH: &str = include_str!("../../templates/api/tests/health.rs
 const API_DEVELOPMENT_TOML: &str = include_str!("../../templates/api/config/development.toml");
 const API_PRODUCTION_TOML: &str = include_str!("../../templates/api/config/production.toml");
 const API_TEST_TOML: &str = include_str!("../../templates/api/config/test.toml");
-const APP_MODULE_TS: &str = include_str!("../../templates/app/app.module.ts");
+const APP_MAIN_TS: &str = include_str!("../../templates/app/src/main.ts");
+const APP_COMPONENT_TS: &str = include_str!("../../templates/app/src/app/app.component.ts");
 const APP_ENVIRONMENT_TS: &str =
     include_str!("../../templates/app/src/environments/environment.ts");
 const APP_COMPONENT_HTML: &str = include_str!("../../templates/app/app.component.html");
-const APP_ROUTING_MODULE_TS: &str =
-    include_str!("../../templates/app/src/app/app-routing.module.ts");
+const APP_ROUTES_TS: &str = include_str!("../../templates/app/src/app/app.routes.ts");
 const AUTH_GUARD_TS: &str = include_str!("../../templates/app/src/app/auth/auth.guard.ts");
 const LOGIN_COMPONENT_TS: &str =
     include_str!("../../templates/app/src/app/auth/login/login.component.ts");
@@ -458,7 +458,7 @@ fn ionic_new_app(_name: &str, _bundle_id: &str, dest: &Path) {
             "start",
             "app",
             "blank",
-            "--type=angular",
+            "--type=angular-standalone",
             "--no-deps",
             "--no-git",
         ])
@@ -510,8 +510,7 @@ fn patch_app(
 
     pkg["name"] = serde_json::Value::String(format!("{name}-app"));
     pkg["dependencies"]["erno-angular"] = serde_json::Value::String(erno_angular_dep.to_string());
-    pkg["scripts"]["test:ci"] =
-        serde_json::Value::String("ng test --watch=false --browsers=ChromeHeadless".to_string());
+    pkg["scripts"]["test:ci"] = serde_json::Value::String("ng test --watch=false".to_string());
 
     // Capacitor — added here rather than via `ionic start --capacitor` to avoid
     // that step running bun install, which conflicts with our npm-only workflow.
@@ -559,9 +558,6 @@ fn patch_app(
                         *val = serde_json::Value::String(ver.to_string());
                     }
                 }
-                // vitest is an optional peer of @angular/build; the version
-                // added by ng new may not match the pinned @angular/build.
-                map.remove("vitest");
             }
         }
     }
@@ -591,30 +587,15 @@ fn patch_app(
         }
     }
 
-    // ionic start generates `import 'zone.js'` in polyfills.ts; comment it out
-    // so Angular runs in zoneless mode (provideZonelessChangeDetection() in app.module.ts).
-    let polyfills_path = app.join("src/polyfills.ts");
-    if let Ok(content) = fs::read_to_string(&polyfills_path) {
-        let patched = content.replace("import 'zone.js';", "// import 'zone.js';");
-        write(&polyfills_path, &patched);
-    }
-
-    // ionic start generates a lazily-loaded home page with its own module; remove those
-    // files since we use eager routing with HomeComponent declared directly in AppModule.
-    let _ = fs::remove_file(app.join("src/app/home/home.module.ts"));
-    let _ = fs::remove_file(app.join("src/app/home/home-routing.module.ts"));
-
-    // Replace ionic-generated files with erno versions
+    // Replace ionic-generated files with erno versions.
+    write(&app.join("src/main.ts"), APP_MAIN_TS);
+    write(&app.join("src/app/app.component.ts"), APP_COMPONENT_TS);
     write(
         &app.join("src/environments/environment.ts"),
         APP_ENVIRONMENT_TS,
     );
-    write(&app.join("src/app/app.module.ts"), APP_MODULE_TS);
     write(&app.join("src/app/app.component.html"), APP_COMPONENT_HTML);
-    write(
-        &app.join("src/app/app-routing.module.ts"),
-        APP_ROUTING_MODULE_TS,
-    );
+    write(&app.join("src/app/app.routes.ts"), APP_ROUTES_TS);
     write(&app.join("src/app/auth/auth.guard.ts"), AUTH_GUARD_TS);
     write(
         &app.join("src/app/auth/login/login.component.ts"),

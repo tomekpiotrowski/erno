@@ -1,11 +1,12 @@
 import { ChangeDetectionStrategy, Component, OnInit, signal } from '@angular/core';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { IonCard, IonCardContent, IonCardHeader, IonCardTitle, IonContent, IonText } from '@ionic/angular';
 import { ErnoAuthService, ErnoAlertsService } from 'erno-angular';
 
 @Component({
   selector: 'app-verify-email',
   templateUrl: './verify-email.component.html',
-  standalone: false,
+  imports: [RouterLink, IonContent, IonCard, IonCardHeader, IonCardTitle, IonCardContent, IonText],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class VerifyEmailComponent implements OnInit {

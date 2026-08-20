@@ -231,10 +231,7 @@ fn conventional(root: &Path) -> Vec<Package> {
         let test = if has_npm_script(&app, "test:ci") {
             step("npm", &["run", "test:ci"])
         } else {
-            step(
-                "npm",
-                &["test", "--", "--watch=false", "--browsers=ChromeHeadless"],
-            )
+            step("npm", &["test", "--", "--watch=false"])
         };
         let mut build = Vec::new();
         if has_npm_script(&app, "build") {

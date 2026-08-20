@@ -1,12 +1,21 @@
-import { Component } from '@angular/core';
+import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { Router } from '@angular/router';
-import { AlertController } from '@ionic/angular';
+import {
+  AlertController,
+  IonButton,
+  IonButtons,
+  IonContent,
+  IonHeader,
+  IonTitle,
+  IonToolbar,
+} from '@ionic/angular';
 import { ErnoAuthService, ErnoAlertsService } from 'erno-angular';
 
 @Component({
   selector: 'app-home',
   templateUrl: './home.page.html',
-  standalone: false,
+  imports: [IonHeader, IonToolbar, IonTitle, IonButtons, IonButton, IonContent],
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class HomePage {
   constructor(

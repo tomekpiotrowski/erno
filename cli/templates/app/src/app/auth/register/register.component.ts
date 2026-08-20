@@ -1,5 +1,18 @@
 import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
-import { AbstractControl, FormControl, FormGroup, ValidationErrors, Validators } from '@angular/forms';
+import { AbstractControl, FormControl, FormGroup, ReactiveFormsModule, ValidationErrors, Validators } from '@angular/forms';
+import { RouterLink } from '@angular/router';
+import {
+  IonButton,
+  IonCard,
+  IonCardContent,
+  IonCardHeader,
+  IonCardTitle,
+  IonContent,
+  IonInput,
+  IonItem,
+  IonLabel,
+  IonText,
+} from '@ionic/angular';
 import { ErnoAuthService } from 'erno-angular';
 
 function passwordsMatch(group: AbstractControl): ValidationErrors | null {
@@ -11,7 +24,20 @@ function passwordsMatch(group: AbstractControl): ValidationErrors | null {
 @Component({
   selector: 'app-register',
   templateUrl: './register.component.html',
-  standalone: false,
+  imports: [
+    ReactiveFormsModule,
+    RouterLink,
+    IonContent,
+    IonCard,
+    IonCardHeader,
+    IonCardTitle,
+    IonCardContent,
+    IonItem,
+    IonLabel,
+    IonInput,
+    IonText,
+    IonButton,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class RegisterComponent {

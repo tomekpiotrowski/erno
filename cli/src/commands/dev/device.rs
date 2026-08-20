@@ -221,14 +221,17 @@ pub fn apply_lan_api_urls(
     api_ws: &str,
 ) -> Result<UrlRewrite, String> {
     let env_path = app_dir.join("src/environments/environment.ts");
+    let main_path = app_dir.join("src/main.ts");
     let module_path = app_dir.join("src/app/app.module.ts");
     let path = if env_path.is_file() {
         env_path
+    } else if main_path.is_file() {
+        main_path
     } else if module_path.is_file() {
         module_path
     } else {
         return Err(format!(
-            "cannot find src/environments/environment.ts or src/app/app.module.ts to point the app at {api_http}"
+            "cannot find src/environments/environment.ts, src/main.ts, or src/app/app.module.ts to point the app at {api_http}"
         ));
     };
     let original = std::fs::read_to_string(&path)

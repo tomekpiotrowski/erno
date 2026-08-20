@@ -1,11 +1,37 @@
 import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
-import { FormControl, FormGroup, Validators } from '@angular/forms';
+import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+import { RouterLink } from '@angular/router';
+import {
+  IonButton,
+  IonCard,
+  IonCardContent,
+  IonCardHeader,
+  IonCardTitle,
+  IonContent,
+  IonInput,
+  IonItem,
+  IonLabel,
+  IonText,
+} from '@ionic/angular';
 import { ErnoAuthService } from 'erno-angular';
 
 @Component({
   selector: 'app-forgot-password',
   templateUrl: './forgot-password.component.html',
-  standalone: false,
+  imports: [
+    ReactiveFormsModule,
+    RouterLink,
+    IonContent,
+    IonCard,
+    IonCardHeader,
+    IonCardTitle,
+    IonCardContent,
+    IonItem,
+    IonLabel,
+    IonInput,
+    IonText,
+    IonButton,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ForgotPasswordComponent {

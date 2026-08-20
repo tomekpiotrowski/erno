@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, isDevMode, OnInit, signal } from '@angular/core';
+import { AsyncPipe, DatePipe, JsonPipe } from '@angular/common';
 import { ErnoSyncService } from '../sync/erno-sync.service';
 import { ErnoDevMailService, MockEmail } from './erno-dev-mail.service';
 import { ErnoDevJobsService, DevJob } from './erno-dev-jobs.service';
@@ -7,7 +8,7 @@ type Tab = 'status' | 'emails' | 'jobs';
 
 @Component({
   selector: 'erno-devtools',
-  standalone: false,
+  imports: [AsyncPipe, DatePipe, JsonPipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (visible) {

@@ -4,12 +4,15 @@
       <ion-card-title>Verify email</ion-card-title>
     </ion-card-header>
     <ion-card-content>
-      <p *ngIf="state() === 'loading'">Verifying…</p>
-
-      <ion-text color="danger" *ngIf="state() === 'error'">
-        <p>{{ error() }}</p>
-        <p><a routerLink="/login">Back to sign in</a></p>
-      </ion-text>
+      @if (state() === 'loading') {
+        <p>Verifying…</p>
+      }
+      @if (state() === 'error') {
+        <ion-text color="danger">
+          <p>{{ error() }}</p>
+          <p><a routerLink="/login">Back to sign in</a></p>
+        </ion-text>
+      }
     </ion-card-content>
   </ion-card>
 </ion-content>

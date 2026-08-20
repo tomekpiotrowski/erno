@@ -1,6 +1,18 @@
 import { ChangeDetectionStrategy, Component, OnInit, signal } from '@angular/core';
-import { AbstractControl, FormControl, FormGroup, ValidationErrors, Validators } from '@angular/forms';
+import { AbstractControl, FormControl, FormGroup, ReactiveFormsModule, ValidationErrors, Validators } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
+import {
+  IonButton,
+  IonCard,
+  IonCardContent,
+  IonCardHeader,
+  IonCardTitle,
+  IonContent,
+  IonInput,
+  IonItem,
+  IonLabel,
+  IonText,
+} from '@ionic/angular';
 import { ErnoAuthService, ErnoAlertsService } from 'erno-angular';
 
 function passwordsMatch(group: AbstractControl): ValidationErrors | null {
@@ -12,7 +24,19 @@ function passwordsMatch(group: AbstractControl): ValidationErrors | null {
 @Component({
   selector: 'app-reset-password',
   templateUrl: './reset-password.component.html',
-  standalone: false,
+  imports: [
+    ReactiveFormsModule,
+    IonContent,
+    IonCard,
+    IonCardHeader,
+    IonCardTitle,
+    IonCardContent,
+    IonItem,
+    IonLabel,
+    IonInput,
+    IonText,
+    IonButton,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ResetPasswordComponent implements OnInit {
