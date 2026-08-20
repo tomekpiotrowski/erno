@@ -34,15 +34,23 @@ pub async fn handle_upgrade(args: UpgradeArgs) -> ui::Cmd {
     ui::blank();
     print_plan(&plan);
 
+    if args.dry_run {
+        if !plan.blocking.is_empty() {
+            return Ok(());
+        }
+        if plan.is_current() {
+            ui::blank();
+            ui::ok("everything current");
+        }
+        return Ok(());
+    }
+
     if !plan.blocking.is_empty() {
         return Err(ui::Failure::Message(plan.blocking.join("\n")));
     }
     if plan.is_current() {
         ui::blank();
         ui::ok("everything current");
-        return Ok(());
-    }
-    if args.dry_run {
         return Ok(());
     }
 
