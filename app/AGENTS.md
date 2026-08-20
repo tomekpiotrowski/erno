@@ -6,7 +6,7 @@ Angular 22 library (`erno-angular`) that Ionic apps consume for web and mobile. 
 
 ```sh
 ng build erno-angular    # build the library into dist/
-ng test                  # Karma unit tests
+ng test                  # Vitest unit tests
 ng serve                 # dev server on :4200 (demo app)
 ```
 

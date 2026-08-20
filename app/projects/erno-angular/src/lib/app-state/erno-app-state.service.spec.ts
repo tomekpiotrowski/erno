@@ -14,7 +14,7 @@ describe('ErnoAppStateService', () => {
   });
 
   it('emits paused$ on active -> background', () => {
-    const paused = jasmine.createSpy('paused');
+    const paused = vi.fn().mockName('paused');
     service.paused$.subscribe(paused);
 
     service.notifyStateChange('background');
@@ -24,7 +24,7 @@ describe('ErnoAppStateService', () => {
   });
 
   it('emits resumed$ only on background -> active, not on subscribe', () => {
-    const resumed = jasmine.createSpy('resumed');
+    const resumed = vi.fn().mockName('resumed');
     service.resumed$.subscribe(resumed);
 
     expect(resumed).not.toHaveBeenCalled();
@@ -37,7 +37,7 @@ describe('ErnoAppStateService', () => {
   });
 
   it('dedupes repeated same-state notifications', () => {
-    const paused = jasmine.createSpy('paused');
+    const paused = vi.fn().mockName('paused');
     service.paused$.subscribe(paused);
 
     service.notifyStateChange('background');

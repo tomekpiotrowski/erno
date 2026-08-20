@@ -1,3 +1,4 @@
+import type { Mock } from 'vitest';
 import { TestBed } from '@angular/core/testing';
 import { provideHttpClient, withXhr } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
@@ -10,7 +11,7 @@ import { ErnoNetworkService } from '../network/erno-network.service';
 import { ErnoSyncService } from './erno-sync.service';
 
 /** Drains the microtask queue so async pull side effects (the HTTP request) run. */
-const flush = () => new Promise<void>(resolve => setTimeout(resolve));
+const flush = () => new Promise<void>((resolve) => setTimeout(resolve));
 
 const DELTA_PATH = '/api/todos/sync';
 const DELTA_URL = `http://api${DELTA_PATH}`;
@@ -21,19 +22,19 @@ describe('ErnoSyncService', () => {
   let network: ErnoNetworkService;
   let http: HttpTestingController;
   let realtimeEvents: Subject<SyncPushEvent>;
-  let connectSpy: jasmine.Spy;
+  let connectSpy: Mock;
   let dbStub: {
-    getLastSyncSeq: jasmine.Spy;
-    setLastSyncSeq: jasmine.Spy;
+    getLastSyncSeq: Mock;
+    setLastSyncSeq: Mock;
   };
 
   beforeEach(() => {
     realtimeEvents = new Subject<SyncPushEvent>();
-    connectSpy = jasmine.createSpy('connect');
+    connectSpy = vi.fn().mockName('connect');
     const realtimeStub = { events$: realtimeEvents.asObservable(), connect: connectSpy };
     dbStub = {
-      getLastSyncSeq: jasmine.createSpy('getLastSyncSeq').and.resolveTo(0),
-      setLastSyncSeq: jasmine.createSpy('setLastSyncSeq').and.resolveTo(undefined),
+      getLastSyncSeq: vi.fn().mockName('getLastSyncSeq').mockResolvedValue(0),
+      setLastSyncSeq: vi.fn().mockName('setLastSyncSeq').mockResolvedValue(undefined),
     };
 
     TestBed.configureTestingModule({
@@ -79,7 +80,7 @@ describe('ErnoSyncService', () => {
     const started = service.start();
     await flush();
 
-    http.expectOne(r => r.url === DELTA_URL).flush(emptyDelta());
+    http.expectOne((r) => r.url === DELTA_URL).flush(emptyDelta());
     await started;
 
     expect(connectSpy).toHaveBeenCalledTimes(1);
@@ -90,7 +91,7 @@ describe('ErnoSyncService', () => {
 
     const first = service.start();
     await flush();
-    http.expectOne(r => r.url === DELTA_URL).flush(emptyDelta());
+    http.expectOne((r) => r.url === DELTA_URL).flush(emptyDelta());
     await first;
 
     await service.start();
@@ -104,14 +105,14 @@ describe('ErnoSyncService', () => {
     registerTodo();
     const started = service.start();
     await flush();
-    http.expectOne(r => r.url === DELTA_URL).flush(emptyDelta());
+    http.expectOne((r) => r.url === DELTA_URL).flush(emptyDelta());
     await started;
 
     appState.notifyStateChange('background');
     appState.notifyStateChange('active');
     await flush();
 
-    http.expectOne(r => r.url === DELTA_URL).flush(emptyDelta());
+    http.expectOne((r) => r.url === DELTA_URL).flush(emptyDelta());
   });
 
   it('shares a single in-flight pull across concurrent callers', async () => {
@@ -122,25 +123,27 @@ describe('ErnoSyncService', () => {
     expect(a).toBe(b);
 
     await flush();
-    http.expectOne(r => r.url === DELTA_URL).flush(emptyDelta());
+    http.expectOne((r) => r.url === DELTA_URL).flush(emptyDelta());
     await a;
   });
 
   it('applies delta rows and advances the cursor to next_since', async () => {
     const applied: string[] = [];
-    registerTodo(async item => {
+    registerTodo(async (item) => {
       applied.push(item.id);
     });
 
     const pull = service.pullDelta();
     await flush();
-    http.expectOne(r => r.url === DELTA_URL).flush({
-      items: [
-        { id: 'a', sync_seq: 1, deleted_at: null, title: 'one' },
-        { id: 'b', sync_seq: 2, deleted_at: '2026-01-01T00:00:00', title: 'gone' },
-      ],
-      next_since: 2,
-    });
+    http
+      .expectOne((r) => r.url === DELTA_URL)
+      .flush({
+        items: [
+          { id: 'a', sync_seq: 1, deleted_at: null, title: 'one' },
+          { id: 'b', sync_seq: 2, deleted_at: '2026-01-01T00:00:00', title: 'gone' },
+        ],
+        next_since: 2,
+      });
     await pull;
 
     expect(applied).toEqual(['a', 'b']);
@@ -156,7 +159,7 @@ describe('ErnoSyncService', () => {
 
     http.expectNone(DELTA_URL);
     let status = '';
-    service.status$.subscribe(s => (status = s));
+    service.status$.subscribe((s) => (status = s));
     expect(status).toBe('offline');
   });
 
@@ -164,13 +167,13 @@ describe('ErnoSyncService', () => {
     registerTodo();
     const started = service.start();
     await flush();
-    http.expectOne(r => r.url === DELTA_URL).flush(emptyDelta());
+    http.expectOne((r) => r.url === DELTA_URL).flush(emptyDelta());
     await started;
 
     network.notifyStatusChange(false);
     network.notifyStatusChange(true);
     await flush();
 
-    http.expectOne(r => r.url === DELTA_URL).flush(emptyDelta());
+    http.expectOne((r) => r.url === DELTA_URL).flush(emptyDelta());
   });
 });

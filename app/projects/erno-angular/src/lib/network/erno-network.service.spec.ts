@@ -14,7 +14,7 @@ describe('ErnoNetworkService', () => {
   });
 
   it('emits offline$ on online -> offline', () => {
-    const offline = jasmine.createSpy('offline');
+    const offline = vi.fn().mockName('offline');
     service.offline$.subscribe(offline);
 
     service.notifyStatusChange(false);
@@ -24,7 +24,7 @@ describe('ErnoNetworkService', () => {
   });
 
   it('emits online$ only on offline -> online, not on subscribe', () => {
-    const online = jasmine.createSpy('online');
+    const online = vi.fn().mockName('online');
     service.online$.subscribe(online);
 
     expect(online).not.toHaveBeenCalled();
@@ -37,7 +37,7 @@ describe('ErnoNetworkService', () => {
   });
 
   it('dedupes repeated same-status notifications', () => {
-    const offline = jasmine.createSpy('offline');
+    const offline = vi.fn().mockName('offline');
     service.offline$.subscribe(offline);
 
     service.notifyStatusChange(false);
@@ -49,7 +49,7 @@ describe('ErnoNetworkService', () => {
   it('replays the current value on connected$', () => {
     service.notifyStatusChange(false);
     const values: boolean[] = [];
-    service.connected$.subscribe(v => values.push(v));
+    service.connected$.subscribe((v) => values.push(v));
     expect(values).toEqual([false]);
   });
 });

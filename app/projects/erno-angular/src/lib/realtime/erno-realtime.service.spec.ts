@@ -33,7 +33,7 @@ describe('ErnoRealtimeService', () => {
   let network: ErnoNetworkService;
 
   beforeEach(() => {
-    jasmine.clock().install();
+    vi.useFakeTimers();
     TestBed.configureTestingModule({
       providers: [
         { provide: ERNO_CONFIG, useValue: { baseUrl: 'http://api', wsUrl: 'ws://api/ws' } },
@@ -48,7 +48,7 @@ describe('ErnoRealtimeService', () => {
     service = TestBed.inject(ErnoRealtimeService) as unknown as TestableRealtimeService;
   });
 
-  afterEach(() => jasmine.clock().uninstall());
+  afterEach(() => vi.useRealTimers());
 
   it('opens a socket with the auth token on connect', () => {
     service.connect();
@@ -58,7 +58,7 @@ describe('ErnoRealtimeService', () => {
 
   it('forwards incoming messages to events$', () => {
     const received: SyncPushEvent[] = [];
-    service.events$.subscribe(e => received.push(e));
+    service.events$.subscribe((e) => received.push(e));
     service.connect();
 
     service.latest!.next({
@@ -89,7 +89,7 @@ describe('ErnoRealtimeService', () => {
     service.latest!.complete();
 
     expect(service.sockets.length).toBe(1);
-    jasmine.clock().tick(3000);
+    vi.advanceTimersByTime(3000);
     expect(service.sockets.length).toBe(2);
   });
 
@@ -97,7 +97,7 @@ describe('ErnoRealtimeService', () => {
     service.connect();
     service.disconnect();
 
-    jasmine.clock().tick(4000);
+    vi.advanceTimersByTime(4000);
     expect(service.sockets.length).toBe(1);
   });
 
@@ -105,7 +105,7 @@ describe('ErnoRealtimeService', () => {
     service.connect();
     appState.notifyStateChange('background');
 
-    jasmine.clock().tick(4000);
+    vi.advanceTimersByTime(4000);
     expect(service.sockets.length).toBe(1);
   });
 
@@ -139,7 +139,7 @@ describe('ErnoRealtimeService', () => {
     // reconnect scheduled; background before it fires
     appState.notifyStateChange('background');
 
-    jasmine.clock().tick(4000);
+    vi.advanceTimersByTime(4000);
     expect(service.sockets.length).toBe(1);
   });
 
@@ -147,7 +147,7 @@ describe('ErnoRealtimeService', () => {
     service.connect();
     network.notifyStatusChange(false);
 
-    jasmine.clock().tick(4000);
+    vi.advanceTimersByTime(4000);
     expect(service.sockets.length).toBe(1);
   });
 
@@ -173,7 +173,7 @@ describe('ErnoRealtimeService', () => {
     service.latest!.complete();
     network.notifyStatusChange(false);
 
-    jasmine.clock().tick(4000);
+    vi.advanceTimersByTime(4000);
     expect(service.sockets.length).toBe(1);
   });
 
@@ -184,7 +184,7 @@ describe('ErnoRealtimeService', () => {
     network.notifyStatusChange(true);
 
     expect(service.sockets.length).toBe(1);
-    jasmine.clock().tick(4000);
+    vi.advanceTimersByTime(4000);
     expect(service.sockets.length).toBe(1);
   });
 });
