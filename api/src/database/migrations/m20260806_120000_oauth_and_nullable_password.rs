@@ -9,9 +9,7 @@ impl MigrationTrait for Migration {
         // OAuth-only users have no password.
         manager
             .get_connection()
-            .execute_unprepared(
-                "ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL",
-            )
+            .execute_unprepared("ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL")
             .await?;
 
         manager
@@ -106,7 +104,9 @@ impl MigrationTrait for Migration {
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
             .get_connection()
-            .execute_unprepared("DROP TRIGGER IF EXISTS update_oauth_identities_updated_at ON oauth_identities")
+            .execute_unprepared(
+                "DROP TRIGGER IF EXISTS update_oauth_identities_updated_at ON oauth_identities",
+            )
             .await?;
         manager
             .drop_table(Table::drop().table(OauthIdentities::Table).to_owned())

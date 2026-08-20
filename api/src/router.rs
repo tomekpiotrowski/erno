@@ -141,10 +141,7 @@ pub fn cors_origin_list(configured: &[String]) -> Vec<HeaderValue> {
 
 fn expose_dev_inbox(email: &EmailConfig, environment: Environment) -> bool {
     matches!(email, EmailConfig::Mock)
-        && matches!(
-            environment,
-            Environment::Development | Environment::Test
-        )
+        && matches!(environment, Environment::Development | Environment::Test)
 }
 
 pub fn parse_extra_cors_origins(raw: &str) -> Vec<String> {

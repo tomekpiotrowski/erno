@@ -37,8 +37,7 @@ pub fn verify_state(secret: &str, state: &str) -> Result<OauthState, &'static st
     let json = URL_SAFE_NO_PAD
         .decode(body)
         .map_err(|_| "invalid state encoding")?;
-    let payload: OauthState =
-        serde_json::from_slice(&json).map_err(|_| "invalid state payload")?;
+    let payload: OauthState = serde_json::from_slice(&json).map_err(|_| "invalid state payload")?;
     if payload.exp < Utc::now().timestamp() {
         return Err("state expired");
     }
@@ -58,11 +57,7 @@ fn hmac_hex(secret: &str, body: &str) -> String {
 }
 
 fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
-    bytes
-        .as_ref()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    bytes.as_ref().iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
@@ -89,7 +84,10 @@ mod tests {
 
     #[test]
     fn rejects_tampered_state() {
-        let s = sign_state("test-secret-key-at-least-32-bytes!!", OauthProvider::Discord);
+        let s = sign_state(
+            "test-secret-key-at-least-32-bytes!!",
+            OauthProvider::Discord,
+        );
         let bad = format!("{s}x");
         assert!(verify_state("test-secret-key-at-least-32-bytes!!", &bad).is_err());
     }

@@ -23,9 +23,7 @@ use super::{
 };
 
 /// `GET /api/auth/oauth/providers` — which social buttons the app should show.
-pub async fn oauth_providers<ExtraConfig>(
-    State(app): State<App<ExtraConfig>>,
-) -> impl IntoResponse
+pub async fn oauth_providers<ExtraConfig>(State(app): State<App<ExtraConfig>>) -> impl IntoResponse
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
@@ -46,7 +44,11 @@ where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
     let Ok(provider) = provider.parse::<OauthProvider>() else {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "unknown_provider" }))).into_response();
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "unknown_provider" })),
+        )
+            .into_response();
     };
     if !is_configured(&app, provider) {
         return (
@@ -65,7 +67,15 @@ where
 
     let url = match provider {
         OauthProvider::Google => {
-            let client_id = app.config.auth.oauth.google.as_ref().unwrap().client_id.clone();
+            let client_id = app
+                .config
+                .auth
+                .oauth
+                .google
+                .as_ref()
+                .unwrap()
+                .client_id
+                .clone();
             format!(
                 "https://accounts.google.com/o/oauth2/v2/auth?\
                  client_id={client_id}\
@@ -78,7 +88,15 @@ where
             )
         }
         OauthProvider::Discord => {
-            let client_id = app.config.auth.oauth.discord.as_ref().unwrap().client_id.clone();
+            let client_id = app
+                .config
+                .auth
+                .oauth
+                .discord
+                .as_ref()
+                .unwrap()
+                .client_id
+                .clone();
             format!(
                 "https://discord.com/api/oauth2/authorize?\
                  client_id={client_id}\
@@ -89,7 +107,15 @@ where
             )
         }
         OauthProvider::Apple => {
-            let client_id = app.config.auth.oauth.apple.as_ref().unwrap().client_id.clone();
+            let client_id = app
+                .config
+                .auth
+                .oauth
+                .apple
+                .as_ref()
+                .unwrap()
+                .client_id
+                .clone();
             format!(
                 "https://appleid.apple.com/auth/authorize?\
                  client_id={client_id}\
@@ -105,10 +131,7 @@ where
     // URL-encode redirect_uri in authorize URL — callback contains reserved chars.
     let url = url.replace(
         &format!("redirect_uri={callback}"),
-        &format!(
-            "redirect_uri={}",
-            urlencoding_encode(&callback)
-        ),
+        &format!("redirect_uri={}", urlencoding_encode(&callback)),
     );
 
     Redirect::temporary(&url).into_response()
@@ -412,9 +435,7 @@ where
                 .await
                 .map_err(|e| e.to_string())?;
 
-            let id_token = token_res["id_token"]
-                .as_str()
-                .ok_or("missing id_token")?;
+            let id_token = token_res["id_token"].as_str().ok_or("missing id_token")?;
             // Decode JWT payload without full JWKS verify for first version;
             // signature verification via Apple JWKS is the hardening follow-up.
             let profile = decode_jwt_payload(id_token)?;
@@ -478,13 +499,11 @@ fn decode_jwt_payload(jwt: &str) -> Result<serde_json::Value, String> {
     if parts.len() < 2 {
         return Err("malformed jwt".into());
     }
-    let payload = base64::Engine::decode(
-        &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-        parts[1],
-    )
-    .or_else(|_| {
-        base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE, parts[1])
-    })
-    .map_err(|e| e.to_string())?;
+    let payload =
+        base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, parts[1])
+            .or_else(|_| {
+                base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE, parts[1])
+            })
+            .map_err(|e| e.to_string())?;
     serde_json::from_slice(&payload).map_err(|e| e.to_string())
 }
