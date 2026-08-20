@@ -16,7 +16,8 @@ cargo install --path .                   # install globally as `erno`
 |---------|-------------|
 | `erno setup` | Interactive wizard — writes `~/.erno/config.toml` with PostgreSQL admin credentials |
 | `erno doctor` | Checks the local environment: Rust, Node, Angular CLI, PostgreSQL, `~/.erno/config.toml`, admin DB access |
-| `erno new <name>` | Scaffolds a full-stack Erno project (Rust API + Ionic app + Astro www) |
+| `erno new <name>` | Scaffolds a full-stack Erno project (Rust API + Ionic Angular standalone app + Astro www) |
+| `erno upgrade` | Inventories Erno-managed packages and runs official migrators (`ng update`, `@ionic/migrate`) toward this CLI generation |
 | `erno dev` | Starts api + app + www dev servers, readiness banner, `--ios`/`--android` live reload (`--target <id>` picks the device) |
 | `erno dev` | Also starts Prometheus (if installed) and `admin/` on :4300 |
 | `erno deploy init` | Scaffolds Docker/Helm deploy files; generates admin password hash for production |
@@ -115,6 +116,7 @@ ALTER USER erno CREATEDB;
 | `src/commands/build.rs` | `erno build` — runs the `build` phase |
 | `src/commands/lint.rs` | `erno lint` — runs the `lint` phase, with `--fix` |
 | `src/commands/test.rs` | `erno test` — the `test` phase, plus test-database setup and e2e orchestration |
+| `src/commands/upgrade/` | `erno upgrade` — inventory scanners + official migrators; targets are this CLI generation |
 
 ## Output style
 
@@ -190,6 +192,7 @@ The escape vocabulary is exactly two sequences — cursor-up and erase-to-end-of
 - **No dependency on `api/`**: the CLI does not depend on the `erno` library crate. Admin uses `reqwest` + `ratatui` as an HTTP client. Keeping it decoupled avoids version skew and circular concerns.
 - **One manifest, three commands**: `build`, `lint`, and `test` differ only in which phase they run and whether `--fix` applies. The shared engine lives in `packages.rs`; the command modules are thin. `test.rs` is the only one that needs more, because the e2e package is orchestrated rather than shelled out — it passes a callback that `run_phase` gives first refusal on each package.
 - **Templates are inline strings**: `new.rs` holds all scaffold templates as Rust string constants/functions. `{{name}}` is substituted via `.replace()` — no template engine dependency.
+- **`erno upgrade` is an orchestrator**: scanners list Erno-managed packages; official tools (`ng update` one major at a time, `@ionic/migrate`) do the rewriting. Targets (`TARGET_ANGULAR_MAJOR`, `TARGET_IONIC_MAJOR`) are this CLI generation. Children run with `CI=true`.
 - **`erno_migrations()` helper**: scaffolded apps call `erno::database::migrations::erno_migrations()` in their `Migrator` to include all built-in framework migrations (users, jobs, sync, billing, storage) before their own.
 - **Database creation**: `erno new` connects with the admin URL from `~/.erno/config.toml` and issues `CREATE DATABASE` for `<name>_development` and `<name>_test`.
 - **`dev` children can never be interactive**: every child is spawned into its own process group with piped stdio, so reading the terminal raises `SIGTTIN` and stops it — a hang with an unanswerable question buried in a pipe. Anything a child would prompt for must be decided by the CLI beforehand and passed as a flag (`npx --yes`, `ionic --no-interactive --target`). As a backstop, `dev/process.rs` flushes an unterminated line once the stream goes quiet and `dev/log.rs` forwards prompt-shaped lines even in quiet mode.

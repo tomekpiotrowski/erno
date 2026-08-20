@@ -1,6 +1,6 @@
 # Erno App
 
-Angular 20 library (`erno-angular`) that Ionic apps consume for web and mobile. All commands below run from this directory (`app/`).
+Angular 22 library (`erno-angular`) that Ionic apps consume for web and mobile. All commands below run from this directory (`app/`).
 
 ## Building & testing
 

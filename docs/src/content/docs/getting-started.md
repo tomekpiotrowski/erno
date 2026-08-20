@@ -8,7 +8,7 @@ The fastest path to a working Erno app is the CLI: it scaffolds a Rust API, an I
 ## Prerequisites
 
 - Rust **1.88.0** or later
-- Node.js and npm
+- Node.js **22.22.3** or later (or 24.15+, or 26+)
 - Angular CLI (`ng`) and Ionic CLI (`ionic`)
 - PostgreSQL (server + `psql` client)
 - Optional: `sea-orm-cli` for generating migrations

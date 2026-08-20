@@ -5,7 +5,7 @@ sidebar:
   order: 0
 ---
 
-`erno-angular` is an Angular 20 library that wires an Angular or Ionic app to an Erno backend. It provides auth, offline-first sync, file storage, billing, sharing, realtime push, and developer tooling as injectable Angular services.
+`erno-angular` is an Angular 22 library that wires an Angular or Ionic app to an Erno backend. It provides auth, offline-first sync, file storage, billing, sharing, realtime push, and developer tooling as injectable Angular services.
 
 ## Installation
 
@@ -29,26 +29,30 @@ npm install file:/path/to/erno/app/dist/erno-angular-0.0.1.tgz
 
 ## Setup
 
-Import `ErnoModule` in your `app.config.ts` (standalone) or `AppModule` (NgModule):
+Call `provideErno` from a standalone `bootstrapApplication` (what `erno new` writes). NgModule apps keep `ErnoModule.forRoot()`, which delegates to the same providers.
 
 ```typescript
-// standalone (Angular 17+)
-import { ApplicationConfig, importProvidersFrom } from '@angular/core';
-import { ErnoModule } from 'erno-angular';
+import { provideErno } from 'erno-angular';
 
-export const appConfig: ApplicationConfig = {
+bootstrapApplication(AppComponent, {
   providers: [
-    importProvidersFrom(
-      ErnoModule.forRoot({
-        baseUrl: 'http://localhost:3000',
-        wsUrl: 'ws://localhost:3000',
-      })
-    ),
+    provideErno({
+      baseUrl: 'http://localhost:3000',
+      wsUrl: 'ws://localhost:3000',
+    }),
   ],
-};
+});
 ```
 
-`ErnoModule.forRoot()` registers all services and wires up the HTTP interceptor that attaches JWT tokens to every outbound request.
+```typescript
+// NgModule apps
+ErnoModule.forRoot({
+  baseUrl: 'http://localhost:3000',
+  wsUrl: 'ws://localhost:3000',
+})
+```
+
+Either form registers all services and the HTTP interceptor that attaches JWT tokens to every outbound request.
 
 ## Services
 
@@ -80,7 +84,7 @@ export const appConfig: ApplicationConfig = {
 - **Mirrors backend modules** — each service corresponds to a module in `api/src/`
 - **Token flow** — `ErnoAuthService` stores access + refresh tokens; `ErnoHttpInterceptor` attaches them automatically and triggers a silent refresh on 401
 - **Offline-first** — `ErnoDatabaseService` wraps Dexie (IndexedDB); `ErnoSyncService` pulls deltas from the backend sync endpoints and writes them to the local store
-- **Target consumers** — Angular 20+ apps including Ionic/Capacitor; no Ionic-specific code in the library itself (except optional toast alerts)
+- **Target consumers** — Angular 22 apps including Ionic 9 / Capacitor; no Ionic-specific code in the library itself (except optional toast alerts)
 
 ## See also
 

@@ -31,7 +31,7 @@ Per-directory instructions below still apply when working inside one part.
 
 ## App (Angular)
 
-`app/` contains `erno-angular` — an Angular 20 library that Ionic apps consume for web and mobile. See `app/AGENTS.md` for build instructions, service reference, and architecture notes.
+`app/` contains `erno-angular` — an Angular 22 library that Ionic apps consume for web and mobile. See `app/AGENTS.md` for build instructions, service reference, and architecture notes.
 
 ## CLI
 

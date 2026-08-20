@@ -26,6 +26,7 @@ cargo install erno-cli
 | [`erno build`](#build) | Build every package, in dependency order |
 | [`erno lint`](#lint) | Format-check, lint, and typecheck every package |
 | [`erno test`](#test) | Run each package's tests, then e2e |
+| [`erno upgrade`](/cli/upgrade/) | Inventory and update Erno-managed packages |
 | [`erno deploy`](/cli/deploy/) | Scaffold Docker/Helm files and install releases |
 
 All three of `build`, `lint`, and `test` read one manifest — [`erno.toml`](#the-package-manifest) in the project root.
