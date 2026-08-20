@@ -18,7 +18,7 @@ use std::sync::Arc;
 use clap::Args;
 use tokio::process::Command;
 
-use banner::{print_banner, spawn_readiness_watcher, starting_snapshot};
+use banner::spawn_readiness_watcher;
 use log::LogSink;
 use process::{spawn_labeled, Supervisor};
 pub use project::resolve_project_root;
@@ -180,7 +180,12 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) -> ui::
         }
     }
 
-    print_banner(&urls, &starting_snapshot(&urls));
+    // Held for the lifetime of the command like `_lock` above: its `Drop` takes
+    // the pinned banner off the screen, which is why the `?`s below are safe.
+    // `None` means this terminal cannot pin, so the banner scrolled and the
+    // readiness watcher narrates each change as a row instead.
+    let banner = banner::start(&urls);
+    let sticky = banner.is_some();
     if args.open {
         if let Some(url) = open::url_to_open(
             urls.www.as_deref(),
@@ -199,7 +204,7 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) -> ui::
             seed::maybe_seed(&seed_root, &api_url, force_seed).await;
         });
     }
-    spawn_readiness_watcher(urls.clone());
+    spawn_readiness_watcher(urls.clone(), sticky);
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
@@ -296,6 +301,9 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) -> ui::
     });
 
     let _ = tokio::signal::ctrl_c().await;
+    // Unpin before anything else prints: the final banner lands in the
+    // scrollback, and the watcher stops narrating as the children go down.
+    drop(banner);
     ui::blank();
     ui::info("Shutting down...");
     let _ = shutdown_tx.send(true);

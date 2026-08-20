@@ -105,7 +105,7 @@ ALTER USER erno CREATEDB;
 | File | Responsibility |
 |------|---------------|
 | `src/main.rs` | CLI entry point — clap command definitions, global flags, and dispatch |
-| `src/ui.rs` | **Every** terminal write — styling, rows, sections, prefixes, prompts, errors |
+| `src/ui.rs` | **Every** terminal write — styling, rows, sections, prefixes, prompts, errors, and the pinned `dev` region |
 | `src/global_config.rs` | `~/.erno/config.toml` read/write via the `config` crate |
 | `src/commands/setup.rs` | Interactive config writer; validates admin connection before saving |
 | `src/commands/doctor.rs` | Environment checks — each returns a `CheckResult` (a `ui::Row` plus whether it is required) |
@@ -160,9 +160,30 @@ Prefer returning `Failure` over exiting: it unwinds, so guards like `DevLock` st
 
 Everything visible is a pure `render_*(on: bool, …) -> String` with a thin printing wrapper. Test the pure half — that keeps tests free of global state and order-independent. `ui::init` is never called under `cargo test`, so colour defaults to off.
 
+The pinned region follows the same rule: `render_frame`, `truncate_display`, `fit_region`, `region_fits`, and `strip_cursor_control` are pure and unit-tested; only `pin`/`repin`/`frame` touch the terminal. What is left — the `ioctl`, real cursor motion, and cross-task interleaving — has no pty harness in the tree and is verified by hand:
+
+```
+erno dev                     # region pins, states flip in place, logs scroll above
+  resize the window mid-run  # next redraw re-fits: no wrap, no stray rows
+Ctrl+C                       # final banner left once in the scrollback
+erno dev | cat               # stdout piped: no flicker, region correct on stderr
+erno dev 2>/dev/null         # no escapes anywhere
+erno dev --no-color / -q / -v / ERNO_STICKY=0 / TERM=dumb   # fallback in all five
+```
+
+### The pinned region
+
+`erno dev` pins its status banner to the last rows of the terminal and redraws it in place as services become ready, with logs scrolling above it. This is the only cursor control in the CLI, it lives entirely in `ui.rs`, and it is stderr-only.
+
+- **`ui::pin(lines) -> Option<Pinned>`** starts it; `ui::repin(lines)` replaces the content; dropping the `Pinned` guard erases the region and leaves its final contents in the scrollback. The guard is modelled on `DevLock` — it is what makes an early `?` safe. `ui::fatal` also clears the region, which covers the paths that `exit` without unwinding.
+- **`None` means fall back**, and the fallback is the behaviour the CLI has always had: the banner printed once, then one `ok`/`info` row per state change. `dev/banner.rs` keeps both renderers, and `spawn_readiness_watcher` takes a `sticky` flag rather than reading a global. Transition rows are suppressed while the region is live — the region already shows every state, and printing both is the duplication this replaced.
+- **The predicate**: a unix terminal on stderr (`is_terminal` is checked separately from `color()`, because `CLICOLOR_FORCE` can make colour true for a file), ANSI enabled, not `--quiet`, not `--verbose` (that is the raw multiplex), `ERNO_STICKY != 0`, and `ui::region_fits` — the whole region fitting as it is, with rows to spare above it.
+- **The invariant**: the region occupies the last `drawn` rows and the cursor sits at column 0 below it, so every frame emits exactly `body + region` newlines. Terminal size comes from `TIOCGWINSZ` on each redraw (`SIGWINCH` is not handled); `ui::fit_region` and `ui::truncate_display` guarantee no region line wraps, because a wrapped region line would break the cursor-up count. Forwarded child text is passed through `ui::strip_cursor_control` while a region is live, so a tool drawing its own progress cannot dislodge it.
+- **One output mutex** serialises every write on both streams, which is what makes erase → write → redraw atomic against `dev`'s ~19 printing tasks. Nothing holding that lock may call a `ui` function that takes it. Multi-line renders go out through `ui::emit_block` as one frame, so another task's `[api] …` can no longer land mid-banner.
+
 ### Deliberate non-goals
 
-The `dev` banner reprints in full on state change. No cursor control, no in-place redraw, no spinners, no `indicatif`. Scrolling is honest and keeps the renderer a testable pure function.
+The escape vocabulary is exactly two sequences — cursor-up and erase-to-end-of-display. No alternate screen, no raw mode, no cursor hiding, no spinners, no `indicatif`. A SIGKILL therefore leaves the terminal in a completely normal state, and every renderer stays a pure function.
 
 ## Architecture notes
 

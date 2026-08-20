@@ -178,10 +178,100 @@ pub fn render_banner_when(on: bool, urls: &DevUrls, snap: &BannerSnapshot) -> St
 }
 
 pub fn print_banner(urls: &DevUrls, snap: &BannerSnapshot) {
-    // Narration, like everything else the CLI says about itself.
-    for line in render_banner(urls, snap).lines() {
-        ui::emit(ui::Stream::Err, line);
+    // Narration, like everything else the CLI says about itself — and one
+    // block, so a child's line cannot land in the middle of it.
+    ui::emit_block(ui::Stream::Err, &render_banner(urls, snap));
+}
+
+/// The banner's rows, ready to pin: [`render_banner_when`] without the trailing
+/// blank line. The leading one is kept, separating the region from the log
+/// lines scrolling above it.
+///
+/// The row count does not depend on the snapshot, so the pinned region never
+/// changes height as services come up.
+pub fn region_lines(on: bool, urls: &DevUrls, snap: &BannerSnapshot) -> Vec<String> {
+    let text = render_banner_when(on, urls, snap);
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    while lines.last().is_some_and(|l| l.trim().is_empty()) {
+        lines.pop();
     }
+    lines
+}
+
+/// Show the banner: pinned to the bottom of the terminal where that works,
+/// scrolled otherwise.
+///
+/// `Some` means the region is live, and the caller must not also print
+/// transition rows — the region already shows every state, and doing both would
+/// bring back exactly the duplication this replaced. Hold the guard for the
+/// session: dropping it takes the region down.
+pub fn start(urls: &DevUrls) -> Option<ui::Pinned> {
+    let snap = starting_snapshot(urls);
+    let pinned = ui::pin(&region_lines(ui::color(), urls, &snap));
+    if pinned.is_none() {
+        print_banner(urls, &snap);
+    }
+    pinned
+}
+
+/// One service's state change, as the readiness watcher observes it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Transition {
+    name: &'static str,
+    state: ServiceState,
+}
+
+/// The banner's services, in banner order. The one place their names live.
+const SERVICES: [&str; 4] = ["www", "app", "api", "prom"];
+
+fn transitions(prev: &BannerSnapshot, next: &BannerSnapshot) -> Vec<Transition> {
+    let pairs = [
+        (prev.www, next.www),
+        (prev.app, next.app),
+        (prev.api, next.api),
+        (prev.prometheus, next.prometheus),
+    ];
+    SERVICES
+        .iter()
+        .zip(pairs)
+        .filter_map(|(name, (before, after))| match (before, after) {
+            (Some(before), Some(after)) if before != after => {
+                Some(Transition { name, state: after })
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The banner is printed once; every later change is a single row instead of
+/// another full copy. The name column is sized from every service name, not
+/// just the ones in this batch, so rows printed seconds apart still line up.
+pub fn render_transitions(on: bool, changes: &[Transition]) -> String {
+    let name_w = ui::column_width(SERVICES);
+    let mut out = String::new();
+    for change in changes {
+        let level = match change.state {
+            ServiceState::Ready => ui::Level::Ok,
+            ServiceState::Starting | ServiceState::Migrating => ui::Level::Info,
+        };
+        let name = ui::paint_when(
+            on,
+            ui::label_style(change.name),
+            &format!("{:<name_w$}", change.name),
+        );
+        let state = ui::paint_when(on, change.state.style(), change.state.label());
+        out.push_str(&ui::render_row(on, level, &format!("{name}  {state}")));
+        out.push('\n');
+    }
+    out
+}
+
+fn print_transitions(changes: &[Transition]) {
+    // These are `ok`/`info` rows, so `--quiet` drops them like any other.
+    if ui::quiet() {
+        return;
+    }
+    ui::emit_block(ui::Stream::Err, &render_transitions(ui::color(), changes));
 }
 
 pub fn starting_snapshot(urls: &DevUrls) -> BannerSnapshot {
@@ -193,8 +283,10 @@ pub fn starting_snapshot(urls: &DevUrls) -> BannerSnapshot {
     }
 }
 
-/// Probe HTTP endpoints and reprint the banner whenever a service changes state.
-pub fn spawn_readiness_watcher(urls: DevUrls) {
+/// Probe HTTP endpoints and report whenever a service changes state: by
+/// redrawing the pinned region when there is one, and by printing a single row
+/// per change when the banner scrolled instead.
+pub fn spawn_readiness_watcher(urls: DevUrls, sticky: bool) {
     tokio::spawn(async move {
         let client = match Client::builder()
             .timeout(Duration::from_millis(500))
@@ -209,7 +301,11 @@ pub fn spawn_readiness_watcher(urls: DevUrls) {
         loop {
             let next = probe_all(&client, &urls).await;
             if next != last {
-                print_banner(&urls, &next);
+                if sticky {
+                    ui::repin(&region_lines(ui::color(), &urls, &next));
+                } else {
+                    print_transitions(&transitions(&last, &next));
+                }
                 last = next;
             }
             tokio::time::sleep(Duration::from_millis(500)).await;
@@ -376,6 +472,124 @@ mod tests {
         assert!(text.contains("http://localhost:9090"));
         assert!(!text.contains("app"));
         assert!(!text.contains("www"));
+    }
+
+    #[test]
+    fn region_lines_are_the_banner_without_the_trailing_blank() {
+        let urls = DevUrls::defaults(true, true, true);
+        let snap = starting_snapshot(&urls);
+        let lines = region_lines(false, &urls, &snap);
+        let text = render_banner_when(false, &urls, &snap);
+
+        assert_eq!(lines.first().map(String::as_str), Some(""));
+        assert!(!lines.last().unwrap().trim().is_empty());
+        assert!(lines.iter().all(|l| !l.contains('\n')));
+        assert!(lines.iter().all(|l| !l.contains('\u{1b}')));
+        // Same content, same order — the layout maths is not duplicated.
+        assert_eq!(lines.join("\n"), text.trim_end_matches('\n'));
+    }
+
+    #[test]
+    fn the_pinned_region_never_changes_height() {
+        // A region that grew or shrank between redraws would leave the
+        // cursor-up count wrong and eat a row of log output.
+        let urls = DevUrls::defaults(true, true, true);
+        let starting = region_lines(false, &urls, &starting_snapshot(&urls));
+        let ready = region_lines(
+            false,
+            &urls,
+            &BannerSnapshot {
+                api: Some(ServiceState::Ready),
+                app: Some(ServiceState::Ready),
+                www: Some(ServiceState::Migrating),
+                prometheus: Some(ServiceState::Ready),
+            },
+        );
+        assert_eq!(starting.len(), ready.len());
+    }
+
+    #[test]
+    fn only_changed_services_produce_a_row() {
+        let urls = DevUrls::defaults(true, true, true);
+        let before = starting_snapshot(&urls);
+        let after = BannerSnapshot {
+            api: Some(ServiceState::Ready),
+            ..before.clone()
+        };
+        let changes = transitions(&before, &after);
+        assert_eq!(
+            changes,
+            vec![Transition {
+                name: "api",
+                state: ServiceState::Ready,
+            }]
+        );
+        let text = render_transitions(false, &changes);
+        assert_eq!(text, "  ok    api   ready\n");
+    }
+
+    #[test]
+    fn an_unchanged_snapshot_prints_nothing() {
+        let urls = DevUrls::defaults(true, true, true);
+        let snap = starting_snapshot(&urls);
+        assert!(transitions(&snap, &snap).is_empty());
+        assert_eq!(render_transitions(false, &[]), "");
+    }
+
+    #[test]
+    fn a_regression_to_starting_is_reported_without_an_ok_marker() {
+        let urls = DevUrls::defaults(true, false, false);
+        let ready = BannerSnapshot {
+            api: Some(ServiceState::Ready),
+            app: None,
+            www: None,
+            prometheus: Some(ServiceState::Ready),
+        };
+        let restarting = BannerSnapshot {
+            api: Some(ServiceState::Starting),
+            ..ready.clone()
+        };
+        let text = render_transitions(false, &transitions(&ready, &restarting));
+        assert_eq!(text, "        api   starting\n");
+        assert!(urls.api.is_some());
+    }
+
+    #[test]
+    fn transition_rows_share_one_state_column() {
+        let urls = DevUrls::defaults(true, true, true);
+        let before = starting_snapshot(&urls);
+        let after = BannerSnapshot {
+            api: Some(ServiceState::Ready),
+            app: Some(ServiceState::Ready),
+            www: Some(ServiceState::Ready),
+            prometheus: Some(ServiceState::Ready),
+        };
+        let text = render_transitions(false, &transitions(&before, &after));
+        let offsets: Vec<usize> = text.lines().filter_map(|l| l.find("ready")).collect();
+        assert_eq!(offsets.len(), 4);
+        assert!(
+            offsets.windows(2).all(|w| w[0] == w[1]),
+            "state column ragged: {offsets:?}\n{text}"
+        );
+        // `prom` is the widest name, so every row is padded to it.
+        assert!(text.contains("prom  ready"));
+    }
+
+    #[test]
+    fn transitions_have_no_escapes_when_colour_is_off() {
+        let urls = DevUrls::defaults(true, true, true);
+        let before = starting_snapshot(&urls);
+        let after = BannerSnapshot {
+            api: Some(ServiceState::Migrating),
+            app: Some(ServiceState::Ready),
+            ..before.clone()
+        };
+        let text = render_transitions(false, &transitions(&before, &after));
+        assert!(!text.contains('\u{1b}'));
+        assert_eq!(
+            ui::strip_ansi(&render_transitions(true, &transitions(&before, &after))),
+            text,
+        );
     }
 
     #[test]
