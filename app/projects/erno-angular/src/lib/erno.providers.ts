@@ -1,5 +1,5 @@
 import { EnvironmentProviders, makeEnvironmentProviders } from '@angular/core';
-import { HTTP_INTERCEPTORS, provideHttpClient, withInterceptorsFromDi, withXhr } from '@angular/common/http';
+import { HTTP_INTERCEPTORS, provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
 
 import { ErnoConfig, ERNO_CONFIG } from './erno.config';
 import { ErnoAuthService } from './auth/erno-auth.service';
@@ -22,7 +22,7 @@ import { ErnoNetworkService } from './network/erno-network.service';
 export function provideErno(config: ErnoConfig): EnvironmentProviders {
   return makeEnvironmentProviders([
     { provide: ERNO_CONFIG, useValue: config },
-    provideHttpClient(withXhr(), withInterceptorsFromDi()),
+    provideHttpClient(withInterceptorsFromDi()),
     { provide: HTTP_INTERCEPTORS, useClass: ErnoHttpInterceptor, multi: true },
     ErnoHttpService,
     ErnoAuthService,
