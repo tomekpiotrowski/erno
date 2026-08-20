@@ -10,66 +10,81 @@ type Tab = 'status' | 'emails' | 'jobs';
   standalone: false,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div *ngIf="visible" class="erno-devtools" [class.wide]="tab === 'emails' || tab === 'jobs'">
-      <div class="header">
-        <strong>Erno Devtools</strong>
-        <div class="tabs">
-          <button [class.active]="tab === 'status'" (click)="tab = 'status'">Status</button>
-          <button [class.active]="tab === 'emails'" (click)="switchToEmails()">
-            Emails<span *ngIf="emails().length"> ({{ emails().length }})</span>
+    @if (visible) {
+      <div class="erno-devtools" [class.wide]="tab === 'emails' || tab === 'jobs'">
+        <div class="header">
+          <strong>Erno Devtools</strong>
+          <div class="tabs">
+            <button [class.active]="tab === 'status'" (click)="tab = 'status'">Status</button>
+            <button [class.active]="tab === 'emails'" (click)="switchToEmails()">
+              Emails@if (emails().length) {
+              <span> ({{ emails().length }})</span>
+            }
           </button>
           <button [class.active]="tab === 'jobs'" (click)="switchToJobs()">
-            Jobs<span *ngIf="jobs().length"> ({{ jobs().length }})</span>
-          </button>
-        </div>
+            Jobs@if (jobs().length) {
+            <span> ({{ jobs().length }})</span>
+          }
+        </button>
       </div>
-
-      <ng-container *ngIf="tab === 'status'">
-        <div>WS: {{ wsStatus }}</div>
-        <div>Sync: {{ syncStatus$ | async }}</div>
-        <button (click)="forceSync()">Force re-sync</button>
-      </ng-container>
-
-      <ng-container *ngIf="tab === 'emails'">
-        <div class="email-toolbar">
-          <button (click)="loadEmails()">↺</button>
-          <button (click)="clearAll()" [disabled]="emails().length === 0">Clear all</button>
-        </div>
-        <div *ngIf="emails().length === 0" class="empty">No emails sent.</div>
-        <div *ngFor="let email of emails()" class="email-row">
+    </div>
+    @if (tab === 'status') {
+      <div>WS: {{ wsStatus }}</div>
+      <div>Sync: {{ syncStatus$ | async }}</div>
+      <button (click)="forceSync()">Force re-sync</button>
+    }
+    @if (tab === 'emails') {
+      <div class="email-toolbar">
+        <button (click)="loadEmails()">↺</button>
+        <button (click)="clearAll()" [disabled]="emails().length === 0">Clear all</button>
+      </div>
+      @if (emails().length === 0) {
+        <div class="empty">No emails sent.</div>
+      }
+      @for (email of emails(); track email) {
+        <div class="email-row">
           <div class="email-summary" (click)="toggle(email.id)">
             <span class="arrow">{{ expanded() === email.id ? '▾' : '▸' }}</span>
             <span class="subject">{{ email.subject }}</span>
             <span class="to">→ {{ email.to }}</span>
           </div>
-          <ng-container *ngIf="expanded() === email.id">
-            <iframe *ngIf="email.body_html" [srcdoc]="email.body_html" sandbox class="body-frame"></iframe>
-            <pre *ngIf="!email.body_html && email.body_text" class="body-text">{{ email.body_text }}</pre>
+          @if (expanded() === email.id) {
+            @if (email.body_html) {
+              <iframe [srcdoc]="email.body_html" sandbox class="body-frame"></iframe>
+            }
+            @if (!email.body_html && email.body_text) {
+              <pre class="body-text">{{ email.body_text }}</pre>
+            }
             <button class="delete-btn" (click)="deleteEmail(email.id)">× delete</button>
-          </ng-container>
+          }
         </div>
-      </ng-container>
-
-      <ng-container *ngIf="tab === 'jobs'">
-        <div class="email-toolbar">
-          <button (click)="loadJobs()">↺</button>
-          <button (click)="clearJobs()" [disabled]="jobs().length === 0">Clear all</button>
-        </div>
-        <div *ngIf="jobs().length === 0" class="empty">No jobs.</div>
-        <div *ngFor="let job of jobs()" class="email-row">
+      }
+    }
+    @if (tab === 'jobs') {
+      <div class="email-toolbar">
+        <button (click)="loadJobs()">↺</button>
+        <button (click)="clearJobs()" [disabled]="jobs().length === 0">Clear all</button>
+      </div>
+      @if (jobs().length === 0) {
+        <div class="empty">No jobs.</div>
+      }
+      @for (job of jobs(); track job) {
+        <div class="email-row">
           <div class="email-summary" (click)="toggleJob(job.id)">
             <span class="arrow">{{ expandedJob() === job.id ? '▾' : '▸' }}</span>
             <span class="subject">{{ job.type }}</span>
             <span class="to" [class]="'status-' + job.status">{{ job.status }}</span>
           </div>
-          <ng-container *ngIf="expandedJob() === job.id">
+          @if (expandedJob() === job.id) {
             <pre class="body-text">{{ job.arguments | json }}</pre>
             <div class="job-meta">retries: {{ job.retry_count }} · {{ job.created_at | date:'HH:mm:ss' }}</div>
-          </ng-container>
+          }
         </div>
-      </ng-container>
+      }
+    }
     </div>
-  `,
+    }
+    `,
   styles: [`
     .erno-devtools {
       position: fixed;
