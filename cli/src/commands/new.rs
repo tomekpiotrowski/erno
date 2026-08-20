@@ -24,6 +24,8 @@ const APP_MAIN_TS: &str = include_str!("../../templates/app/src/main.ts");
 const APP_COMPONENT_TS: &str = include_str!("../../templates/app/src/app/app.component.ts");
 const APP_ENVIRONMENT_TS: &str =
     include_str!("../../templates/app/src/environments/environment.ts");
+const APP_ENVIRONMENT_PROD_TS: &str =
+    include_str!("../../templates/app/src/environments/environment.prod.ts");
 const APP_COMPONENT_HTML: &str = include_str!("../../templates/app/app.component.html");
 const APP_ROUTES_TS: &str = include_str!("../../templates/app/src/app/app.routes.ts");
 const AUTH_GUARD_TS: &str = include_str!("../../templates/app/src/app/auth/auth.guard.ts");
@@ -593,6 +595,10 @@ fn patch_app(
     write(
         &app.join("src/environments/environment.ts"),
         APP_ENVIRONMENT_TS,
+    );
+    write(
+        &app.join("src/environments/environment.prod.ts"),
+        APP_ENVIRONMENT_PROD_TS,
     );
     write(&app.join("src/app/app.component.html"), APP_COMPONENT_HTML);
     write(&app.join("src/app/app.routes.ts"), APP_ROUTES_TS);

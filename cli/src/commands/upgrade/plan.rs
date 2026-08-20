@@ -128,7 +128,9 @@ fn scan_app(pkg_json: &str) -> Vec<UpgradeStep> {
         _ => false,
     };
     if let Some(from) = dep_raw(&pkg, "erno-angular") {
-        if angular_behind || ionic_behind || version_name(&from) != TARGET_ERNO_ANGULAR {
+        let local = from.starts_with("file:") || from.starts_with('/') || from.starts_with('.');
+        if !local && (angular_behind || ionic_behind || version_name(&from) != TARGET_ERNO_ANGULAR)
+        {
             steps.push(UpgradeStep {
                 label: "app erno-angular".into(),
                 current: from.clone(),
@@ -388,6 +390,23 @@ erno = { path = "/home/me/erno/api" }
         }
         assert!(plan.steps[0].how.contains("20→21"));
         assert!(plan.steps[0].how.contains("21→22"));
+    }
+
+    #[test]
+    fn local_file_erno_angular_is_not_a_registry_bump() {
+        let mut s = snap();
+        s.app_package = Some(
+            r#"{
+              "dependencies": {
+                "@angular/core": "^22.1.3",
+                "@ionic/angular": "^9.0.0",
+                "erno-angular": "file:/tmp/erno-angular"
+              }
+            }"#
+            .into(),
+        );
+        let plan = plan_upgrade(&s);
+        assert!(plan.steps.is_empty(), "{:?}", plan.steps);
     }
 
     #[test]
