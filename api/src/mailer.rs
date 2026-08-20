@@ -45,6 +45,15 @@ impl MockTransport {
         self.records.lock().unwrap().clone()
     }
 
+    pub fn record(&self, id: Uuid) -> Option<MockEmailRecord> {
+        self.records
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|r| r.id == id)
+            .cloned()
+    }
+
     pub fn remove_record(&self, id: Uuid) -> bool {
         let mut records = self.records.lock().unwrap();
         let len_before = records.len();
@@ -103,6 +112,13 @@ impl Mailer {
     pub fn records(&self) -> Option<Vec<MockEmailRecord>> {
         match self {
             Self::Mock(transport) => Some(transport.records()),
+            Self::Smtp(_) => None,
+        }
+    }
+
+    pub fn record(&self, id: Uuid) -> Option<MockEmailRecord> {
+        match self {
+            Self::Mock(transport) => transport.record(id),
             Self::Smtp(_) => None,
         }
     }

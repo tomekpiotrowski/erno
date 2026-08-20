@@ -28,6 +28,11 @@ export class ErnoDevMailService {
     return this.http.delete<void>(`${this.config.baseUrl}/dev/emails/${id}`);
   }
 
+  /** Standalone preview page for one email, meant to be opened in a new tab. */
+  previewUrl(id: string): string {
+    return `${this.config.baseUrl}/dev/emails/${id}/preview`;
+  }
+
   clear(): Observable<void> {
     return this.http.delete<void>(`${this.config.baseUrl}/dev/emails`);
   }

@@ -2,7 +2,9 @@ use axum::{routing::get, Router};
 
 use crate::{
     app::App,
-    dev::handlers::{clear_emails, clear_jobs, delete_email, list_emails, list_jobs},
+    dev::handlers::{
+        clear_emails, clear_jobs, delete_email, email_body, email_preview, list_emails, list_jobs,
+    },
 };
 
 pub fn dev_router<ExtraConfig: Clone + Send + Sync + 'static>(app: App<ExtraConfig>) -> Router {
@@ -15,6 +17,11 @@ pub fn dev_router<ExtraConfig: Clone + Send + Sync + 'static>(app: App<ExtraConf
             "/dev/emails/{id}",
             axum::routing::delete(delete_email::<ExtraConfig>),
         )
+        .route(
+            "/dev/emails/{id}/preview",
+            get(email_preview::<ExtraConfig>),
+        )
+        .route("/dev/emails/{id}/body", get(email_body::<ExtraConfig>))
         .route(
             "/dev/jobs",
             get(list_jobs::<ExtraConfig>).delete(clear_jobs::<ExtraConfig>),

@@ -42,22 +42,20 @@ type Tab = 'status' | 'emails' | 'jobs';
       @if (emails().length === 0) {
         <div class="empty">No emails sent.</div>
       }
-      @for (email of emails(); track email) {
-        <div class="email-row">
-          <div class="email-summary" (click)="toggle(email.id)">
-            <span class="arrow">{{ expanded() === email.id ? '▾' : '▸' }}</span>
+      @for (email of emails(); track email.id) {
+        <div class="email-card" (click)="openEmail(email)" title="Open in a new tab">
+          <div class="email-line">
             <span class="subject">{{ email.subject }}</span>
-            <span class="to">→ {{ email.to }}</span>
+            <span class="time">{{ email.created_at | date:'HH:mm:ss' }}</span>
           </div>
-          @if (expanded() === email.id) {
-            @if (email.body_html) {
-              <iframe [srcdoc]="email.body_html" sandbox class="body-frame"></iframe>
-            }
-            @if (!email.body_html && email.body_text) {
-              <pre class="body-text">{{ email.body_text }}</pre>
-            }
-            <button class="delete-btn" (click)="deleteEmail(email.id)">× delete</button>
-          }
+          <div class="email-line">
+            <span class="to">{{ email.to }}</span>
+            <span class="actions">
+              <span class="open-hint">open ↗</span>
+              <button class="icon-btn" title="Delete"
+                (click)="deleteEmail(email.id); $event.stopPropagation()">×</button>
+            </span>
+          </div>
         </div>
       }
     }
@@ -118,11 +116,26 @@ type Tab = 'status' | 'emails' | 'jobs';
     .email-row { border-top: 1px solid #333; padding-top: 4px; }
     .email-summary { cursor: pointer; display: flex; gap: 4px; align-items: baseline; }
     .arrow { flex-shrink: 0; }
-    .subject { font-weight: bold; flex-shrink: 0; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .email-card {
+      display: flex; flex-direction: column; gap: 2px; cursor: pointer;
+      padding: 6px 8px; border-radius: 6px; background: #1c1c1c;
+      border: 1px solid #333;
+    }
+    .email-card:hover { background: #262626; border-color: #4a4a4a; }
+    .email-line { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; }
+    .email-card .subject, .email-card .to { flex: 1; min-width: 0; }
+    .subject { font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .time { color: #777; font-size: 10px; flex-shrink: 0; }
     .to { color: #aaa; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .body-frame { width: 100%; height: 200px; border: 1px solid #555; border-radius: 4px; margin-top: 4px; background: #fff; }
+    .actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+    .open-hint { color: #666; font-size: 10px; }
+    .email-card:hover .open-hint { color: #6af; }
+    .icon-btn {
+      background: none; color: #777; border: none; padding: 0 2px;
+      cursor: pointer; font-size: 13px; line-height: 1; font-family: monospace;
+    }
+    .icon-btn:hover { color: #f66; }
     .body-text { white-space: pre-wrap; font-size: 11px; color: #ccc; max-height: 200px; overflow-y: auto; margin: 4px 0; }
-    .delete-btn { background: #600; color: #fff; border: none; border-radius: 4px; padding: 2px 6px; cursor: pointer; font-size: 11px; font-family: monospace; margin-top: 4px; }
     .job-meta { color: #888; font-size: 10px; margin-top: 2px; }
     .status-pending { color: #fa0; }
     .status-pending_retry { color: #f80; }
@@ -139,7 +152,6 @@ export class ErnoDevtoolsComponent implements OnInit {
 
   tab: Tab = 'status';
   emails = signal<MockEmail[]>([]);
-  expanded = signal<string | null>(null);
   jobs = signal<DevJob[]>([]);
   expandedJob = signal<string | null>(null);
 
@@ -164,27 +176,26 @@ export class ErnoDevtoolsComponent implements OnInit {
     this.loadEmails();
   }
 
-  toggle(id: string): void {
-    this.expanded.set(this.expanded() === id ? null : id);
+  /** Emails render their own CSS best in a real document, so open a tab. */
+  openEmail(email: MockEmail): void {
+    window.open(this.mailService.previewUrl(email.id), '_blank', 'noopener');
   }
 
   loadEmails(): void {
     this.mailService.list().subscribe(emails => {
-      this.emails.set(emails);
+      this.emails.set([...emails].reverse());
     });
   }
 
   deleteEmail(id: string): void {
     this.mailService.delete(id).subscribe(() => {
       this.emails.update(list => list.filter(e => e.id !== id));
-      if (this.expanded() === id) this.expanded.set(null);
     });
   }
 
   clearAll(): void {
     this.mailService.clear().subscribe(() => {
       this.emails.set([]);
-      this.expanded.set(null);
     });
   }
 

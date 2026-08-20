@@ -20,7 +20,7 @@ The overlay is fixed to the bottom-right and exposes three tabs:
 | Tab | What it shows |
 |-----|----------------|
 | **Status** | WebSocket and sync status; button to force a re-sync |
-| **Emails** | Mock emails captured when the API uses `email.type = "mock"` |
+| **Emails** | Mock emails captured when the API uses `email.type = "mock"`; newest first, click one to open it in a new tab |
 | **Jobs** | Recent background jobs (type, status, arguments, retries) |
 
 Visibility is gated by Angular’s `isDevMode()` so production builds do not show the panel even if the tag remains in a template.
@@ -30,7 +30,16 @@ Visibility is gated by Angular’s `isDevMode()` so production builds do not sho
 | Service | Endpoints | Role |
 |---------|-----------|------|
 | `ErnoDevMailService` | `GET/DELETE /dev/emails` | List, delete one, or clear mock emails |
+| `ErnoDevMailService.previewUrl(id)` | `GET /dev/emails/{id}/preview` | URL of the standalone preview page for one email |
 | `ErnoDevJobsService` | `GET/DELETE /dev/jobs` | List/clear jobs for the Jobs tab |
+
+### Opening an email
+
+Clicking a row in the Emails tab opens `/dev/emails/{id}/preview` in a new tab: a page with the envelope
+metadata (subject, from, to, sent) above an iframe holding the message body. The body is served untouched
+from `/dev/emails/{id}/body`, so the email's own `<style>` blocks and layout render exactly as a mail client
+would show them. Plain-text-only messages are wrapped in a `<pre>`. Both routes exist only where the mock
+inbox does — `email.type = "mock"` outside production.
 
 ```typescript
 import { ErnoDevMailService } from 'erno-angular';

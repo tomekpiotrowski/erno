@@ -87,3 +87,14 @@ if let Some(messages) = app.mailer.messages() {
 // clear between test cases
 app.mailer.clear_messages();
 ```
+
+Outside production the mock transport also backs a small dev inbox on the API's own origin:
+
+| Route | Purpose |
+|-------|---------|
+| `GET /dev/emails` | JSON list of captured messages |
+| `DELETE /dev/emails` / `DELETE /dev/emails/{id}` | Clear all, or drop one |
+| `GET /dev/emails/{id}/preview` | HTML page: envelope metadata plus the body in an iframe |
+| `GET /dev/emails/{id}/body` | The message body verbatim, so its own CSS renders |
+
+The [devtools overlay](/app/devtools/) links each captured email to its preview page.

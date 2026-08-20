@@ -213,6 +213,62 @@ mod dev_inbox_tests {
     }
 
     #[tokio::test]
+    async fn preview_serves_the_email_body_verbatim() {
+        let t = setup_test::<Migrator, _>(test_boot(empty_router), no_fixtures).await;
+        let id = uuid::Uuid::new_v4();
+        t.mailer.store_record(crate::mailer::MockEmailRecord {
+            id,
+            to: "user@example.com".to_string(),
+            from: "app@example.com".to_string(),
+            subject: "Verify <your> email".to_string(),
+            body_html: Some(
+                "<html><head><style>b{color:red}</style></head><body><b>Hi</b></body></html>"
+                    .to_string(),
+            ),
+            body_text: None,
+            created_at: chrono::Utc::now(),
+        });
+
+        let preview = t.server.get(&format!("/dev/emails/{id}/preview")).await;
+        preview.assert_status_ok();
+        let page = preview.text();
+        // The subject is escaped in the chrome, and the body loads in an iframe
+        // so the email's own <style> survives instead of being sanitised away.
+        assert!(page.contains("Verify &lt;your&gt; email"));
+        assert!(page.contains(r#"<iframe src="body""#));
+
+        let body = t.server.get(&format!("/dev/emails/{id}/body")).await;
+        body.assert_status_ok();
+        assert!(body.text().contains("<style>b{color:red}</style>"));
+
+        let missing = t
+            .server
+            .get(&format!("/dev/emails/{}/preview", uuid::Uuid::new_v4()))
+            .await;
+        assert_eq!(missing.status_code(), 404);
+    }
+
+    #[tokio::test]
+    async fn preview_wraps_text_only_bodies() {
+        let t = setup_test::<Migrator, _>(test_boot(empty_router), no_fixtures).await;
+        let id = uuid::Uuid::new_v4();
+        t.mailer.store_record(crate::mailer::MockEmailRecord {
+            id,
+            to: "user@example.com".to_string(),
+            from: "app@example.com".to_string(),
+            subject: "Plain".to_string(),
+            body_html: None,
+            body_text: Some("line one\nline two".to_string()),
+            created_at: chrono::Utc::now(),
+        });
+
+        let body = t.server.get(&format!("/dev/emails/{id}/body")).await;
+        body.assert_status_ok();
+        assert!(body.text().contains("<pre"));
+        assert!(body.text().contains("line two"));
+    }
+
+    #[tokio::test]
     async fn production_does_not_serve_the_mock_inbox() {
         let t = setup_test::<Migrator, _>(test_boot(empty_router), no_fixtures).await;
         let app = App {
