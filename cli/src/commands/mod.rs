@@ -7,3 +7,4 @@ pub mod new;
 pub mod packages;
 pub mod setup;
 pub mod test;
+pub mod upgrade;
