@@ -1,4 +1,4 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { AdminApi, TablesResponse } from '../core/api';
 import { PrometheusService, PromPoint } from '../core/prometheus';
 import { BUSINESS } from '../metrics/catalog';
@@ -7,6 +7,7 @@ import { Sparkline } from '../sparkline';
 @Component({
   selector: 'app-database',
   imports: [Sparkline],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="stack">
       <header class="head">

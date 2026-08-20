@@ -1,11 +1,12 @@
 import { JsonPipe } from '@angular/common';
-import { Component, inject, signal } from '@angular/core';
+import { Component, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { AdminApi, EventsResponse } from '../core/api';
 
 @Component({
   selector: 'app-events',
   imports: [FormsModule, JsonPipe],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="stack">
       <header class="head">
@@ -16,7 +17,7 @@ import { AdminApi, EventsResponse } from '../core/api';
       </header>
 
       <div class="toolbar">
-        <input [(ngModel)]="name" placeholder="name (user.registered)" />
+        <input [ngModel]="name()" (ngModelChange)="name.set($event)" placeholder="name (user.registered)" />
         <button type="button" (click)="load()">Filter</button>
       </div>
 
@@ -44,12 +45,12 @@ import { AdminApi, EventsResponse } from '../core/api';
 })
 export class EventsPage {
   private readonly api = inject(AdminApi);
-  name = '';
+  name = signal('');
   data = signal<EventsResponse | null>(null);
   constructor() {
     this.load();
   }
   load() {
-    this.api.events(this.name).subscribe((d) => this.data.set(d));
+    this.api.events(this.name()).subscribe((d) => this.data.set(d));
   }
 }

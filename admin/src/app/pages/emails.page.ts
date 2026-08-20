@@ -1,10 +1,11 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { AdminApi, EmailList } from '../core/api';
 
 @Component({
   selector: 'app-emails',
   imports: [FormsModule],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="stack">
       <header class="head">
@@ -15,7 +16,7 @@ import { AdminApi, EmailList } from '../core/api';
       </header>
 
       <div class="toolbar">
-        <input [(ngModel)]="to" placeholder="Filter to" (keyup.enter)="load()" />
+        <input [ngModel]="to()" (ngModelChange)="to.set($event)" placeholder="Filter to" (keyup.enter)="load()" />
         <button type="button" (click)="load()">Search</button>
       </div>
 
@@ -45,13 +46,13 @@ import { AdminApi, EmailList } from '../core/api';
 })
 export class EmailsPage {
   private readonly api = inject(AdminApi);
-  to = '';
+  to = signal('');
   data = signal<EmailList | null>(null);
   constructor() {
     this.load();
   }
   load() {
-    this.api.emails(this.to).subscribe((d) => this.data.set(d));
+    this.api.emails(this.to()).subscribe((d) => this.data.set(d));
   }
 
   statusClass(status: string) {

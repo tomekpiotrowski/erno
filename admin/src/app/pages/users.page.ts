@@ -1,4 +1,4 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { AdminApi, UserList } from '../core/api';
@@ -6,6 +6,7 @@ import { AdminApi, UserList } from '../core/api';
 @Component({
   selector: 'app-users',
   imports: [FormsModule, RouterLink],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="stack">
       <header class="head">
@@ -16,7 +17,7 @@ import { AdminApi, UserList } from '../core/api';
       </header>
 
       <div class="toolbar">
-        <input [(ngModel)]="q" (keyup.enter)="load()" placeholder="Search email" />
+        <input [ngModel]="q()" (ngModelChange)="q.set($event)" (keyup.enter)="load()" placeholder="Search email" />
         <button type="button" (click)="load()">Search</button>
       </div>
 
@@ -49,8 +50,8 @@ import { AdminApi, UserList } from '../core/api';
         </section>
         <div class="toolbar">
           <span class="muted">{{ d.total }} users · page {{ d.page }}</span>
-          <button type="button" [disabled]="d.page <= 1" (click)="page = d.page - 1; load()">Prev</button>
-          <button type="button" [disabled]="d.page * d.per_page >= d.total" (click)="page = d.page + 1; load()">
+          <button type="button" [disabled]="d.page <= 1" (click)="page.set(d.page - 1); load()">Prev</button>
+          <button type="button" [disabled]="d.page * d.per_page >= d.total" (click)="page.set(d.page + 1); load()">
             Next
           </button>
         </div>
@@ -60,8 +61,8 @@ import { AdminApi, UserList } from '../core/api';
 })
 export class UsersPage {
   private readonly api = inject(AdminApi);
-  q = '';
-  page = 1;
+  q = signal('');
+  page = signal(1);
   data = signal<UserList | null>(null);
 
   constructor() {
@@ -69,6 +70,6 @@ export class UsersPage {
   }
 
   load() {
-    this.api.users(this.q, this.page).subscribe((d) => this.data.set(d));
+    this.api.users(this.q(), this.page()).subscribe((d) => this.data.set(d));
   }
 }

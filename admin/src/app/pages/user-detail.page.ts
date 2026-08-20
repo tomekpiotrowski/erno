@@ -1,4 +1,4 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { AdminApi, UserDetail } from '../core/api';
@@ -6,6 +6,7 @@ import { AdminApi, UserDetail } from '../core/api';
 @Component({
   selector: 'app-user-detail',
   imports: [FormsModule, RouterLink],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (data(); as d) {
       <div class="stack">
@@ -36,8 +37,8 @@ import { AdminApi, UserDetail } from '../core/api';
 
         <div class="toolbar">
           <button type="button" (click)="activate()">Activate</button>
-          <input [(ngModel)]="plan" placeholder="plan" style="max-width:120px" />
-          <input [(ngModel)]="days" type="number" style="max-width:80px" />
+          <input [ngModel]="plan()" (ngModelChange)="plan.set($event)" placeholder="plan" style="max-width:120px" />
+          <input [ngModel]="days()" (ngModelChange)="days.set(+$event)" type="number" style="max-width:80px" />
           <button type="button" (click)="gift()">Gift</button>
           <button type="button" class="danger" (click)="openDelete()">Delete</button>
         </div>
@@ -114,8 +115,8 @@ export class UserDetailPage {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   data = signal<UserDetail | null>(null);
-  plan = 'pro';
-  days = 30;
+  plan = signal('pro');
+  days = signal(30);
   confirmOpen = signal(false);
   confirmEmail = signal('');
   deleting = signal(false);
@@ -133,7 +134,7 @@ export class UserDetailPage {
 
   gift() {
     const id = this.route.snapshot.paramMap.get('id')!;
-    this.api.gift(id, this.plan, this.days).subscribe((d) => this.data.set(d));
+    this.api.gift(id, this.plan(), this.days()).subscribe((d) => this.data.set(d));
   }
 
   matches(email: string) {

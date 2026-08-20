@@ -1,4 +1,4 @@
-import { Component, Input } from '@angular/core';
+import { Component, Input, ChangeDetectionStrategy } from '@angular/core';
 import { PromPoint } from './core/prometheus';
 
 @Component({
@@ -12,6 +12,7 @@ import { PromPoint } from './core/prometheus';
       </svg>
     }
   `,
+  changeDetection: ChangeDetectionStrategy.OnPush,
   styles: `
     .spark { width: 108px; height: 30px; color: var(--cb-accent); display: block; }
   `,

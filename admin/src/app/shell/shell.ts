@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { Component, ChangeDetectionStrategy } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { clearBasicAuth } from '../core/auth';
 
@@ -55,6 +55,7 @@ import { clearBasicAuth } from '../core/auth';
       </div>
     </div>
   `,
+  changeDetection: ChangeDetectionStrategy.OnPush,
   styles: `
     .shell {
       display: flex;

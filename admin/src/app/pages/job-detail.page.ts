@@ -1,11 +1,12 @@
 import { JsonPipe } from '@angular/common';
-import { Component, inject, signal } from '@angular/core';
+import { Component, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { AdminApi, JobDetail } from '../core/api';
 
 @Component({
   selector: 'app-job-detail',
   imports: [JsonPipe, RouterLink],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (data(); as d) {
       <div class="stack">

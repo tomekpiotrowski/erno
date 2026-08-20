@@ -1,4 +1,4 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
@@ -20,13 +20,14 @@ import { setBasicAuth } from '../core/auth';
         <h1>Sign in</h1>
         <p class="sub">Operator console. Every write is logged.</p>
         <label class="eyebrow" for="user">Username</label>
-        <input id="user" name="user" [(ngModel)]="user" autocomplete="username" />
+        <input id="user" name="user" [ngModel]="user()" (ngModelChange)="user.set($event)" autocomplete="username" />
         <label class="eyebrow" for="password">Password</label>
         <input
           id="password"
           name="password"
           type="password"
-          [(ngModel)]="password"
+          [ngModel]="password()"
+          (ngModelChange)="password.set($event)"
           autocomplete="current-password"
         />
         @if (error()) {
@@ -36,6 +37,7 @@ import { setBasicAuth } from '../core/auth';
       </form>
     </main>
   `,
+  changeDetection: ChangeDetectionStrategy.OnPush,
   styles: `
     .login {
       min-height: 100%;
@@ -84,13 +86,13 @@ import { setBasicAuth } from '../core/auth';
 export class LoginPage {
   private readonly http = inject(HttpClient);
   private readonly router = inject(Router);
-  user = 'admin';
-  password = 'admin';
+  user = signal('admin');
+  password = signal('admin');
   error = signal('');
 
   submit() {
     this.error.set('');
-    setBasicAuth(this.user, this.password);
+    setBasicAuth(this.user(), this.password());
     this.http.get('/admin/api/dashboard').subscribe({
       next: () => void this.router.navigateByUrl('/'),
       error: (err: HttpErrorResponse) => {
