@@ -22,6 +22,7 @@ describe('ErnoSyncService', () => {
   let network: ErnoNetworkService;
   let http: HttpTestingController;
   let realtimeEvents: Subject<SyncPushEvent>;
+  let realtimeConnected: Subject<boolean>;
   let connectSpy: Mock;
   let dbStub: {
     getLastSyncSeq: Mock;
@@ -30,8 +31,13 @@ describe('ErnoSyncService', () => {
 
   beforeEach(() => {
     realtimeEvents = new Subject<SyncPushEvent>();
+    realtimeConnected = new Subject<boolean>();
     connectSpy = vi.fn().mockName('connect');
-    const realtimeStub = { events$: realtimeEvents.asObservable(), connect: connectSpy };
+    const realtimeStub = {
+      events$: realtimeEvents.asObservable(),
+      connected$: realtimeConnected.asObservable(),
+      connect: connectSpy,
+    };
     dbStub = {
       getLastSyncSeq: vi.fn().mockName('getLastSyncSeq').mockResolvedValue(0),
       setLastSyncSeq: vi.fn().mockName('setLastSyncSeq').mockResolvedValue(undefined),
@@ -175,5 +181,27 @@ describe('ErnoSyncService', () => {
     await flush();
 
     http.expectOne((r) => r.url === DELTA_URL).flush(emptyDelta());
+  });
+
+  it('pulls a delta when the socket reconnects after a silent drop', async () => {
+    registerTodo();
+    const started = service.start();
+    await flush();
+    http.expectOne((r) => r.url === DELTA_URL).flush(emptyDelta());
+    await started;
+
+    // No app-state or network event — only the socket coming back.
+    realtimeConnected.next(true);
+    await flush();
+
+    http.expectOne((r) => r.url === DELTA_URL).flush(emptyDelta());
+  });
+
+  it('does not pull on reconnect before start()', async () => {
+    registerTodo();
+    realtimeConnected.next(true);
+    await flush();
+
+    http.expectNone((r) => r.url === DELTA_URL);
   });
 });

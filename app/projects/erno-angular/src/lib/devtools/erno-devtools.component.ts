@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, isDevMode, OnInit, signal } from '@angular/core';
 import { AsyncPipe, DatePipe, JsonPipe } from '@angular/common';
+import { ErnoRealtimeService } from '../realtime/erno-realtime.service';
 import { ErnoSyncService } from '../sync/erno-sync.service';
 import { ErnoDevMailService, MockEmail } from './erno-dev-mail.service';
 import { ErnoDevJobsService, DevJob } from './erno-dev-jobs.service';
@@ -30,7 +31,7 @@ type Tab = 'status' | 'emails' | 'jobs';
       </div>
     </div>
     @if (tab === 'status') {
-      <div>WS: {{ wsStatus }}</div>
+      <div>WS: {{ wsStatus() }}</div>
       <div>Sync: {{ syncStatus$ | async }}</div>
       <button (click)="forceSync()">Force re-sync</button>
     }
@@ -148,7 +149,7 @@ type Tab = 'status' | 'emails' | 'jobs';
 export class ErnoDevtoolsComponent implements OnInit {
   readonly visible = isDevMode();
   readonly syncStatus$;
-  wsStatus = 'disconnected';
+  readonly wsStatus = signal('disconnected');
 
   tab: Tab = 'status';
   emails = signal<MockEmail[]>([]);
@@ -157,6 +158,7 @@ export class ErnoDevtoolsComponent implements OnInit {
 
   constructor(
     private sync: ErnoSyncService,
+    private realtime: ErnoRealtimeService,
     private mailService: ErnoDevMailService,
     private jobsService: ErnoDevJobsService,
   ) {
@@ -164,7 +166,9 @@ export class ErnoDevtoolsComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    // WS connection state will be surfaced via ErnoRealtimeService in a later iteration
+    this.realtime.connected$.subscribe((connected) => {
+      this.wsStatus.set(connected ? 'connected' : 'disconnected');
+    });
   }
 
   forceSync(): void {

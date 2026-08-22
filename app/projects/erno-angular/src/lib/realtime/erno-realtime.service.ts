@@ -1,5 +1,6 @@
 import { Inject, Injectable, OnDestroy } from '@angular/core';
-import { Observable, Subject, Subscription } from 'rxjs';
+import { BehaviorSubject, Observable, Subject, Subscription } from 'rxjs';
+import { distinctUntilChanged } from 'rxjs/operators';
 import { webSocket, WebSocketSubject } from 'rxjs/webSocket';
 import { ERNO_CONFIG, ErnoConfig } from '../erno.config';
 import { ErnoAuthService } from '../auth/erno-auth.service';
@@ -31,8 +32,13 @@ export interface ShareSubscription {
   entity_id: string;
 }
 
-/** Wire format of backend WebSocket messages (serde internally tagged). */
-interface ErnoWsMessage {
+/**
+ * Wire format of backend WebSocket messages (serde internally tagged).
+ *
+ * Exported because `createSocket` is a protected test seam: a subclass cannot
+ * type its override without naming this.
+ */
+export interface ErnoWsMessage {
   type: 'request' | 'response' | 'broadcast' | 'error';
   id?: string;
   request?: Record<string, unknown>;
@@ -46,6 +52,7 @@ const RECONNECT_DELAY_MS = 3000;
 @Injectable()
 export class ErnoRealtimeService implements OnDestroy {
   private socket$: WebSocketSubject<ErnoWsMessage> | null = null;
+  private connectedSubject$ = new BehaviorSubject<boolean>(false);
   private socketSub: Subscription | null = null;
   private syncEvents$ = new Subject<SyncPushEvent>();
   private shareEventsSubject$ = new Subject<ShareEvent>();
@@ -79,6 +86,19 @@ export class ErnoRealtimeService implements OnDestroy {
   /** True when backgrounded or offline — socket must stay closed. */
   private get suspended(): boolean {
     return this.backgroundSuspended || this.offlineSuspended;
+  }
+
+  /**
+   * Whether the socket is currently open.
+   *
+   * Driven by the socket's own open/close lifecycle, not by `subscribe()` —
+   * `webSocket()` connects lazily and the open lands asynchronously, so a
+   * failing reconnect must not report itself as connected. Consumers use the
+   * false -> true edge to catch up on anything missed while the socket was
+   * down; a silent drop fires no app-state or network event.
+   */
+  get connected$(): Observable<boolean> {
+    return this.connectedSubject$.pipe(distinctUntilChanged());
   }
 
   /** Sync change events for entities this connection may read. */
@@ -186,11 +206,24 @@ export class ErnoRealtimeService implements OnDestroy {
     this.lifecycleSubs.unsubscribe();
     this.syncEvents$.complete();
     this.shareEventsSubject$.complete();
+    this.connectedSubject$.complete();
   }
 
-  /** Test seam: overridable factory so specs can inject a fake socket. */
-  protected createSocket(url: string): WebSocketSubject<ErnoWsMessage> {
-    return webSocket<ErnoWsMessage>(url);
+  /**
+   * Test seam: overridable factory so specs can inject a fake socket.
+   *
+   * `handlers` carries the open/close callbacks that back `connected$`; a fake
+   * socket has no lifecycle of its own, so specs invoke them by hand.
+   */
+  protected createSocket(
+    url: string,
+    handlers: { onOpen: () => void; onClose: () => void },
+  ): WebSocketSubject<ErnoWsMessage> {
+    return webSocket<ErnoWsMessage>({
+      url,
+      openObserver: { next: () => handlers.onOpen() },
+      closeObserver: { next: () => handlers.onClose() },
+    });
   }
 
   private openSocket(): void {
@@ -200,7 +233,10 @@ export class ErnoRealtimeService implements OnDestroy {
     const token = this.auth.accessToken;
     const url = token ? `${this.config.wsUrl}?token=${token}` : this.config.wsUrl;
 
-    this.socket$ = this.createSocket(url);
+    this.socket$ = this.createSocket(url, {
+      onOpen: () => this.connectedSubject$.next(true),
+      onClose: () => this.connectedSubject$.next(false),
+    });
     this.socketSub = this.socket$.subscribe({
       next: msg => this.route(msg),
       error: () => this.handleSocketClosed(),
@@ -211,6 +247,7 @@ export class ErnoRealtimeService implements OnDestroy {
   private handleSocketClosed(): void {
     this.socket$ = null;
     this.socketSub = null;
+    this.connectedSubject$.next(false);
     if (this.shouldBeConnected && !this.suspended) {
       this.scheduleReconnect();
     }
@@ -262,6 +299,8 @@ export class ErnoRealtimeService implements OnDestroy {
     this.socketSub?.unsubscribe();
     this.socketSub = null;
     this.socket$ = null;
+    // Unsubscribing never fires closeObserver, so report the drop here.
+    this.connectedSubject$.next(false);
   }
 
   private clearReconnectTimer(): void {
