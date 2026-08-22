@@ -1,6 +1,7 @@
 import { Inject, Injectable, OnDestroy } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { BehaviorSubject, Subscription, firstValueFrom } from 'rxjs';
+import { filter } from 'rxjs/operators';
 import { ERNO_CONFIG, ErnoConfig } from '../erno.config';
 import { ErnoDatabaseService } from './erno-database.service';
 import { ErnoRealtimeService, SyncPushEvent } from '../realtime/erno-realtime.service';
@@ -77,6 +78,16 @@ export class ErnoSyncService implements OnDestroy {
     // ErnoRealtimeService.
     this.subscriptions.add(
       this.network.online$.subscribe(() => {
+        if (this.started) void this.pullDelta();
+      }),
+    );
+    // A socket can also die silently — an API restart, a proxy idle timeout, a
+    // reconnect carrying an expired token — which fires neither of the above.
+    // The false -> true edge is the only signal that we were disconnected, so
+    // catch up on it. `pullDelta` collapses this into the initial pull when the
+    // first connect lands near `start()`.
+    this.subscriptions.add(
+      this.realtime.connected$.pipe(filter(Boolean)).subscribe(() => {
         if (this.started) void this.pullDelta();
       }),
     );

@@ -13,12 +13,23 @@ class TestableRealtimeService extends ErnoRealtimeService {
   sockets: Subject<unknown>[] = [];
   urls: string[] = [];
 
+  handlers: { onOpen: () => void; onClose: () => void }[] = [];
+
   // ErnoWsMessage is private on the base; cast through unknown for the test seam.
-  protected override createSocket(url: string): WebSocketSubject<any> {
+  protected override createSocket(
+    url: string,
+    handlers: { onOpen: () => void; onClose: () => void },
+  ): WebSocketSubject<any> {
     this.urls.push(url);
+    this.handlers.push(handlers);
     const socket = new Subject<unknown>();
     this.sockets.push(socket);
     return socket as unknown as WebSocketSubject<any>;
+  }
+
+  /** A fake socket has no lifecycle, so specs drive open/close by hand. */
+  openLatest(): void {
+    this.handlers[this.handlers.length - 1]?.onOpen();
   }
 
   /** The currently-open socket, or undefined if none. */
@@ -186,5 +197,31 @@ describe('ErnoRealtimeService', () => {
     expect(service.sockets.length).toBe(1);
     vi.advanceTimersByTime(4000);
     expect(service.sockets.length).toBe(1);
+  });
+
+  it('reports connected only once the socket actually opens', () => {
+    const seen: boolean[] = [];
+    service.connected$.subscribe((c) => seen.push(c));
+
+    // Subscribing initiates the connection; the open lands later.
+    service.connect();
+    expect(seen).toEqual([false]);
+
+    service.openLatest();
+    expect(seen).toEqual([false, true]);
+  });
+
+  it('reports a false -> true edge across a silent drop and reconnect', () => {
+    const seen: boolean[] = [];
+    service.connected$.subscribe((c) => seen.push(c));
+    service.connect();
+    service.openLatest();
+
+    // A silent drop: the socket errors, no app-state or network event fires.
+    service.latest!.complete();
+    vi.advanceTimersByTime(3000);
+    service.openLatest();
+
+    expect(seen).toEqual([false, true, false, true]);
   });
 });
