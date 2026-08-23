@@ -60,6 +60,12 @@ pub struct DevArgs {
     /// Do not start the operator admin SPA
     #[arg(long)]
     pub no_admin: bool,
+    /// Extra `[[package.dev]]` service to start (repeatable; added to the usual stack)
+    #[arg(long)]
+    pub package: Vec<String>,
+    /// Start every `[[package.dev]]`, including `default = false`
+    #[arg(long)]
+    pub all: bool,
 }
 
 pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) -> ui::Cmd {
@@ -87,10 +93,17 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) -> ui::
         .into());
     }
 
+    let packages = crate::commands::packages::load_packages(&root)?;
+    let extras = selection::extra_services(&packages, &args.package, args.all)?;
+
     let mut urls = ports::discover_urls(&root, &sel);
     if sel.api && !args.no_prometheus {
         urls.prometheus = Some(prometheus::LISTEN_URL.to_string());
     }
+    urls.extra = extras
+        .iter()
+        .map(|e| (e.name.clone(), e.url.clone()))
+        .collect();
 
     let device = if args.ios {
         Some(device::DevicePlatform::Ios)
@@ -300,6 +313,19 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) -> ui::
         })
     });
 
+    let extra_supervisors: Vec<Supervisor> = extras
+        .into_iter()
+        .map(|svc| {
+            let dir = root.join(svc.dir);
+            let extra_sink = sink.clone();
+            Supervisor::start(svc.name.clone(), shutdown_rx.clone(), move || {
+                let mut cmd = Command::new(&svc.command);
+                cmd.args(&svc.args);
+                spawn_labeled(cmd, &dir, svc.name.clone(), extra_sink.clone())
+            })
+        })
+        .collect();
+
     let _ = tokio::signal::ctrl_c().await;
     // Unpin before anything else prints: the final banner lands in the
     // scrollback, and the watcher stops narrating as the children go down.
@@ -321,6 +347,9 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) -> ui::
     }
     if let Some(admin) = admin {
         admin.shutdown().await;
+    }
+    for extra in extra_supervisors {
+        extra.shutdown().await;
     }
     Ok(())
 }

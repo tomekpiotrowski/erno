@@ -12,9 +12,10 @@ use crate::ui;
 pub fn spawn_labeled(
     mut cmd: Command,
     dir: &std::path::Path,
-    label: &'static str,
+    label: impl Into<String>,
     sink: Arc<LogSink>,
 ) -> Child {
+    let label = label.into();
     ui::apply_child_env(&mut cmd);
 
     #[cfg(unix)]
@@ -34,7 +35,7 @@ pub fn spawn_labeled(
 
     let stdout = BufReader::new(child.stdout.take().unwrap());
     let stderr = BufReader::new(child.stderr.take().unwrap());
-    spawn_printer(stdout, label, ui::Stream::Out, sink.clone());
+    spawn_printer(stdout, label.clone(), ui::Stream::Out, sink.clone());
     spawn_printer(stderr, label, ui::Stream::Err, sink);
     child
 }
@@ -44,7 +45,7 @@ pub fn spawn_labeled(
 /// reader would hold it until the child dies — which reads as a silent hang.
 const PARTIAL_FLUSH: std::time::Duration = std::time::Duration::from_millis(750);
 
-pub fn spawn_printer<R>(reader: R, label: &'static str, stream: ui::Stream, sink: Arc<LogSink>)
+pub fn spawn_printer<R>(reader: R, label: String, stream: ui::Stream, sink: Arc<LogSink>)
 where
     R: AsyncRead + Unpin + Send + 'static,
 {
@@ -56,16 +57,16 @@ where
             match tokio::time::timeout(PARTIAL_FLUSH, reader.read(&mut buf)).await {
                 // Idle with something buffered: the child is most likely waiting
                 // on stdin. Emit what it wrote and start a fresh line.
-                Err(_) => flush_pending(&mut pending, stream, label, &sink),
+                Err(_) => flush_pending(&mut pending, stream, &label, &sink),
                 Ok(Ok(0)) => {
-                    flush_pending(&mut pending, stream, label, &sink);
+                    flush_pending(&mut pending, stream, &label, &sink);
                     break;
                 }
                 Ok(Ok(n)) => {
                     pending.extend_from_slice(&buf[..n]);
                     while let Some(end) = pending.iter().position(|b| *b == b'\n') {
                         let line: Vec<u8> = pending.drain(..=end).collect();
-                        emit_bytes(&line[..end], stream, label, &sink);
+                        emit_bytes(&line[..end], stream, &label, &sink);
                     }
                 }
                 Ok(Err(_)) => break,
@@ -129,13 +130,14 @@ pub struct Supervisor {
 
 impl Supervisor {
     pub fn start<F>(
-        name: &'static str,
+        name: impl Into<String>,
         mut shutdown: tokio::sync::watch::Receiver<bool>,
         mut spawn: F,
     ) -> Self
     where
         F: FnMut() -> Child + Send + 'static,
     {
+        let name = name.into();
         let slot = Arc::new(Mutex::new(None));
         let restart_requested = Arc::new(AtomicBool::new(false));
         let slot_task = slot.clone();
@@ -168,7 +170,7 @@ impl Supervisor {
                         ui::emit(ui::Stream::Err, "");
                         ui::prefixed(
                             ui::Stream::Err,
-                            name,
+                            &name,
                             &format!("process exited — restarting in {}s", backoff.as_secs()),
                         );
                         tokio::select! {
@@ -248,7 +250,7 @@ mod tests {
         let sink = Arc::new(LogSink::new(&root));
 
         let (mut writer, reader) = tokio::io::duplex(64);
-        spawn_printer(reader, "app", ui::Stream::Out, sink);
+        spawn_printer(reader, "app".into(), ui::Stream::Out, sink);
         tokio::io::AsyncWriteExt::write_all(&mut writer, b"done\nOk to proceed? (y) ")
             .await
             .unwrap();

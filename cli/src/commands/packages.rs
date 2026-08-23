@@ -100,6 +100,21 @@ pub struct Package {
     pub lint: Vec<Step>,
     #[serde(default)]
     pub test: Vec<Step>,
+    /// Long-running process for `erno dev`. At most one per package.
+    #[serde(default)]
+    pub dev: Vec<DevService>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DevService {
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    pub url: String,
+    /// `false` means opt in with `--all` (naming the package is not enough).
+    #[serde(default = "default_true")]
+    pub default: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -198,6 +213,26 @@ fn validate(packages: &[Package]) -> Result<(), String> {
                 p.name
             ));
         }
+        if p.dev.len() > 1 {
+            return Err(format!(
+                "package '{}' has more than one [[package.dev]]; one long-running process per package",
+                p.name
+            ));
+        }
+        for d in &p.dev {
+            if d.command.is_empty() {
+                return Err(format!(
+                    "package '{}' has a [[package.dev]] with an empty command",
+                    p.name
+                ));
+            }
+            if d.url.is_empty() {
+                return Err(format!(
+                    "package '{}' has a [[package.dev]] with an empty url",
+                    p.name
+                ));
+            }
+        }
     }
     Ok(())
 }
@@ -223,6 +258,7 @@ fn conventional(root: &Path) -> Vec<Package> {
                 ),
             ],
             test: vec![step("cargo", &["test"])],
+            dev: Vec::new(),
         });
     }
 
@@ -250,6 +286,7 @@ fn conventional(root: &Path) -> Vec<Package> {
             build,
             lint,
             test: vec![test],
+            dev: Vec::new(),
         });
     }
 
@@ -263,6 +300,7 @@ fn conventional(root: &Path) -> Vec<Package> {
             build: Vec::new(),
             lint: Vec::new(),
             test: Vec::new(),
+            dev: Vec::new(),
         });
     }
 
@@ -557,6 +595,10 @@ default = false
   [[package.test]]
   command = "cargo"
   args    = ["test"]
+
+  [[package.dev]]
+  command = "./serve.sh"
+  url     = "http://localhost:8765/tools/solve_studio/"
 "#;
 
     #[test]
@@ -576,6 +618,17 @@ default = false
         assert!(puzzles.test[0].default);
         assert!(!puzzles.test[1].default);
         assert!(packages[1].test.is_empty());
+        let vision = &packages[2];
+        assert_eq!(vision.dev.len(), 1);
+        assert_eq!(vision.dev[0].command, "./serve.sh");
+        assert_eq!(
+            vision.dev[0].url,
+            "http://localhost:8765/tools/solve_studio/"
+        );
+        assert!(vision.dev[0].args.is_empty());
+        assert!(vision.dev[0].default);
+        assert!(packages[0].dev.is_empty());
+        assert!(packages[1].dev.is_empty());
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -601,6 +654,7 @@ default = false
         assert_eq!(packages[0].build[0].args, ["build"]);
         assert_eq!(packages[1].test[0].args, ["run", "test:ci"]);
         assert!(packages[2].is_e2e());
+        assert!(packages.iter().all(|p| p.dev.is_empty()));
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -787,6 +841,49 @@ default = false
         );
         let err = load_packages(&root).unwrap_err();
         assert!(err.contains("defualt"), "{err}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rejects_fix_on_package_dev() {
+        let root = temp("dev-fix");
+        write_manifest(
+            &root,
+            "[[package]]\nname = \"x\"\ndir = \"x\"\n\n  [[package.dev]]\n  command = \"./s\"\n  url = \"http://localhost:1\"\n  fix = [\"x\"]\n",
+        );
+        let err = load_packages(&root).unwrap_err();
+        assert!(err.contains("fix"), "{err}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rejects_empty_dev_command_or_url() {
+        let root = temp("dev-empty-cmd");
+        write_manifest(
+            &root,
+            "[[package]]\nname = \"x\"\ndir = \"x\"\n\n  [[package.dev]]\n  command = \"\"\n  url = \"http://localhost:1\"\n",
+        );
+        assert!(load_packages(&root).unwrap_err().contains("empty command"));
+        let _ = fs::remove_dir_all(&root);
+
+        let url = temp("dev-empty-url");
+        write_manifest(
+            &url,
+            "[[package]]\nname = \"x\"\ndir = \"x\"\n\n  [[package.dev]]\n  command = \"./s\"\n  url = \"\"\n",
+        );
+        assert!(load_packages(&url).unwrap_err().contains("empty url"));
+        let _ = fs::remove_dir_all(&url);
+    }
+
+    #[test]
+    fn rejects_two_package_dev_entries() {
+        let root = temp("dev-two");
+        write_manifest(
+            &root,
+            "[[package]]\nname = \"x\"\ndir = \"x\"\n\n  [[package.dev]]\n  command = \"./a\"\n  url = \"http://localhost:1\"\n\n  [[package.dev]]\n  command = \"./b\"\n  url = \"http://localhost:2\"\n",
+        );
+        let err = load_packages(&root).unwrap_err();
+        assert!(err.contains("one long-running process"), "{err}");
         let _ = fs::remove_dir_all(&root);
     }
 }

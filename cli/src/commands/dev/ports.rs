@@ -25,6 +25,7 @@ pub fn discover_urls(root: &Path, sel: &ServiceSelection) -> DevUrls {
         app: sel.app.then_some(app_url),
         www: sel.www.then_some(www_url),
         prometheus: None,
+        extra: Vec::new(),
     }
 }
 
@@ -41,6 +42,11 @@ pub fn ports_to_check(urls: &DevUrls) -> Vec<u16> {
     }
     if let Some(url) = &urls.prometheus {
         ports.push(port_from_url(Some(url)).unwrap_or(9090));
+    }
+    for (_, url) in &urls.extra {
+        if let Some(port) = port_from_url(Some(url)) {
+            ports.push(port);
+        }
     }
     ports
 }
@@ -184,5 +190,34 @@ port = 3005
         assert_eq!(port_from_script("astro dev --port 4321"), Some(4321));
         assert_eq!(port_from_script("astro dev --port=4400"), Some(4400));
         assert_eq!(port_from_script("astro dev"), None);
+    }
+
+    #[test]
+    fn extra_url_port_is_checked() {
+        let sel = ServiceSelection {
+            api: true,
+            app: false,
+            www: false,
+        };
+        let mut urls = discover_urls(Path::new("/nonexistent"), &sel);
+        urls.extra.push((
+            "vision".into(),
+            "http://localhost:8765/tools/solve_studio/".into(),
+        ));
+        assert!(ports_to_check(&urls).contains(&8765));
+    }
+
+    #[test]
+    fn extra_url_without_a_port_is_skipped() {
+        let mut urls = DevUrls {
+            api: None,
+            app: None,
+            www: None,
+            prometheus: None,
+            extra: vec![("local".into(), "http://localhost/tools/".into())],
+        };
+        assert!(ports_to_check(&urls).is_empty());
+        urls.extra[0].1 = "http://localhost:8765/".into();
+        assert_eq!(ports_to_check(&urls), vec![8765]);
     }
 }

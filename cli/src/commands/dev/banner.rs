@@ -34,6 +34,8 @@ pub struct DevUrls {
     pub app: Option<String>,
     pub www: Option<String>,
     pub prometheus: Option<String>,
+    /// Extra `[[package.dev]]` services: (name, url), declaration order.
+    pub extra: Vec<(String, String)>,
 }
 
 impl DevUrls {
@@ -44,7 +46,12 @@ impl DevUrls {
             app: start_app.then(|| "http://localhost:4200".to_string()),
             www: start_www.then(|| "http://localhost:4321".to_string()),
             prometheus: start_api.then(|| super::prometheus::LISTEN_URL.to_string()),
+            extra: Vec::new(),
         }
+    }
+
+    fn extra_names(&self) -> impl Iterator<Item = &str> {
+        self.extra.iter().map(|(name, _)| name.as_str())
     }
 
     pub fn api_readiness(&self) -> Option<String> {
@@ -72,12 +79,13 @@ pub struct BannerSnapshot {
     pub app: Option<ServiceState>,
     pub www: Option<ServiceState>,
     pub prometheus: Option<ServiceState>,
+    pub extra: Vec<ServiceState>,
 }
 
 /// One row of the banner: a service (with a readiness state) or a hidden
 /// surface (with a static note).
 struct BannerRow {
-    name: &'static str,
+    name: String,
     url: String,
     state: Option<ServiceState>,
     note: Option<&'static str>,
@@ -87,9 +95,9 @@ fn banner_rows(urls: &DevUrls, snap: &BannerSnapshot) -> (Vec<BannerRow>, Vec<Ba
     let mut services = Vec::new();
     let mut surfaces = Vec::new();
 
-    let mut push = |name, url: &str, state| {
+    let mut push = |name: &str, url: &str, state| {
         services.push(BannerRow {
-            name,
+            name: name.to_string(),
             url: url.to_string(),
             state: Some(state),
             note: None,
@@ -107,6 +115,9 @@ fn banner_rows(urls: &DevUrls, snap: &BannerSnapshot) -> (Vec<BannerRow>, Vec<Ba
     if let (Some(url), Some(state)) = (urls.prometheus.as_deref(), snap.prometheus) {
         push("prom", url, state);
     }
+    for ((name, url), state) in urls.extra.iter().zip(&snap.extra) {
+        push(name, url, *state);
+    }
 
     // The surfaces the API exposes but does not announce. Grouped after the
     // services rather than wedged between them.
@@ -122,7 +133,7 @@ fn banner_rows(urls: &DevUrls, snap: &BannerSnapshot) -> (Vec<BannerRow>, Vec<Ba
             ("jobs", format!("{base}/dev/jobs"), None),
         ] {
             surfaces.push(BannerRow {
-                name,
+                name: name.to_string(),
                 url,
                 state: None,
                 note,
@@ -143,7 +154,7 @@ pub fn render_banner_when(on: bool, urls: &DevUrls, snap: &BannerSnapshot) -> St
     // Both columns are sized from the content, across every row, so the state
     // and note columns line up no matter how long the URLs are.
     let all = services.iter().chain(surfaces.iter());
-    let name_w = ui::column_width(all.clone().map(|r| r.name));
+    let name_w = ui::column_width(all.clone().map(|r| r.name.as_str()));
     let url_w = ui::column_width(all.map(|r| r.url.as_str()));
 
     let row = |r: &BannerRow| {
@@ -152,7 +163,11 @@ pub fn render_banner_when(on: bool, urls: &DevUrls, snap: &BannerSnapshot) -> St
             (None, Some(note)) => ui::paint_when(on, ui::DIM, note),
             (None, None) => String::new(),
         };
-        let name = ui::paint_when(on, ui::label_style(r.name), &format!("{:<name_w$}", r.name));
+        let name = ui::paint_when(
+            on,
+            ui::label_style(&r.name),
+            &format!("{:<name_w$}", r.name),
+        );
         format!("  {name}  {:<url_w$}  {tail}\n", r.url)
             .trim_end()
             .to_string()
@@ -215,39 +230,53 @@ pub fn start(urls: &DevUrls) -> Option<ui::Pinned> {
 }
 
 /// One service's state change, as the readiness watcher observes it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Transition {
-    name: &'static str,
+    name: String,
     state: ServiceState,
 }
 
-/// The banner's services, in banner order. The one place their names live.
+/// The banner's built-in services, in banner order.
 const SERVICES: [&str; 4] = ["www", "app", "api", "prom"];
 
-fn transitions(prev: &BannerSnapshot, next: &BannerSnapshot) -> Vec<Transition> {
+fn transitions(urls: &DevUrls, prev: &BannerSnapshot, next: &BannerSnapshot) -> Vec<Transition> {
     let pairs = [
         (prev.www, next.www),
         (prev.app, next.app),
         (prev.api, next.api),
         (prev.prometheus, next.prometheus),
     ];
-    SERVICES
+    let mut out: Vec<Transition> = SERVICES
         .iter()
         .zip(pairs)
         .filter_map(|(name, (before, after))| match (before, after) {
-            (Some(before), Some(after)) if before != after => {
-                Some(Transition { name, state: after })
-            }
+            (Some(before), Some(after)) if before != after => Some(Transition {
+                name: (*name).to_string(),
+                state: after,
+            }),
             _ => None,
         })
-        .collect()
+        .collect();
+    for ((name, _), (before, after)) in urls
+        .extra
+        .iter()
+        .zip(prev.extra.iter().zip(next.extra.iter()))
+    {
+        if before != after {
+            out.push(Transition {
+                name: name.clone(),
+                state: *after,
+            });
+        }
+    }
+    out
 }
 
 /// The banner is printed once; every later change is a single row instead of
 /// another full copy. The name column is sized from every service name, not
 /// just the ones in this batch, so rows printed seconds apart still line up.
-pub fn render_transitions(on: bool, changes: &[Transition]) -> String {
-    let name_w = ui::column_width(SERVICES);
+pub fn render_transitions(on: bool, changes: &[Transition], extra_names: &[&str]) -> String {
+    let name_w = ui::column_width(SERVICES.iter().copied().chain(extra_names.iter().copied()));
     let mut out = String::new();
     for change in changes {
         let level = match change.state {
@@ -256,7 +285,7 @@ pub fn render_transitions(on: bool, changes: &[Transition]) -> String {
         };
         let name = ui::paint_when(
             on,
-            ui::label_style(change.name),
+            ui::label_style(&change.name),
             &format!("{:<name_w$}", change.name),
         );
         let state = ui::paint_when(on, change.state.style(), change.state.label());
@@ -266,12 +295,15 @@ pub fn render_transitions(on: bool, changes: &[Transition]) -> String {
     out
 }
 
-fn print_transitions(changes: &[Transition]) {
+fn print_transitions(changes: &[Transition], extra_names: &[&str]) {
     // These are `ok`/`info` rows, so `--quiet` drops them like any other.
     if ui::quiet() {
         return;
     }
-    ui::emit_block(ui::Stream::Err, &render_transitions(ui::color(), changes));
+    ui::emit_block(
+        ui::Stream::Err,
+        &render_transitions(ui::color(), changes, extra_names),
+    );
 }
 
 pub fn starting_snapshot(urls: &DevUrls) -> BannerSnapshot {
@@ -280,6 +312,7 @@ pub fn starting_snapshot(urls: &DevUrls) -> BannerSnapshot {
         app: urls.app.as_ref().map(|_| ServiceState::Starting),
         www: urls.www.as_ref().map(|_| ServiceState::Starting),
         prometheus: urls.prometheus.as_ref().map(|_| ServiceState::Starting),
+        extra: urls.extra.iter().map(|_| ServiceState::Starting).collect(),
     }
 }
 
@@ -304,7 +337,8 @@ pub fn spawn_readiness_watcher(urls: DevUrls, sticky: bool) {
                 if sticky {
                     ui::repin(&region_lines(ui::color(), &urls, &next));
                 } else {
-                    print_transitions(&transitions(&last, &next));
+                    let names: Vec<&str> = urls.extra_names().collect();
+                    print_transitions(&transitions(&urls, &last, &next), &names);
                 }
                 last = next;
             }
@@ -330,11 +364,16 @@ async fn probe_all(client: &Client, urls: &DevUrls) -> BannerSnapshot {
         Some(url) => Some(probe_http(client, &url).await),
         None => None,
     };
+    let mut extra = Vec::with_capacity(urls.extra.len());
+    for (_, url) in &urls.extra {
+        extra.push(probe_http(client, url).await);
+    }
     BannerSnapshot {
         api,
         app,
         www,
         prometheus,
+        extra,
     }
 }
 
@@ -382,6 +421,7 @@ mod tests {
             app: Some(ServiceState::Starting),
             www: Some(ServiceState::Ready),
             prometheus: Some(ServiceState::Ready),
+            extra: vec![],
         };
         let text = render_banner(&urls, &snap);
         assert!(text.contains("http://localhost:3000"));
@@ -403,6 +443,7 @@ mod tests {
             app: Some(ServiceState::Starting),
             www: None,
             prometheus: Some(ServiceState::Starting),
+            extra: vec![],
         };
         let text = render_banner(&urls, &snap);
         assert!(text.contains("migrating"));
@@ -446,6 +487,7 @@ mod tests {
             app: Some(ServiceState::Starting),
             www: Some(ServiceState::Ready),
             prometheus: Some(ServiceState::Ready),
+            extra: vec![],
         };
         let text = render_banner_when(false, &urls, &snap);
 
@@ -503,6 +545,7 @@ mod tests {
                 app: Some(ServiceState::Ready),
                 www: Some(ServiceState::Migrating),
                 prometheus: Some(ServiceState::Ready),
+                extra: vec![],
             },
         );
         assert_eq!(starting.len(), ready.len());
@@ -516,15 +559,15 @@ mod tests {
             api: Some(ServiceState::Ready),
             ..before.clone()
         };
-        let changes = transitions(&before, &after);
+        let changes = transitions(&urls, &before, &after);
         assert_eq!(
             changes,
             vec![Transition {
-                name: "api",
+                name: "api".into(),
                 state: ServiceState::Ready,
             }]
         );
-        let text = render_transitions(false, &changes);
+        let text = render_transitions(false, &changes, &[]);
         assert_eq!(text, "  ok    api   ready\n");
     }
 
@@ -532,8 +575,8 @@ mod tests {
     fn an_unchanged_snapshot_prints_nothing() {
         let urls = DevUrls::defaults(true, true, true);
         let snap = starting_snapshot(&urls);
-        assert!(transitions(&snap, &snap).is_empty());
-        assert_eq!(render_transitions(false, &[]), "");
+        assert!(transitions(&urls, &snap, &snap).is_empty());
+        assert_eq!(render_transitions(false, &[], &[]), "");
     }
 
     #[test]
@@ -544,12 +587,13 @@ mod tests {
             app: None,
             www: None,
             prometheus: Some(ServiceState::Ready),
+            extra: vec![],
         };
         let restarting = BannerSnapshot {
             api: Some(ServiceState::Starting),
             ..ready.clone()
         };
-        let text = render_transitions(false, &transitions(&ready, &restarting));
+        let text = render_transitions(false, &transitions(&urls, &ready, &restarting), &[]);
         assert_eq!(text, "        api   starting\n");
         assert!(urls.api.is_some());
     }
@@ -563,8 +607,9 @@ mod tests {
             app: Some(ServiceState::Ready),
             www: Some(ServiceState::Ready),
             prometheus: Some(ServiceState::Ready),
+            extra: vec![],
         };
-        let text = render_transitions(false, &transitions(&before, &after));
+        let text = render_transitions(false, &transitions(&urls, &before, &after), &[]);
         let offsets: Vec<usize> = text.lines().filter_map(|l| l.find("ready")).collect();
         assert_eq!(offsets.len(), 4);
         assert!(
@@ -584,10 +629,14 @@ mod tests {
             app: Some(ServiceState::Ready),
             ..before.clone()
         };
-        let text = render_transitions(false, &transitions(&before, &after));
+        let text = render_transitions(false, &transitions(&urls, &before, &after), &[]);
         assert!(!text.contains('\u{1b}'));
         assert_eq!(
-            ui::strip_ansi(&render_transitions(true, &transitions(&before, &after))),
+            ui::strip_ansi(&render_transitions(
+                true,
+                &transitions(&urls, &before, &after),
+                &[]
+            )),
             text,
         );
     }
@@ -600,5 +649,61 @@ mod tests {
         assert!(text.contains("api"));
         assert!(!text.contains("prom"));
         assert!(!text.contains("9090"));
+    }
+
+    #[test]
+    fn extra_service_row_follows_prom() {
+        let mut urls = DevUrls::defaults(true, false, false);
+        urls.extra.push((
+            "vision".into(),
+            "http://localhost:8765/tools/solve_studio/".into(),
+        ));
+        let text = render_banner_when(false, &urls, &starting_snapshot(&urls));
+        let prom = text.find("prom").expect("prom row");
+        let vision = text.find("vision").expect("vision row");
+        assert!(vision > prom, "{text}");
+        assert!(text.contains("http://localhost:8765/tools/solve_studio/"));
+    }
+
+    #[test]
+    fn extra_service_row_is_omitted_when_empty() {
+        let urls = DevUrls::defaults(true, false, false);
+        let text = render_banner(&urls, &starting_snapshot(&urls));
+        assert!(!text.contains("vision"));
+        assert!(!text.contains("8765"));
+    }
+
+    #[test]
+    fn extra_row_does_not_change_pinned_height() {
+        let mut urls = DevUrls::defaults(true, false, false);
+        urls.extra
+            .push(("vision".into(), "http://localhost:8765/".into()));
+        let starting = region_lines(false, &urls, &starting_snapshot(&urls));
+        let mut ready = starting_snapshot(&urls);
+        ready.extra = vec![ServiceState::Ready];
+        let ready_lines = region_lines(false, &urls, &ready);
+        assert_eq!(starting.len(), ready_lines.len());
+    }
+
+    #[test]
+    fn extra_transition_uses_the_package_name() {
+        let mut urls = DevUrls::defaults(true, false, false);
+        urls.extra
+            .push(("vision".into(), "http://localhost:8765/".into()));
+        let before = starting_snapshot(&urls);
+        let mut after = before.clone();
+        after.extra = vec![ServiceState::Ready];
+        let changes = transitions(&urls, &before, &after);
+        assert_eq!(
+            changes,
+            vec![Transition {
+                name: "vision".into(),
+                state: ServiceState::Ready,
+            }]
+        );
+        let names = ["vision"];
+        let text = render_transitions(false, &changes, &names);
+        assert!(text.contains("vision"));
+        assert!(text.contains("ready"));
     }
 }

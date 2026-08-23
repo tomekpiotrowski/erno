@@ -29,7 +29,7 @@ cargo install erno-cli
 | [`erno upgrade`](/cli/upgrade/) | Inventory and update Erno-managed packages |
 | [`erno deploy`](/cli/deploy/) | Scaffold Docker/Helm files and install releases |
 
-All three of `build`, `lint`, and `test` read one manifest — [`erno.toml`](#the-package-manifest) in the project root.
+`build`, `lint`, and `test` read one manifest — [`erno.toml`](#the-package-manifest) in the project root. `erno dev` reads the same file for optional `[[package.dev]]` children.
 
 ---
 
@@ -74,6 +74,8 @@ erno dev --seed
 erno dev --open
 erno dev --ios
 erno dev --android
+erno dev --package vision
+erno dev --all
 ```
 
 Starts the project’s dev servers (`api/` + `app/`, plus `www/` when present). Walks up from the current directory looking for `api/Cargo.toml`, so you can run it from `api/`, `app/`, or any subdirectory. Child tools are told to keep colour even though their stdout is piped — and told to drop it when you pass `--no-color`.
@@ -81,6 +83,8 @@ Starts the project’s dev servers (`api/` + `app/`, plus `www/` when present). 
 By default only errors and ready events are printed; the full multiplex is written to `.erno/dev.log`. Pass the global `--verbose` (or `-v`) to stream every child line, prefixed by service (`[api]`, `[app]`, `[www]`). The `.erno/dev.log` copy is always uncoloured, so it greps cleanly.
 
 `--api`, `--app`, and `--www` start only the services you name (combine them). `--no-www` skips the marketing site when you want the default API + app pair. `--api` does not require an `app/` directory.
+
+`--package <name>` (repeatable) and `--all` start extra long-running processes declared as `[[package.dev]]` in `erno.toml`, **in addition to** the usual api/app/www selection. A package with `default = false` is not started by plain `erno dev`. Naming a package does not pull a `default = false` `[[package.dev]]` step unless `--all` is also passed. `--open` still prefers www, then the app, then the API — extra URLs are not opened.
 
 `--seed` inserts a verified demo user (`dev@example.com` / `password`) if it is missing. An empty `users` table is seeded automatically on first run so login works without walking through email verification.
 
@@ -112,6 +116,7 @@ erno dev --android --target emulator-5554
 | Product app | HTTP | `app_url` or `angular.json` serve port (4200) |
 | Marketing | HTTP | `--port` in `www/package.json` `dev` script (4321) |
 | Prometheus | `GET /-/ready` | `http://localhost:9090` |
+| Extra `[[package.dev]]` | HTTP on the declared `url` | From `erno.toml` |
 
 A second `erno dev` in the same project is rejected via `.erno/dev.lock` (stale locks from a crashed session are replaced). When the API is running the banner also lists Prometheus (`http://localhost:9090`), the admin SPA (`http://localhost:4300`, password `admin`), `/dev/emails`, and `/dev/jobs`. Newly captured mock emails are printed as `[mail] subject → to`. In an interactive terminal the banner is pinned to the bottom of the screen and updated in place as services come up, with log output scrolling above it; on Ctrl+C the last copy is left in the scrollback. When output is piped, under `--no-color`, `--quiet`, or `--verbose`, on a terminal too small to hold the banner, or with `ERNO_STICKY=0`, it is printed once instead and each later state change (`starting` → `ready`) is reported as a single row naming the service. If one process exits, it is restarted (with backoff) without taking the others down. The API is rebuilt automatically when `api/` source files change (no `cargo-watch` needed). Ctrl+C sends SIGTERM, then SIGKILL after two seconds. Prometheus is required when the API is started (`prometheus` must be on `PATH`). Pass `--no-prometheus` to skip — the banner then omits `prom`. A missing binary is an error, not a silent skip.
 
@@ -169,6 +174,7 @@ dir  = "app"
 | `default` | `true` | `false` means opt in with `--package <name>` or `--all`. |
 | `database` | `false` | Ensure the test database exists before this package's test phase. |
 | `kind` | — | Only `"e2e"` is recognised. The CLI orchestrates that package itself and ignores its declared test steps. |
+| `[[package.dev]]` | — | At most one long-running process for `erno dev`. Required `command` and `url`; optional `args`, `default`. Not a `build`/`lint`/`test` phase. |
 
 | Step key | Default | Meaning |
 |----------|---------|---------|

@@ -19,7 +19,7 @@ cargo install --path .                   # install globally as `erno`
 | `erno new <name>` | Scaffolds a full-stack Erno project (Rust API + Ionic Angular standalone app + Astro www) |
 | `erno upgrade` | Inventories Erno-managed packages and runs official migrators (`ng update`, `@ionic/migrate`) toward this CLI generation |
 | `erno dev` | Starts api + app + www dev servers, readiness banner, `--ios`/`--android` live reload (`--target <id>` picks the device) |
-| `erno dev` | Also starts Prometheus (if installed) and `admin/` on :4300 |
+| `erno dev` | Also starts Prometheus (if installed) and `admin/` on :4300; `--package` / `--all` add `[[package.dev]]` extras |
 | `erno deploy init` | Scaffolds Docker/Helm deploy files; generates admin password hash for production |
 | `erno deploy install` | Installs a chart version to the cluster (`helm secrets upgrade --install`) |
 | `erno build` | Builds every package declared in `erno.toml`, in declaration order |
@@ -30,7 +30,7 @@ Narrative docs for the CLI live in `docs/src/content/docs/cli/` (`index.md`, `de
 
 ## The package manifest: `erno.toml`
 
-`build`, `lint`, and `test` all read one file in the project root. Each `[[package]]` declares its own steps per phase, and **declaration order is execution order** — that is how build dependency order is expressed, which is why there is no dependency graph and no parallelism.
+`build`, `lint`, and `test` all read one file in the project root. Each `[[package]]` declares its own steps per phase, and **declaration order is execution order** — that is how build dependency order is expressed, which is why there is no dependency graph and no parallelism. `erno dev` reads the same file for optional `[[package.dev]]` processes; those are long-running children of the multiplexer, not a fourth phase of the sequential runner.
 
 ```toml
 [[package]]
@@ -56,6 +56,7 @@ dir  = "puzzles"
 | `default` | `false` means opt in with `--package <name>` or `--all`. Defaults to `true`. |
 | `database` | Ensure the test database exists before this package's test phase. |
 | `kind` | Only `"e2e"` is recognised — the CLI runs its own port-allocating orchestration and ignores declared test steps. |
+| `[[package.dev]]` | At most one long-running process for `erno dev`. Required `command` and `url`; optional `args`, `default`. |
 
 | Step key | Meaning |
 |----------|---------|
@@ -190,7 +191,7 @@ The escape vocabulary is exactly two sequences — cursor-up and erase-to-end-of
 ## Architecture notes
 
 - **No dependency on `api/`**: the CLI does not depend on the `erno` library crate. Admin uses `reqwest` + `ratatui` as an HTTP client. Keeping it decoupled avoids version skew and circular concerns.
-- **One manifest, three commands**: `build`, `lint`, and `test` differ only in which phase they run and whether `--fix` applies. The shared engine lives in `packages.rs`; the command modules are thin. `test.rs` is the only one that needs more, because the e2e package is orchestrated rather than shelled out — it passes a callback that `run_phase` gives first refusal on each package.
+- **One manifest, three sequential commands**: `build`, `lint`, and `test` differ only in which phase they run and whether `--fix` applies. The shared engine lives in `packages.rs`; the command modules are thin. `test.rs` is the only one that needs more, because the e2e package is orchestrated rather than shelled out — it passes a callback that `run_phase` gives first refusal on each package. `erno dev` also reads the manifest, but only for `[[package.dev]]` children of the multiplexer.
 - **Templates are inline strings**: `new.rs` holds all scaffold templates as Rust string constants/functions. `{{name}}` is substituted via `.replace()` — no template engine dependency.
 - **`erno upgrade` is an orchestrator**: scanners list Erno-managed packages; official tools (`ng update` one major at a time, `@ionic/migrate`) do the rewriting. Targets (`TARGET_ANGULAR_MAJOR`, `TARGET_IONIC_MAJOR`) are this CLI generation. Children run with `CI=true`.
 - **`erno_migrations()` helper**: scaffolded apps call `erno::database::migrations::erno_migrations()` in their `Migrator` to include all built-in framework migrations (users, jobs, sync, billing, storage) before their own.

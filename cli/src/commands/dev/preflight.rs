@@ -4,7 +4,7 @@ use std::process::Command;
 use crate::ui;
 
 const FRIENDLY_COMMANDS: &[&str] = &[
-    "erno", "cargo", "node", "npm", "ng", "astro", "esbuild", "vite",
+    "erno", "cargo", "node", "npm", "ng", "astro", "esbuild", "vite", "python", "python3",
 ];
 
 pub fn run_preflight(check_db: bool, check_prometheus: bool, ports: &[u16]) -> Result<(), String> {
@@ -182,6 +182,8 @@ mod tests {
         assert!(should_default_kill("node"));
         assert!(should_default_kill("/usr/bin/npm"));
         assert!(should_default_kill("ng"));
+        assert!(should_default_kill("python3"));
+        assert!(should_default_kill("/usr/bin/python"));
         assert!(!should_default_kill("firefox"));
         assert!(!should_default_kill("postgres"));
     }
