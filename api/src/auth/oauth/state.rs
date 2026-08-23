@@ -53,7 +53,7 @@ fn hmac_hex(secret: &str, body: &str) -> String {
     mac.update(secret.as_bytes());
     mac.update(b"|");
     mac.update(body.as_bytes());
-    hex_encode(&mac.finalize())
+    hex_encode(mac.finalize())
 }
 
 fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
