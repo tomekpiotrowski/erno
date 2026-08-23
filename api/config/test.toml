@@ -50,3 +50,11 @@ backoff_multiplier = 2.0
 [admin]
 username = "admin"
 password_hash = "$argon2id$v=19$m=19456,t=2,p=1$5B2ECOLqakkxkiD5EjKyDQ$PBe29N0j5lou/OHFWQuxjKEnL7fv4GE9MhniBui9rYc"
+
+# Tests never reach out to a collector. Capture hooks are off too: a panic hook
+# installed by one test leaks into the whole binary, and capturing every
+# `tracing::error!` would pollute tests that deliberately provoke errors.
+[error_reporting]
+enabled = false
+capture_tracing_errors = false
+capture_panics = false

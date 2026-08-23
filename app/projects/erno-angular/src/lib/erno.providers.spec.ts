@@ -5,6 +5,9 @@ import { firstValueFrom } from 'rxjs';
 import { provideErno } from './erno.providers';
 import { ErnoAuthService } from './auth/erno-auth.service';
 import { ErnoDatabaseService } from './sync/erno-database.service';
+import { ErrorHandler } from '@angular/core';
+import { ErnoErrorHandler } from './errors/erno-error-handler';
+import { ErnoErrorReporterService } from './errors/erno-error-reporter.service';
 
 const BASE = 'http://api';
 
@@ -57,5 +60,16 @@ describe('provideErno', () => {
 
     expect(await pending).toEqual({ ok: true });
     expect(TestBed.inject(ErnoAuthService).accessToken).toBe('new-access');
+  });
+
+  it('registers the error handler and reporter', () => {
+    expect(TestBed.inject(ErrorHandler)).toBeInstanceOf(ErnoErrorHandler);
+    expect(TestBed.inject(ErnoErrorReporterService)).toBeTruthy();
+  });
+
+  it('leaves the reporter inert when no ingest key is configured', () => {
+    // Overriding ErrorHandler is intrusive, so an application that has not
+    // opted in must get a handler that reports nothing.
+    expect(TestBed.inject(ErnoErrorReporterService).active).toBe(false);
   });
 });

@@ -56,3 +56,14 @@ table_counts = ["users", "job", "job_execution", "files", "file_attachments", "s
 [admin]
 username = "admin"
 password_hash = "$argon2id$v=19$m=19456,t=2,p=1$5B2ECOLqakkxkiD5EjKyDQ$PBe29N0j5lou/OHFWQuxjKEnL7fv4GE9MhniBui9rYc"
+
+# Report this application's own errors to the monitoring deployment.
+# Inert until `collector_url` is set, so a fresh app never phones home.
+[error_reporting]
+enabled = true
+collector_url = "http://localhost:3001"
+# Trusted server-to-server credential. A real secret — SOPS in production,
+# unlike the browser token, which is public by necessity.
+ingest_token = "dev-server-token"
+capture_tracing_errors = true
+capture_panics = true

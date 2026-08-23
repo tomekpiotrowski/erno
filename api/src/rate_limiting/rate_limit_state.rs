@@ -271,6 +271,73 @@ impl RateLimitConfig {
             },
         );
 
+        // Error ingest. The three actions form a deliberate hierarchy: the
+        // path-based ceiling must be at least the sum of the identity tiers, or
+        // it silently masks them.
+        //
+        // The browser tier is loose on purpose. A corporate NAT or a campus puts
+        // hundreds of real users behind one IPv4, so a tight limit here would
+        // blackhole a whole office's crash reports rather than stop an abuser.
+        actions.insert(
+            "error_ingest".to_string(),
+            ActionRateLimit {
+                tiers: vec![
+                    RateLimitTier {
+                        window_secs: 10,
+                        max_requests: 60,
+                    },
+                    RateLimitTier {
+                        window_secs: 60,
+                        max_requests: 300,
+                    },
+                    RateLimitTier {
+                        window_secs: 3600,
+                        max_requests: 3000,
+                    },
+                ],
+            },
+        );
+
+        actions.insert(
+            "error_ingest_server".to_string(),
+            ActionRateLimit {
+                tiers: vec![
+                    RateLimitTier {
+                        window_secs: 10,
+                        max_requests: 100,
+                    },
+                    RateLimitTier {
+                        window_secs: 60,
+                        max_requests: 600,
+                    },
+                    RateLimitTier {
+                        window_secs: 3600,
+                        max_requests: 10000,
+                    },
+                ],
+            },
+        );
+
+        actions.insert(
+            "error_ingest_browser".to_string(),
+            ActionRateLimit {
+                tiers: vec![
+                    RateLimitTier {
+                        window_secs: 10,
+                        max_requests: 10,
+                    },
+                    RateLimitTier {
+                        window_secs: 60,
+                        max_requests: 30,
+                    },
+                    RateLimitTier {
+                        window_secs: 3600,
+                        max_requests: 200,
+                    },
+                ],
+            },
+        );
+
         actions
     }
 
@@ -357,11 +424,28 @@ impl RateLimitState {
         ip: IpAddr,
         action: &RateLimitAction,
     ) -> Result<(), Duration> {
+        self.check_rate_limit_key(&ip.to_string(), action).await
+    }
+
+    /// Check a rate limit against an arbitrary identity key, such as
+    /// `user:{uuid}` or `token:server`.
+    ///
+    /// The path-based middleware runs before any authentication, so it can only
+    /// ever limit by IP. Handlers that *can* see who is calling use this to
+    /// apply a tier matched to the caller's identity.
+    ///
+    /// Returns `Ok(())` if allowed, or `Err(retry_after)` if blocked.
+    pub async fn check_rate_limit_key(
+        &self,
+        identity: &str,
+        action: &RateLimitAction,
+    ) -> Result<(), Duration> {
         if !self.config.enabled {
             return Ok(());
         }
         let limit = self.config.get_limit(action);
-        let key = format!("{}/{}", ip, action.as_str());
+        // Same key shape the IP path has always produced, so no live bucket moves.
+        let key = format!("{}/{}", identity, action.as_str());
         self.backend
             .check_rate_limit(&key, &limit, self.config.backoff_multiplier)
             .await

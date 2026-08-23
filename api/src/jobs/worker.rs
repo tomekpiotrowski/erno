@@ -125,6 +125,29 @@ where
         job_registry.retry_overrides(&job_model.r#type),
     );
 
+    // How long the job sat before a worker picked it up.
+    //
+    // Measured from when it *became runnable*, not from when it was created: a
+    // job scheduled for later, or backing off after a failure, is not waiting
+    // until its time arrives. Counting that as latency would make a healthy
+    // retry queue look permanently late.
+    //
+    // This, rather than queue depth, is what predicts user-visible lateness —
+    // a thousand jobs enqueued a second ago is fine; one job waiting ten
+    // minutes is not.
+    let runnable_at = job_model
+        .next_execution_at
+        .unwrap_or(job_model.created_at)
+        .max(job_model.created_at);
+    let queue_wait = (chrono::Utc::now().naive_utc() - runnable_at)
+        .num_milliseconds()
+        .max(0) as f64
+        / 1000.0;
+    metrics::histogram!("erno_jobs_queue_wait_seconds",
+        "job_type" => job_model.r#type.clone(),
+    )
+    .record(queue_wait);
+
     // Execute the job and measure execution time
     let start_time = Instant::now();
     let timeout_duration = Duration::from_secs(u64::from(resolved.job_timeout));
@@ -541,6 +564,7 @@ mod tests {
             metrics_collectors: Arc::new(crate::metrics::collector::CollectorRegistry::default()),
             job_failure_handler: handler,
             user_data_deleter: None,
+            error_reporter: crate::error_reporting::reporter::ErrorReporter::disabled(),
         }
     }
 

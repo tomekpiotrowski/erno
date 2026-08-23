@@ -7,8 +7,9 @@
 #   ./build.sh test           run the Rust test suites
 #   ./build.sh help           list every target
 #
-# There is no cargo workspace: api/ and cli/ are independent crates, and app/
-# and docs/ are npm projects. This script is the one entry point across all four.
+# There is no cargo workspace: api/, cli/ and monitoring/ are independent
+# crates, and app/, admin/, monitoring/ui and docs/ are npm projects. This
+# script is the one entry point across all of them.
 
 set -euo pipefail
 
@@ -42,6 +43,20 @@ build_app() {
     (cd app && npm run build -- erno-angular)
 }
 
+build_monitoring() {
+    step "Building monitoring (collector)"
+    (cd monitoring && cargo build)
+    ensure_node_modules monitoring/ui
+    step "Building monitoring console"
+    (cd monitoring/ui && npm run build)
+}
+
+build_admin() {
+    ensure_node_modules admin
+    step "Building admin (operator console)"
+    (cd admin && npm run build)
+}
+
 build_docs() {
     ensure_node_modules docs
     step "Building docs (Astro site)"
@@ -55,45 +70,57 @@ run_test() {
     (cd api && cargo test --all-features)
     step "Testing cli"
     (cd cli && cargo test)
+    # Uses its own database (erno_monitoring_test); see monitoring/config/test.toml.
+    step "Testing monitoring"
+    (cd monitoring && cargo test)
+    ensure_node_modules app
+    step "Testing app (erno-angular)"
+    (cd app && npm test -- --watch=false)
 }
 
 run_check() {
     step "Checking formatting"
     (cd api && cargo fmt --check)
     (cd cli && cargo fmt --check)
+    (cd monitoring && cargo fmt --check)
     step "Running clippy"
     (cd api && cargo clippy --all-features -- -D warnings)
     (cd cli && cargo clippy -- -D warnings)
+    (cd monitoring && cargo clippy -- -D warnings)
 }
 
 run_fmt() {
     step "Formatting Rust sources"
     (cd api && cargo fmt)
     (cd cli && cargo fmt)
+    (cd monitoring && cargo fmt)
 }
 
 run_clean() {
     step "Cleaning build outputs"
     (cd api && cargo clean)
     (cd cli && cargo clean)
-    rm -rf app/dist docs/dist
+    (cd monitoring && cargo clean)
+    rm -rf app/dist docs/dist admin/dist monitoring/ui/dist
 }
 
 usage() {
     cat <<'EOF'
 Usage: ./build.sh [target...]
 
-Build targets (all four run when no target is given):
-  api      Build the erno crate            (cd api  && cargo build --all-features)
-  cli      Build the erno binary           (cd cli  && cargo build)
-  app      Build the erno-angular library  (cd app  && npm run build -- erno-angular)
-  docs     Build the Astro docs site       (cd docs && npm run build)
+Build targets (all run when no target is given):
+  api         Build the erno crate            (cd api  && cargo build --all-features)
+  cli         Build the erno binary           (cd cli  && cargo build)
+  app         Build the erno-angular library  (cd app  && npm run build -- erno-angular)
+  admin       Build the operator console      (cd admin && npm run build)
+  monitoring  Build the collector + console   (cd monitoring && cargo build)
+  docs        Build the Astro docs site       (cd docs && npm run build)
 
 Other targets:
-  test     Run the Rust test suites (api tests require PostgreSQL)
-  check    cargo fmt --check + clippy -D warnings, both crates
-  fmt      cargo fmt, both crates
-  clean    cargo clean both crates, remove app/dist and docs/dist
+  test     Run the test suites (Rust suites require PostgreSQL)
+  check    cargo fmt --check + clippy -D warnings, all Rust crates
+  fmt      cargo fmt, all Rust crates
+  clean    cargo clean every crate, remove all dist directories
   help     Show this message
 
 Targets compose, in the order given:  ./build.sh fmt api test
@@ -104,6 +131,8 @@ if [ $# -eq 0 ]; then
     build_api
     build_cli
     build_app
+    build_admin
+    build_monitoring
     build_docs
     step "Done"
     exit 0
@@ -114,8 +143,10 @@ for target in "$@"; do
         api) build_api ;;
         cli) build_cli ;;
         app) build_app ;;
+        admin) build_admin ;;
+        monitoring) build_monitoring ;;
         docs) build_docs ;;
-        all) build_api; build_cli; build_app; build_docs ;;
+        all) build_api; build_cli; build_app; build_admin; build_monitoring; build_docs ;;
         test) run_test ;;
         check) run_check ;;
         fmt) run_fmt ;;

@@ -50,3 +50,12 @@ table_counts = ["users", "job", "job_execution", "files", "file_attachments", "s
 [admin]
 username = "admin"
 password_hash = "$argon2id$v=19$m=19456,t=2,p=1$5B2ECOLqakkxkiD5EjKyDQ$PBe29N0j5lou/OHFWQuxjKEnL7fv4GE9MhniBui9rYc"
+
+# Report this application's own errors to a monitoring deployment.
+# Inert until `collector_url` is set, so a fresh app never phones home.
+[error_reporting]
+enabled = true
+collector_url = ""          # e.g. "http://localhost:3001" when running `monitoring/`
+ingest_token = ""           # trusted server-to-server token; a real secret
+capture_tracing_errors = true
+capture_panics = true

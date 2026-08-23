@@ -261,6 +261,7 @@ pub async fn handle_command<AppMigrator: MigratorTrait, ExtraConfig>(
                 job_failure_handler,
                 user_data_deleter,
                 metrics_collectors,
+                app_info,
             )
             .await;
         }

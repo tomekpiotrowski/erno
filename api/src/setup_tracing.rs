@@ -1,5 +1,5 @@
 use time::format_description::parse_borrowed;
-use tracing_subscriber::fmt::time::OffsetTime;
+use tracing_subscriber::{fmt::time::OffsetTime, layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::cli::Commands;
 
@@ -22,8 +22,11 @@ pub fn setup_tracing_for_command(command: &Option<Commands>, server_log_level: &
         .add_directive("sqlx::postgres::notice=warn".parse().unwrap())
         .add_directive("sea_orm_migration::migrator=warn".parse().unwrap());
 
-    tracing_subscriber::fmt()
-        .with_env_filter(env_filter)
+    // Composed as a layered registry rather than the `fmt()` builder so error
+    // reporting can observe events. Every formatting option below is carried
+    // over from the builder one-for-one — operators read these logs, so the
+    // output must be byte-identical.
+    let fmt_layer = tracing_subscriber::fmt::layer()
         .with_target(false) // Remove module paths for cleaner output
         .with_thread_ids(false) // Remove thread IDs for cleaner output
         .with_thread_names(false) // Remove thread names for cleaner output
@@ -33,6 +36,13 @@ pub fn setup_tracing_for_command(command: &Option<Commands>, server_log_level: &
             time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC),
             parse_borrowed::<2>("[hour]:[minute]:[second].[subsecond digits:2]").unwrap(),
         ))
-        .compact() // Use compact format
+        .compact(); // Use compact format
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(fmt_layer)
+        // Inert until the application installs a reporter; see
+        // `error_reporting::reporter::capture`.
+        .with(crate::error_reporting::reporter::capture::ErrorCaptureLayer)
         .init();
 }

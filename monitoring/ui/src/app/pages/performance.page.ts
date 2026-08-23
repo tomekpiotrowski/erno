@@ -1,6 +1,6 @@
 import { Component, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { PrometheusService, PromSeries } from '../core/prometheus';
-import { PERFORMANCE, WINDOWS } from '../metrics/catalog';
+import { PERFORMANCE, SUBSYSTEMS, WINDOWS } from '../metrics/catalog';
 import { Sparkline } from '../sparkline';
 
 @Component({
@@ -87,6 +87,14 @@ export class PerformancePage {
       ['In-flight', PERFORMANCE.inFlight],
       ['DB pool total', PERFORMANCE.poolTotal],
       ['Job queue', PERFORMANCE.jobQueue],
+      // Erno-specific timings — see metrics/catalog.ts.
+      ['Job queue wait p95', SUBSYSTEMS.jobWaitP95],
+      ['Job duration p95', SUBSYSTEMS.jobDurationP95],
+      ['Job failure rate', SUBSYSTEMS.jobFailureRate],
+      ['Sync delta p95', SUBSYSTEMS.syncDurationP95],
+      ['Sync delta rows p95', SUBSYSTEMS.syncRowsP95],
+      ['Storage upload p95', SUBSYSTEMS.storageUploadP95],
+      ['Email send p95', SUBSYSTEMS.emailDurationP95],
     ] as const;
     const next: { title: string; series: PromSeries[] }[] = [];
     let remaining = queries.length;
@@ -97,7 +105,10 @@ export class PerformancePage {
           remaining -= 1;
           if (remaining === 0) this.blocks.set(next);
         },
-        error: () => this.error.set('Prometheus is unreachable. Is it running?'),
+        error: () =>
+          this.error.set(
+            'Prometheus is unreachable. It runs in this deployment — check that it is up.',
+          ),
       });
     }
   }

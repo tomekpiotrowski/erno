@@ -20,7 +20,7 @@ impl SoftDeleteStatement {
     pub async fn exec(self, db: &DatabaseConnection) -> Result<(), DbErr> {
         db.execute(Statement::from_sql_and_values(
             DbBackend::Postgres,
-            &format!("UPDATE {} SET deleted_at = NOW() WHERE id = $1", self.table),
+            format!("UPDATE {} SET deleted_at = NOW() WHERE id = $1", self.table),
             [self.id.into()],
         ))
         .await?;

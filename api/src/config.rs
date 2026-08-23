@@ -45,6 +45,7 @@ pub struct StripeConfig {
     pub portal_return_url: String,
 }
 
+pub use crate::error_reporting::config::ErrorReportingConfig;
 pub use crate::rate_limiting::rate_limit_state::RateLimitConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,6 +120,10 @@ pub struct Config<ExtraConfig = ()> {
     /// `password_hash` is empty.
     #[serde(default)]
     pub admin: Option<AdminConfig>,
+    /// Reporting this app's own errors to a monitoring collector.
+    /// Inert until `collector_url` is set.
+    #[serde(default)]
+    pub error_reporting: ErrorReportingConfig,
     #[serde(flatten, default)]
     pub extra: ExtraConfig,
 }

@@ -35,6 +35,10 @@ async fn tag_rate_limit_action(mut req: Request, next: Next) -> Response {
             "/api/auth/password-reset/request" => "password_reset_request",
             "/api/auth/password-reset/confirm" => "password_reset_confirm",
             "/api/account" => "account_delete",
+            // Error ingest on a monitoring deployment. This is the
+            // identity-blind ceiling; the tier matched to the caller's
+            // credential is applied inside the handler, which can see it.
+            "/api/errors" => "error_ingest",
             _ => "default",
         }
     };
@@ -100,6 +104,12 @@ where
         .route("/liveness", get(api::health_checks::ok))
         .route("/readiness", get(api::health_checks::ok))
         .merge(rate_limited)
+        // A panicking handler would otherwise be caught by hyper and surface as
+        // a dropped connection: no status, no log, nothing to report. This turns
+        // it into a clean 500. The report itself comes from the panic hook, so
+        // the default responder is used deliberately — a custom one here would
+        // report the same panic twice.
+        .layer(tower_http::catch_panic::CatchPanicLayer::new())
         .layer(TraceLayer::new_for_http());
 
     if metrics_enabled {
@@ -286,6 +296,7 @@ mod dev_inbox_tests {
             metrics_collectors: Arc::new(CollectorRegistry::default()),
             job_failure_handler: None,
             user_data_deleter: None,
+            error_reporter: crate::error_reporting::reporter::ErrorReporter::disabled(),
         };
         let server = TestServer::new(router(app, empty_router)).expect("test server");
         assert_eq!(server.get("/dev/emails").await.status_code(), 404);

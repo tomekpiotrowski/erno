@@ -2,9 +2,11 @@
 pub mod collector;
 pub mod db_stats;
 pub mod http;
+pub mod timing;
 
 pub use collector::{CollectorRegistry, MetricsCollector};
 pub use metrics_exporter_prometheus::PrometheusHandle;
+pub use timing::OperationTimer;
 
 #[derive(Clone)]
 pub struct MetricsEndpointState {

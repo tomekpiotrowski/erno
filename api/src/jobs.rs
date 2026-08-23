@@ -1,5 +1,7 @@
 //! Docs: docs/src/content/docs/api/jobs.md
-mod advisory_lock;
+// Public so other framework subsystems can take a deployment-wide singleton
+// lock — the monitoring collector's retention sweep does exactly that.
+pub mod advisory_lock;
 pub mod failure_handler;
 pub mod job_registry;
 pub mod job_result;

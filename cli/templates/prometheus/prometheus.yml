@@ -1,3 +1,10 @@
+# Scrape configuration for local development.
+#
+# Docs: docs/src/content/docs/monitoring/metrics.md
+#
+# Prometheus belongs to the monitoring deployment, not to the application it
+# watches — monitoring that lives inside the thing it monitors goes down with
+# it. In development both run on this machine, so one Prometheus scrapes both.
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
@@ -7,3 +14,10 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets: ["127.0.0.1:3000"]
+
+  # The collector reports on itself too: an operator needs to know when the
+  # thing doing the watching is the thing that is struggling.
+  - job_name: erno-monitoring
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["127.0.0.1:3001"]

@@ -79,7 +79,21 @@ export default defineConfig({
             { label: 'File storage', link: '/app/storage/' },
             { label: 'Billing', link: '/app/billing/' },
             { label: 'Sharing', link: '/app/share/' },
+            { label: 'Error reporting', link: '/app/error-reporting/' },
             { label: 'Devtools', link: '/app/devtools/' },
+          ],
+        },
+        {
+          label: 'Monitoring',
+          items: [
+            { label: 'Overview', link: '/monitoring/' },
+            { label: 'Error reporting', link: '/monitoring/error-reporting/' },
+            { label: 'Releases', link: '/monitoring/releases/' },
+            { label: 'Subsystem health', link: '/monitoring/subsystem-health/' },
+            { label: 'Uptime checks', link: '/monitoring/uptime/' },
+            { label: 'Alerts', link: '/monitoring/alerts/' },
+            { label: 'Status page', link: '/monitoring/status-page/' },
+            { label: 'Metrics', link: '/monitoring/metrics/' },
           ],
         },
         {

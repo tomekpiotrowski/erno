@@ -10,6 +10,7 @@ Rust/Axum SaaS infrastructure library — batteries-included auth, jobs, billing
 | `app/`    | Angular library (`erno-angular`) for Ionic web + mobile — see `app/AGENTS.md` |
 | `cli/`    | `erno` CLI binary — scaffolding, environment checks — see `cli/AGENTS.md` |
 | `docs/`   | Astro documentation site |
+| `monitoring/` | Monitoring collector — error reporting, deployed separately from the app it watches. See `monitoring/AGENTS.md` |
 
 ## Building everything
 
@@ -36,6 +37,13 @@ Per-directory instructions below still apply when working inside one part.
 ## CLI
 
 `cli/` contains the `erno` binary. Install with `cargo install --path cli` or `cargo install erno-cli`. See `cli/AGENTS.md` for command reference and development instructions.
+
+## Monitoring
+
+`monitoring/` is a separate deployment — its own binary, database, and operator
+console — that collects errors from the API, Angular apps, and the admin panel.
+It runs on infrastructure separate from the application, so it survives the
+outages it exists to report. See `monitoring/AGENTS.md`.
 
 ## Docs (Astro)
 

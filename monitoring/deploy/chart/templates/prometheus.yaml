@@ -1,3 +1,16 @@
+{{/*
+  Prometheus for the monitoring deployment.
+
+  Docs: docs/src/content/docs/monitoring/metrics.md
+
+  This used to live in the application's own chart, which meant the thing doing
+  the observing went down with the thing being observed. It belongs here, on the
+  infrastructure that is meant to survive an application outage.
+
+  It scrapes across the network now rather than in-cluster, so `api.url` is a
+  full address and `api.metrics_auth_token` is required in practice — an
+  internet-reachable /metrics should not be open.
+*/}}
 {{- if .Values.prometheus.enabled }}
 apiVersion: v1
 kind: ConfigMap
@@ -10,11 +23,24 @@ data:
     scrape_configs:
       - job_name: erno-api
         metrics_path: /metrics
+        {{- if .Values.api.scheme }}
+        scheme: {{ .Values.api.scheme }}
+        {{- end }}
         {{- if .Values.api.metrics_auth_token }}
         bearer_token: {{ .Values.api.metrics_auth_token | quote }}
         {{- end }}
         static_configs:
-          - targets: ["{{ .Release.Name }}-api:{{ .Values.api.port }}"]
+          - targets: [{{ .Values.api.target | quote }}]
+
+      # The collector reports on itself: an operator needs to know when the
+      # thing doing the watching is the thing that is struggling.
+      - job_name: erno-monitoring
+        metrics_path: /metrics
+        {{- if .Values.collector.metrics_auth_token }}
+        bearer_token: {{ .Values.collector.metrics_auth_token | quote }}
+        {{- end }}
+        static_configs:
+          - targets: ["{{ .Release.Name }}-collector:{{ .Values.collector.port }}"]
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

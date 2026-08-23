@@ -13,6 +13,26 @@ pub mod lock_keys {
 
     /// Lock key for stuck job recovery
     pub const RECOVERY: i64 = 0x5245_434F_5645_5259; // "RECOVERY" in hex
+
+    /// Lock key for error-report retention, held by the monitoring collector.
+    pub const ERROR_RETENTION: i64 = 0x4552_524F_5252_4554; // "ERRORRET" in hex
+
+    /// Lock key for the uptime prober, held by the monitoring collector.
+    ///
+    /// Singleton on purpose: every replica probing would multiply load on the
+    /// target and make the recorded ratios meaningless.
+    pub const UPTIME: i64 = 0x5550_5449_4D45_4348; // "UPTIMECH" in hex
+
+    /// Lock key for the status-page publisher.
+    ///
+    /// Singleton so replicas cannot race to write the same document.
+    pub const STATUS_PUBLISH: i64 = 0x5354_4154_5553_5047; // "STATUSPG" in hex
+
+    /// Lock key for the alert evaluator.
+    ///
+    /// Singleton because replicas each notifying would multiply every alert by
+    /// the replica count.
+    pub const ALERTING: i64 = 0x414C_4552_5452_554C; // "ALERTRUL" in hex
 }
 /// Tries to acquire a `PostgreSQL` advisory lock
 pub async fn try_acquire_lock(db: &DatabaseConnection, key: i64) -> Result<bool, DbErr> {
