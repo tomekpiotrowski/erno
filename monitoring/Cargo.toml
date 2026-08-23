@@ -1,0 +1,41 @@
+[package]
+name = "erno-monitoring"
+version = "0.1.0"
+edition = "2021"
+authors = ["Erno Contributors"]
+description = "Erno monitoring collector — error reporting, deployed separately from the app it watches"
+license = "MIT"
+rust-version = "1.88.0"
+
+[[bin]]
+name = "erno-monitoring"
+path = "src/main.rs"
+
+[features]
+default = []
+test-utils = ["erno/test-utils", "dep:axum-test"]
+
+[dependencies]
+erno = { path = "../api" }
+
+async-trait = "0.1"
+axum = "0.8.4"
+chrono = { version = "0.4", features = ["serde"] }
+sea-orm = { version = "1.1.0", features = ["sqlx-postgres", "runtime-tokio", "macros", "with-uuid", "with-time"] }
+sea-orm-migration = { version = "1.1.14", features = ["sqlx-postgres"] }
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.47.1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tracing = "0.1.41"
+uuid = { version = "1.12", features = ["v4", "serde"] }
+
+axum-test = { version = "18.5", optional = true }
+
+[dev-dependencies]
+# The alert notifier takes a client; tests hand it a real one.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# Enables the framework test harness (schema reset, per-test transaction,
+# TestServer) for this crate's request tests.
+erno = { path = "../api", features = ["test-utils"] }
+axum-test = "18.5"
+serde_json = "1.0"

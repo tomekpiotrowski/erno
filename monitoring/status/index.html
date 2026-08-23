@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Service status</title>
+    <!--
+      Docs: docs/src/content/docs/monitoring/status-page.md
+
+      Deliberately one file with no dependencies, no build step and no
+      framework. This page has to work when everything else does not, so it
+      reads a published JSON document and nothing else. Point SNAPSHOT_URL at
+      wherever the collector publishes — object storage behind a CDN in
+      production, which is what keeps this page up when the collector is not.
+    -->
+    <style>
+      :root {
+        --bg: #0f1215; --panel: #161a1f; --border: #242a31;
+        --fg: #e6e9ec; --dim: #98a2ad; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+        --ok: #2fa46b; --degraded: #c9962f; --outage: #cc4b4b; --maintenance: #2f8fa8;
+      }
+      @media (prefers-color-scheme: light) {
+        :root { --bg: #f7f8f9; --panel: #fff; --border: #e2e5e9; --fg: #14181c; --dim: #5c6670; }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; background: var(--bg); color: var(--fg);
+        font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      main { max-width: 760px; margin: 0 auto; padding: 40px 20px 64px; }
+      h1 { font-size: 22px; margin: 0 0 24px; }
+      .banner {
+        border: 1px solid var(--border); border-radius: 6px;
+        padding: 18px 20px; margin-bottom: 12px; background: var(--panel);
+        border-left: 4px solid var(--ok);
+      }
+      .banner.degraded, .banner.maintenance { border-left-color: var(--degraded); }
+      .banner.partial_outage, .banner.major_outage { border-left-color: var(--outage); }
+      .banner h2 { margin: 0; font-size: 17px; }
+      .banner p { margin: 6px 0 0; color: var(--dim); font-size: 13px; }
+      .stale {
+        border: 1px solid var(--degraded); background: color-mix(in srgb, var(--degraded) 12%, transparent);
+        border-radius: 6px; padding: 12px 16px; margin-bottom: 12px; font-size: 13.5px;
+      }
+      section { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; margin-top: 16px; }
+      section h3 {
+        margin: 0; padding: 12px 16px; font-size: 11px; letter-spacing: .12em;
+        text-transform: uppercase; color: var(--dim); border-bottom: 1px solid var(--border);
+      }
+      .component { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+      .component:last-child { border-bottom: 0; }
+      .component-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+      .component-name { font-weight: 600; }
+      .state { font-size: 12.5px; }
+      .state.operational { color: var(--ok); }
+      .state.degraded, .state.maintenance { color: var(--degraded); }
+      .state.partial_outage, .state.major_outage { color: var(--outage); }
+      .desc { color: var(--dim); font-size: 13px; margin-top: 2px; }
+      .bars { display: flex; gap: 2px; margin-top: 10px; height: 26px; }
+      .bar { flex: 1 1 0; min-width: 2px; border-radius: 1px; background: var(--border); }
+      .bar.ok { background: var(--ok); }
+      .bar.partial { background: var(--degraded); }
+      .bar.bad { background: var(--outage); }
+      .bars-legend {
+        display: flex; justify-content: space-between;
+        color: var(--dim); font-size: 11.5px; margin-top: 5px;
+      }
+      .incident { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+      .incident:last-child { border-bottom: 0; }
+      .incident-title { font-weight: 600; }
+      .impact { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--dim); }
+      .update { margin-top: 10px; padding-left: 12px; border-left: 2px solid var(--border); }
+      .update-status { font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); }
+      .update-body { margin: 2px 0 0; }
+      time, .mono { font-family: var(--mono); font-size: 12px; color: var(--dim); }
+      footer { margin-top: 28px; color: var(--dim); font-size: 12px; }
+      .error { color: var(--outage); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 id="title">Service status</h1>
+      <div id="content">
+        <p class="mono">Loading…</p>
+      </div>
+      <footer>
+        Updated <span id="generated" class="mono">—</span>
+      </footer>
+    </main>
+
+    <script>
+      // Where the collector publishes. Override by setting window.SNAPSHOT_URL
+      // before this script runs, or by editing this line when deploying.
+      const SNAPSHOT_URL = window.SNAPSHOT_URL || '/api/collector/status.json';
+
+      const LABELS = {
+        operational: 'All systems operational',
+        degraded: 'Degraded performance',
+        partial_outage: 'Partial outage',
+        major_outage: 'Major outage',
+        maintenance: 'Under maintenance',
+      };
+
+      const escapeHtml = (value) =>
+        String(value ?? '').replace(/[&<>"']/g, (c) => ({
+          '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+        })[c]);
+
+      const formatTime = (value) => {
+        if (!value) return '—';
+        // The collector emits naive UTC; make that explicit before parsing.
+        const date = new Date(value.endsWith('Z') ? value : value + 'Z');
+        return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
+      };
+
+      function barClass(ratio) {
+        if (ratio === null || ratio === undefined) return '';
+        if (ratio >= 0.999) return 'ok';
+        if (ratio >= 0.95) return 'partial';
+        return 'bad';
+      }
+
+      function renderComponent(component) {
+        const bars = (component.history || [])
+          .slice(-90)
+          .map((d) => `<div class="bar ${barClass(d.ratio)}" title="${escapeHtml(d.day)}: ${
+            d.ratio === null ? 'no data' : (d.ratio * 100).toFixed(2) + '%'
+          }"></div>`)
+          .join('');
+
+        const ratio =
+          component.uptime_ratio === null || component.uptime_ratio === undefined
+            ? null
+            : (component.uptime_ratio * 100).toFixed(2) + '%';
+
+        return `
+          <div class="component">
+            <div class="component-head">
+              <span class="component-name">${escapeHtml(component.name)}</span>
+              <span class="state ${escapeHtml(component.state)}">${escapeHtml(
+                LABELS[component.state] || component.state,
+              )}</span>
+            </div>
+            ${component.description ? `<div class="desc">${escapeHtml(component.description)}</div>` : ''}
+            ${bars ? `<div class="bars">${bars}</div>
+              <div class="bars-legend"><span>90 days ago</span>${
+                ratio ? `<span>${ratio} uptime</span>` : '<span></span>'
+              }<span>today</span></div>` : ''}
+          </div>`;
+      }
+
+      function renderIncident(incident) {
+        const updates = (incident.updates || [])
+          .slice()
+          .reverse()
+          .map(
+            (u) => `
+              <div class="update">
+                <div class="update-status">${escapeHtml(u.status)} · <time>${formatTime(
+                  u.created_at,
+                )}</time></div>
+                <p class="update-body">${escapeHtml(u.body)}</p>
+              </div>`,
+          )
+          .join('');
+
+        return `
+          <div class="incident">
+            <div class="component-head">
+              <span class="incident-title">${escapeHtml(incident.title)}</span>
+              <span class="impact">${escapeHtml(incident.impact)}</span>
+            </div>
+            <time>Started ${formatTime(incident.started_at)}</time>
+            ${updates}
+          </div>`;
+      }
+
+      function render(snapshot) {
+        document.title = snapshot.name || 'Service status';
+        document.getElementById('title').textContent = snapshot.name || 'Service status';
+
+        // Staleness matters more than anything else on this page: showing a
+        // confident green from an hour-old document during an outage is the
+        // failure mode a status page exists to avoid.
+        const generatedAt = new Date(
+          snapshot.generated_at.endsWith('Z') ? snapshot.generated_at : snapshot.generated_at + 'Z',
+        );
+        const ageSeconds = (Date.now() - generatedAt.getTime()) / 1000;
+        const allowed = Math.max((snapshot.refresh_seconds || 30) * 4, 120);
+        const stale = ageSeconds > allowed;
+
+        const parts = [];
+
+        if (stale) {
+          parts.push(`<div class="stale">
+            <strong>This page may be out of date.</strong>
+            The last update was ${Math.round(ageSeconds / 60)} minutes ago; it is
+            normally refreshed every ${snapshot.refresh_seconds || 30} seconds.
+          </div>`);
+        }
+
+        parts.push(`<div class="banner ${escapeHtml(snapshot.state)}">
+          <h2>${escapeHtml(LABELS[snapshot.state] || snapshot.state)}</h2>
+          ${stale ? '<p>Based on the last reading received.</p>' : ''}
+        </div>`);
+
+        if ((snapshot.active_incidents || []).length) {
+          parts.push(`<section><h3>Active incidents</h3>${snapshot.active_incidents
+            .map(renderIncident)
+            .join('')}</section>`);
+        }
+
+        if ((snapshot.components || []).length) {
+          parts.push(`<section><h3>Components</h3>${snapshot.components
+            .map(renderComponent)
+            .join('')}</section>`);
+        }
+
+        if ((snapshot.recent_incidents || []).length) {
+          parts.push(`<section><h3>Recent incidents</h3>${snapshot.recent_incidents
+            .map(renderIncident)
+            .join('')}</section>`);
+        }
+
+        document.getElementById('content').innerHTML = parts.join('');
+        document.getElementById('generated').textContent = formatTime(snapshot.generated_at);
+      }
+
+      async function load() {
+        try {
+          const response = await fetch(SNAPSHOT_URL, { cache: 'no-store' });
+          if (!response.ok) throw new Error('HTTP ' + response.status);
+          render(await response.json());
+        } catch (e) {
+          // Say so plainly rather than showing a reassuring blank page.
+          document.getElementById('content').innerHTML =
+            '<div class="stale"><strong>Status is unavailable.</strong> ' +
+            'The status document could not be loaded, so the state of the service is unknown.</div>';
+        }
+      }
+
+      load();
+      setInterval(load, 30_000);
+    </script>
+  </body>
+</html>
