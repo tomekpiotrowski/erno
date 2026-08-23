@@ -46,8 +46,6 @@ const TEMPLATE_ADMIN_NGINX: &str = include_str!("../../templates/deploy/admin/ng
 const TEMPLATE_ADMIN_ENTRYPOINT: &str = include_str!("../../templates/deploy/admin/entrypoint.sh");
 const TEMPLATE_ADMIN_DEPLOYMENT: &str =
     include_str!("../../templates/deploy/chart/templates/admin.yaml");
-const TEMPLATE_PROMETHEUS_DEPLOYMENT: &str =
-    include_str!("../../templates/deploy/chart/templates/prometheus.yaml");
 
 pub async fn handle_deploy_init() -> ui::Cmd {
     validate_project_root();
@@ -56,7 +54,10 @@ pub async fn handle_deploy_init() -> ui::Cmd {
     let github_repo = read_github_repo();
     let k8s_context = prompt_k8s_context();
 
-    ui::section(format!("Generating deployment files for '{name}'"));
+    ui::section(
+        ui::icon::DEPLOY,
+        format!("Generating deployment files for '{name}'"),
+    );
     ui::blank();
 
     let (admin_password, admin_password_hash) = generate_admin_password();
@@ -136,10 +137,6 @@ pub async fn handle_deploy_init() -> ui::Cmd {
         render(TEMPLATE_ADMIN_DEPLOYMENT, vars),
     );
     write_file(
-        "chart/templates/prometheus.yaml",
-        render(TEMPLATE_PROMETHEUS_DEPLOYMENT, vars),
-    );
-    write_file(
         "chart/templates/ingress.yaml",
         render(TEMPLATE_INGRESS, vars),
     );
@@ -189,7 +186,7 @@ fn generate_admin_password() -> (String, String) {
 }
 
 fn print_admin_password_once(password: &str) {
-    ui::section("Admin password");
+    ui::section(ui::icon::KEY, "Admin password");
     ui::detail("Store this in your password manager — it is shown only once.");
     ui::blank();
     ui::info(password);
@@ -210,7 +207,10 @@ pub async fn handle_deploy_install(version: &str, env: &str) -> ui::Cmd {
 
     let context = read_deploy_context(env);
 
-    ui::section(format!("Switching kubectl context to '{context}'"));
+    ui::section(
+        ui::icon::CLOUD,
+        format!("Switching kubectl context to '{context}'"),
+    );
     run_command("kubectl", &["config", "use-context", &context]);
 
     let secrets_file = format!("chart/secrets.{env}.yaml");
@@ -223,7 +223,10 @@ pub async fn handle_deploy_install(version: &str, env: &str) -> ui::Cmd {
     }
 
     let chart_ref = format!("oci://ghcr.io/{github_repo}/{name}");
-    ui::section(format!("Deploying {name} {version} to {env}"));
+    ui::section(
+        ui::icon::DEPLOY,
+        format!("Deploying {name} {version} to {env}"),
+    );
     run_command(
         "helm",
         &[
@@ -444,7 +447,7 @@ async fn setup_sops(name: &str, github_repo: &str) {
     let secret_set =
         try_set_github_secret(github_repo, "SOPS_AGE_KEY", &private_key, github_token).await;
 
-    ui::section("SOPS");
+    ui::section(ui::icon::KEY, "SOPS");
     ui::ok("age keypair generated");
     ui::detail(format!(
         "public key:  {public_key}\n\
@@ -598,40 +601,48 @@ fn run_command(program: &str, args: &[&str]) {
 
 fn print_next_steps(name: &str, github_repo: &str) {
     let written = FILES_WRITTEN.load(std::sync::atomic::Ordering::Relaxed);
-    ui::section("Done");
+    ui::section(ui::icon::DONE, "Done");
     ui::ok(format!("wrote {written} files"));
     if !ui::verbose() {
         ui::detail("Re-run with --verbose to list them.");
     }
 
-    ui::section("Next steps");
-    ui::detail(
-        "1. Copy chart/secrets.example.yaml → chart/secrets.production.yaml,\n\
-            fill remaining secrets (DB, JWT, SMTP), keep admin_password_hash as generated,\n\
-            then encrypt:  sops --encrypt --in-place chart/secrets.production.yaml",
+    ui::section(ui::icon::NOTE, "Next steps");
+    ui::blank();
+    ui::next_steps(
+        "1. Encrypt your production secrets",
+        &[
+            "cp chart/secrets.example.yaml chart/secrets.production.yaml".to_string(),
+            "sops --encrypt --in-place chart/secrets.production.yaml".to_string(),
+        ],
+    );
+    ui::detail("Fill in DB, JWT, and SMTP; keep admin_password_hash as generated.");
+    ui::blank();
+    ui::next_steps(
+        "2. Install cluster prerequisites (first time only)",
+        &[
+            "helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx".to_string(),
+            "helm repo add jetstack https://charts.jetstack.io".to_string(),
+            "helm install ingress-nginx ingress-nginx/ingress-nginx".to_string(),
+            "helm install cert-manager jetstack/cert-manager --set installCRDs=true".to_string(),
+        ],
     );
     ui::blank();
-    ui::detail(
-        "2. Install prerequisites on your cluster (first time only):\n\
-            helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx\n\
-            helm repo add jetstack https://charts.jetstack.io\n\
-            helm install ingress-nginx ingress-nginx/ingress-nginx\n\
-            helm install cert-manager jetstack/cert-manager --set installCRDs=true",
+    ui::next_steps(
+        "3. Push a version tag to trigger the GitHub Actions build",
+        &["git tag v0.1.0 && git push origin v0.1.0".to_string()],
     );
     ui::blank();
-    ui::detail(
-        "3. Push a version tag to trigger the GitHub Actions build:\n\
-            git tag v0.1.0 && git push origin v0.1.0",
+    ui::next_steps("4. Deploy", &["erno deploy install v0.1.0".to_string()]);
+    ui::blank();
+    ui::next_steps(
+        "5. Point DNS at the ingress-nginx LoadBalancer IP",
+        &["kubectl get svc -n ingress-nginx ingress-nginx-controller".to_string()],
     );
-    ui::blank();
-    ui::detail("4. Deploy:\n   erno deploy install v0.1.0");
-    ui::blank();
     ui::detail(
-        "5. Point DNS at the ingress-nginx LoadBalancer IP:\n\
-            kubectl get svc -n ingress-nginx ingress-nginx-controller\n\
-            example.com          → www (marketing)\n\
-            app.example.com      → app (product SPA)\n\
-            api.example.com      → api",
+        "example.com          → www (marketing)\n\
+         app.example.com      → app (product SPA)\n\
+         api.example.com      → api",
     );
     ui::blank();
     ui::detail(format!("GitHub repo: https://github.com/{github_repo}"));

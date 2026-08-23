@@ -1,0 +1,27 @@
+# Values for the monitoring deployment.
+#
+# Docs: docs/src/content/docs/monitoring/metrics.md
+#
+# Deployed separately from the application — ideally to different
+# infrastructure, since a monitoring stack that shares a failure domain with
+# what it monitors is not monitoring.
+
+# The application being watched. Reachable over the network, not in-cluster.
+api:
+  # host:port Prometheus should scrape.
+  target: "api.example.com:443"
+  scheme: https
+  # Required in practice: an internet-reachable /metrics should not be open.
+  # Set from a secret, not here.
+  metrics_auth_token: ""
+
+collector:
+  port: 3001
+  # The collector's own /metrics, scraped in-cluster.
+  metrics_auth_token: ""
+
+prometheus:
+  enabled: true
+  image: prom/prometheus:v2.55.1
+  retention: 90d
+  storage: 10Gi

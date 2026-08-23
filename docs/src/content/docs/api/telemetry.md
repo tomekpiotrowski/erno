@@ -7,6 +7,13 @@ sidebar:
 
 > **Source**: `api/src/metrics/`
 
+:::note[Errors are reported separately]
+Tracing writes error logs to stdout and Prometheus counts 5xx responses, but
+neither keeps the *content* of a failure. That is
+[error reporting](/monitoring/error-reporting/), which runs in a separate
+[monitoring deployment](/monitoring/).
+:::
+
 Erno configures both structured logging/tracing and Prometheus metrics automatically on startup. No manual setup is required.
 
 ## Tracing

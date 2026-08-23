@@ -16,8 +16,7 @@ admin:
   replicas: 1
   imageTag: ""
 
-prometheus:
-  enabled: true
-  image: prom/prometheus:v2.55.1
-  retention: 90d
-  storage: 10Gi
+# Prometheus is no longer part of this chart. It belongs to the monitoring
+# deployment (monitoring/deploy/chart), which runs on separate infrastructure so
+# it survives the outages it exists to report. Point it at this application's
+# /metrics and set `api.metrics_auth_token` there and here to the same value.
