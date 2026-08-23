@@ -10,8 +10,6 @@ import { JobDetailPage } from './pages/job-detail.page';
 import { EmailsPage } from './pages/emails.page';
 import { EventsPage } from './pages/events.page';
 import { DatabasePage } from './pages/database.page';
-import { PerformancePage } from './pages/performance.page';
-import { BusinessPage } from './pages/business.page';
 
 export const routes: Routes = [
   { path: 'login', component: LoginPage },
@@ -28,8 +26,6 @@ export const routes: Routes = [
       { path: 'emails', component: EmailsPage },
       { path: 'events', component: EventsPage },
       { path: 'database', component: DatabasePage },
-      { path: 'performance', component: PerformancePage },
-      { path: 'business', component: BusinessPage },
     ],
   },
 ];

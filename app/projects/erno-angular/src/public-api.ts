@@ -20,3 +20,6 @@ export * from './lib/share/erno-shared-view.service';
 export * from './lib/devtools/erno-devtools.component';
 export * from './lib/devtools/erno-dev-mail.service';
 export * from './lib/alerts/erno-alerts.service';
+export * from './lib/errors/erno-error-reporter.service';
+export * from './lib/errors/erno-error-handler';
+export * from './lib/errors/erno-error-report';

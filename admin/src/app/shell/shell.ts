@@ -46,6 +46,14 @@ import { clearBasicAuth } from '../core/auth';
             }
           </nav>
 
+          <a class="nav external" [href]="monitoringUrl" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+                 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 20V10m5 10V4m5 16v-7m5 7V7" />
+            </svg>
+            <span>Monitoring ↗</span>
+          </a>
+
           <button class="ghost logout" type="button" (click)="logout()">Log out</button>
         </aside>
 
@@ -163,6 +171,7 @@ import { clearBasicAuth } from '../core/auth';
       color: var(--cb-fg);
     }
     .nav svg { width: 14px; height: 14px; flex: 0 0 auto; }
+    .nav.external { color: var(--cb-fg-dim2); }
     .logout {
       margin: 10px 12px;
       justify-content: flex-start;
@@ -181,13 +190,21 @@ import { clearBasicAuth } from '../core/auth';
 })
 export class Shell {
   readonly env = envBanner();
+
+  /**
+   * The monitoring console, which owns error reporting, uptime, alerts and the
+   * performance and statistics dashboards that used to live here.
+   *
+   * A separate deployment, so this is a plain link rather than a route. On
+   * localhost it is the dev port; elsewhere it is assumed to be a `monitoring.`
+   * subdomain, which an operator can correct if their DNS differs.
+   */
+  readonly monitoringUrl = monitoringConsoleUrl();
   readonly items = [
     { path: '/', label: 'Overview', exact: true, icon: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z' },
     { path: '/users', label: 'Users', exact: false, icon: 'M16 20v-1.5a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4V20M9.5 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7M21 20v-1.5a4 4 0 0 0-3-3.87M16.5 4.13a4 4 0 0 1 0 7.75' },
     { path: '/jobs', label: 'Jobs', exact: false, icon: 'M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.11a1.7 1.7 0 0 0-1.1-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.11A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6h.07A1.7 1.7 0 0 0 10.1 3.04V3a2 2 0 1 1 4 0v.11a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9v.07a1.7 1.7 0 0 0 1.56 1.03H21a2 2 0 1 1 0 4h-.11a1.7 1.7 0 0 0-1.49 1.03z' },
     { path: '/emails', label: 'Emails', exact: false, icon: 'M3 6h18v12H3zM3 7l9 6 9-6' },
-    { path: '/business', label: 'Statistics', exact: false, icon: 'M4 20V10m5 10V4m5 16v-7m5 7V7' },
-    { path: '/performance', label: 'Performance', exact: false, icon: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 8v4.5l3 2' },
     { path: '/events', label: 'Audit log', exact: false, icon: 'M8 4h9l3 3v13H8zM8 9H4v11h4M12 11h5M12 15h5' },
     { path: '/database', label: 'Database', exact: false, icon: 'M12 3c4.4 0 8 1.3 8 3s-3.6 3-8 3-8-1.3-8-3 3.6-3 8-3Z M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6 M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6' },
   ];
@@ -204,4 +221,15 @@ function envBanner() {
   return local
     ? { prod: false, label: 'Development', note: 'Local data. Safe to break.', host }
     : { prod: true, label: 'Production', note: 'Live user data — every write is logged.', host };
+}
+
+function monitoringConsoleUrl(): string {
+  if (typeof location === 'undefined') {
+    return 'http://localhost:4400';
+  }
+  const host = location.hostname;
+  if (host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local')) {
+    return 'http://localhost:4400';
+  }
+  return `${location.protocol}//monitoring.${host.replace(/^admin\./, '')}`;
 }

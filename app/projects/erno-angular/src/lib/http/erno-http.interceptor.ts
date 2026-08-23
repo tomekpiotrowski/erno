@@ -5,6 +5,27 @@ import { catchError, filter, switchMap, take } from 'rxjs/operators';
 import { ErnoAuthService, LoginResponse } from '../auth/erno-auth.service';
 import { ERNO_CONFIG, ErnoConfig } from '../erno.config';
 
+/**
+ * Endpoints that the 401 recovery path calls itself. A 401 from one of these is
+ * the recovery failing, not a request needing recovery — feeding it back into
+ * `handle401` would refresh, log out, and refresh again without end.
+ */
+function isAuthRecovery(url: string): boolean {
+  return url.includes('/api/auth/refresh') || url.includes('/api/auth/logout');
+}
+
+/**
+ * The error-reporting ingest endpoint.
+ *
+ * A 401 from here must never start the refresh/logout dance: a failing refresh
+ * throws, the global ErrorHandler reports it, and that report POSTs here again.
+ * The collector is normally a different origin, so the guard above would not
+ * even run — this is belt and braces for same-origin dev setups.
+ */
+function isErrorIngest(url: string): boolean {
+  return url.includes('/api/errors');
+}
+
 @Injectable()
 export class ErnoHttpInterceptor implements HttpInterceptor {
   private refreshing = false;
@@ -22,7 +43,12 @@ export class ErnoHttpInterceptor implements HttpInterceptor {
 
     return next.handle(this.addToken(req)).pipe(
       catchError(err => {
-        if (err instanceof HttpErrorResponse && err.status === 401 && !req.url.includes('/api/auth/refresh')) {
+        if (
+          err instanceof HttpErrorResponse &&
+          err.status === 401 &&
+          !isAuthRecovery(req.url) &&
+          !isErrorIngest(req.url)
+        ) {
           return this.handle401(req, next);
         }
         return throwError(() => err);
@@ -37,7 +63,7 @@ export class ErnoHttpInterceptor implements HttpInterceptor {
 
   private handle401(req: HttpRequest<unknown>, next: HttpHandler): Observable<HttpEvent<unknown>> {
     if (!this.auth.refreshToken) {
-      this.auth.logout().subscribe();
+      this.auth.logout().subscribe({ error: () => undefined });
       return throwError(() => new Error('No refresh token'));
     }
 
@@ -60,7 +86,7 @@ export class ErnoHttpInterceptor implements HttpInterceptor {
       }),
       catchError(err => {
         this.refreshing = false;
-        this.auth.logout().subscribe();
+        this.auth.logout().subscribe({ error: () => undefined });
         return throwError(() => err);
       }),
     );

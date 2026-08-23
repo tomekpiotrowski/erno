@@ -1,4 +1,10 @@
-import { EnvironmentProviders, makeEnvironmentProviders } from '@angular/core';
+import {
+  EnvironmentProviders,
+  ErrorHandler,
+  inject,
+  makeEnvironmentProviders,
+  provideAppInitializer,
+} from '@angular/core';
 import { HTTP_INTERCEPTORS, provideHttpClient, withInterceptorsFromDi } from '@angular/common/http';
 
 import { ErnoConfig, ERNO_CONFIG } from './erno.config';
@@ -17,6 +23,8 @@ import { ErnoAlertsService } from './alerts/erno-alerts.service';
 import { ErnoHttpService } from './http/erno-http.service';
 import { ErnoAppStateService } from './app-state/erno-app-state.service';
 import { ErnoNetworkService } from './network/erno-network.service';
+import { ErnoErrorReporterService } from './errors/erno-error-reporter.service';
+import { ErnoErrorHandler } from './errors/erno-error-handler';
 
 /** Standalone entry: `providers: [provideErno({ baseUrl, wsUrl })]`. */
 export function provideErno(config: ErnoConfig): EnvironmentProviders {
@@ -38,5 +46,16 @@ export function provideErno(config: ErnoConfig): EnvironmentProviders {
     ErnoDevMailService,
     ErnoDevJobsService,
     ErnoAlertsService,
+    ErnoErrorReporterService,
+    // Overriding ErrorHandler is intrusive, so it is a no-op pass-through
+    // unless `errorReporting.key` is set. An application that wants its own
+    // handler provides one after `provideErno(...)`.
+    { provide: ErrorHandler, useClass: ErnoErrorHandler },
+    // Without an initializer the global `error` / `unhandledrejection`
+    // listeners would only attach once something first injected the reporter,
+    // which might be never.
+    provideAppInitializer(() => {
+      inject(ErnoErrorReporterService).install();
+    }),
   ]);
 }
