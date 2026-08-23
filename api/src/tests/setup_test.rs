@@ -256,6 +256,9 @@ where
         metrics_collectors: std::sync::Arc::new(boot.metrics_collectors),
         job_failure_handler: boot.job_failure_handler,
         user_data_deleter: boot.user_data_deleter,
+        // Tests never reach out to a collector; the reporting paths are
+        // covered by unit tests and by the monitoring crate's request tests.
+        error_reporter: crate::error_reporting::reporter::ErrorReporter::disabled(),
     };
 
     let test_router = router(app, boot.app_router);
@@ -394,6 +397,7 @@ impl TestUtils {
             ),
             job_failure_handler: None,
             user_data_deleter: None,
+            error_reporter: crate::error_reporting::reporter::ErrorReporter::disabled(),
         };
 
         J::execute(&app, args).await

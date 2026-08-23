@@ -63,6 +63,18 @@ impl FileStorage {
         Self::Mock(Arc::new(Mutex::new(HashMap::new())))
     }
 
+    /// Which backend is in use, as a metric label.
+    ///
+    /// Deliberately the backend and not the key: a per-file label would blow up
+    /// metric cardinality immediately.
+    const fn backend_name(&self) -> &'static str {
+        match self {
+            Self::Local(_) => "local",
+            Self::S3(_) => "s3",
+            Self::Mock(_) => "mock",
+        }
+    }
+
     /// Compute checksum, upload bytes to the backend, and insert a `files` row.
     ///
     /// On DB insert failure the uploaded bytes are deleted (best-effort) to avoid orphans.
@@ -210,7 +222,14 @@ impl FileStorage {
     }
 
     pub async fn download(&self, key: &str) -> Result<Bytes, StorageError> {
-        match self {
+        let timer = crate::metrics::OperationTimer::start(
+            "erno_storage_download_duration_seconds",
+            "erno_storage_download_total",
+            "backend",
+            self.backend_name(),
+        );
+
+        let result = match self {
             Self::Local(s) => s.download(key).await,
             Self::S3(s) => s.download(key).await,
             Self::Mock(m) => m
@@ -219,7 +238,16 @@ impl FileStorage {
                 .get(key)
                 .cloned()
                 .ok_or_else(|| StorageError::NotFound(key.to_string())),
+        };
+        timer.finish(&result);
+
+        if let Ok(bytes) = &result {
+            metrics::counter!("erno_storage_downloaded_bytes_total",
+                "backend" => self.backend_name(),
+            )
+            .increment(bytes.len() as u64);
         }
+        result
     }
 
     pub async fn delete(&self, key: &str) -> Result<(), StorageError> {
@@ -247,14 +275,27 @@ impl FileStorage {
         data: Bytes,
         content_type: Option<&str>,
     ) -> Result<(), StorageError> {
-        match self {
+        let timer = crate::metrics::OperationTimer::start(
+            "erno_storage_upload_duration_seconds",
+            "erno_storage_upload_total",
+            "backend",
+            self.backend_name(),
+        );
+        metrics::counter!("erno_storage_uploaded_bytes_total",
+            "backend" => self.backend_name(),
+        )
+        .increment(data.len() as u64);
+
+        let result = match self {
             Self::Local(s) => s.upload(key, data, content_type).await,
             Self::S3(s) => s.upload(key, data, content_type).await,
             Self::Mock(m) => {
                 m.lock().unwrap().insert(key.to_string(), data);
                 Ok(())
             }
-        }
+        };
+        timer.finish(&result);
+        result
     }
 }
 

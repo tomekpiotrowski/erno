@@ -36,6 +36,7 @@ Rate limiting and email sending are disabled in the test environment.
 | `metrics` | Prometheus scrape target + `db_stats` gauges |
 | `admin` | HTTP admin API (`/admin/api/*`) for the Angular operator app |
 | `admin_events` | Operator event log + matching counters |
+| `error_reporting` | Error capture and reporting; the collector half runs in the separate `monitoring/` deployment |
 
 ## Architecture notes
 
@@ -64,6 +65,7 @@ Narrative docs for each module live in `docs/src/content/docs/api/`:
 | `metrics` | `telemetry.md` |
 | `admin` | `console.md` |
 | `admin_events` / gauges | `business-stats.md` |
+| `error_reporting` | `../monitoring/error-reporting.md` |
 | `websocket` | `websocket.md` |
 | `emails` / mailer | `email.md` |
 | `database` | `database.md` |

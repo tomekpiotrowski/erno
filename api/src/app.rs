@@ -40,6 +40,9 @@ pub struct App<ExtraConfig = ()> {
     pub job_failure_handler: Option<Arc<dyn JobFailureHandler>>,
     /// Optional hook for deleting app-owned per-user data on account deletion.
     pub user_data_deleter: Option<Arc<dyn UserDataDeleter>>,
+    /// Sends this application's own errors to a monitoring collector.
+    /// [`ErrorReporter::Disabled`] when no collector is configured.
+    pub error_reporter: crate::error_reporting::reporter::ErrorReporter,
 }
 
 impl<ExtraConfig> App<ExtraConfig> {

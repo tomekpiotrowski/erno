@@ -91,13 +91,32 @@ where
 {
     let base_query = E::find().filter(E::sync_seq_column().gt(params.since));
 
-    let items = match policy.readable(base_query).all(db).await {
+    // Labelled by entity type, which is a fixed set declared at boot — never by
+    // user or by cursor, which would be unbounded.
+    let timer = crate::metrics::OperationTimer::start(
+        "erno_sync_delta_duration_seconds",
+        "erno_sync_delta_total",
+        "entity",
+        E::entity_type(),
+    );
+    let result = policy.readable(base_query).all(db).await;
+    timer.finish(&result);
+
+    let items = match result {
         Ok(items) => items,
         Err(e) => {
             tracing::error!("sync_delta error for {}: {:?}", E::entity_type(), e);
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
+
+    // Delta size is the signal that a client is about to have a bad time: a
+    // pull returning tens of thousands of rows means someone has been offline
+    // for a long while, or a backfill has rewritten everything.
+    metrics::histogram!("erno_sync_delta_rows",
+        "entity" => E::entity_type(),
+    )
+    .record(items.len() as f64);
 
     let next_since = items
         .iter()

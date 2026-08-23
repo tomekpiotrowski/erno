@@ -92,11 +92,18 @@ pub async fn send_html_email_with_meta<ExtraConfig>(
         .header(ContentType::TEXT_HTML)
         .body(body)?;
 
+    let timer = crate::metrics::OperationTimer::start(
+        "erno_email_send_duration_seconds",
+        "erno_email_send_total",
+        "template",
+        meta.template.clone().unwrap_or_else(|| "none".to_string()),
+    );
     let send_result = app
         .mailer
         .send(email)
         .await
         .map_err(|e| EmailError::MailerError(e.to_string()));
+    timer.finish(&send_result);
 
     persist_email_message(app, recipient, &from, subject, &meta, &send_result).await;
 
@@ -171,11 +178,18 @@ pub async fn send_multipart_email_with_meta<ExtraConfig>(
                 ),
         )?;
 
+    let timer = crate::metrics::OperationTimer::start(
+        "erno_email_send_duration_seconds",
+        "erno_email_send_total",
+        "template",
+        meta.template.clone().unwrap_or_else(|| "none".to_string()),
+    );
     let send_result = app
         .mailer
         .send(email)
         .await
         .map_err(|e| EmailError::MailerError(e.to_string()));
+    timer.finish(&send_result);
 
     persist_email_message(app, recipient, &from, subject, &meta, &send_result).await;
 
@@ -261,6 +275,7 @@ mod tests {
             ),
             job_failure_handler: None,
             user_data_deleter: None,
+            error_reporter: crate::error_reporting::reporter::ErrorReporter::disabled(),
         };
 
         send_html_email(&app, "outbox@example.com", "Hello", "<p>Hi</p>".into())

@@ -9,6 +9,8 @@ pub enum EmailTemplate {
     Verification,
     PasswordReset,
     AlreadyRegistered,
+    /// Operator alert: an error fingerprint was seen for the first time.
+    NewIssue,
 }
 
 impl EmailTemplate {
@@ -17,6 +19,7 @@ impl EmailTemplate {
             Self::Verification => "verification.html",
             Self::PasswordReset => "password_reset.html",
             Self::AlreadyRegistered => "already_registered.html",
+            Self::NewIssue => "new_issue.html",
         }
     }
 }

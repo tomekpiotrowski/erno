@@ -25,6 +25,8 @@ pub mod dev;
 pub mod email_templates;
 pub mod emails;
 pub mod environment;
+pub mod error_reporting;
+pub mod health;
 pub mod job_queue;
 pub mod jobs;
 pub mod mailer;

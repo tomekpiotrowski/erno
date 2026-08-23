@@ -26,6 +26,8 @@ use crate::{
     websocket::connections::Connections,
 };
 
+// Boot wiring: every argument is a distinct subsystem the server needs.
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
     environment: Environment,
     config: Config<ExtraConfig>,
@@ -36,6 +38,7 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
     job_failure_handler: Option<Arc<dyn JobFailureHandler>>,
     user_data_deleter: Option<Arc<dyn crate::account::UserDataDeleter>>,
     metrics_collectors: crate::metrics::collector::CollectorRegistry,
+    app_info: crate::app_info::AppInfo,
 ) where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
@@ -127,6 +130,51 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
     let prometheus_handle = metrics::setup_metrics();
     let metrics_collectors = Arc::new(metrics_collectors);
 
+    // Error reporting. The reporter is built before the App so the capture
+    // hooks can be armed immediately: a panic during the rest of boot is
+    // exactly the kind of failure worth catching.
+    let error_reporting = Arc::new(config.error_reporting.clone());
+    let error_reporter = crate::error_reporting::reporter::ErrorReporter::start(
+        &error_reporting,
+        app_info,
+        environment,
+    );
+    if error_reporter.is_active() {
+        crate::error_reporting::reporter::capture::install(
+            error_reporter.clone(),
+            Arc::clone(&error_reporting),
+        );
+        if error_reporting.capture_panics {
+            // Catches panics outside any request: job workers, the sync and
+            // websocket listeners, background loops.
+            crate::error_reporting::reporter::capture::install_panic_hook();
+        }
+    }
+
+    // Subsystem health. Independent of error capture — a deployment may want
+    // liveness without error reporting, or the reverse.
+    if error_reporting.is_active() && error_reporting.report_health {
+        crate::health::spawn_health_reporter(
+            db.clone(),
+            websocket_connections.clone(),
+            crate::health::HealthReporterConfig {
+                endpoint: error_reporting.health_endpoint(),
+                token: error_reporting.ingest_token.clone(),
+                interval: Duration::from_secs(error_reporting.health_interval_seconds.max(5)),
+                request_timeout: Duration::from_millis(error_reporting.request_timeout_ms.max(1)),
+                // Distinguishes replicas. The hostname is what a container
+                // orchestrator sets, and is what an operator recognises.
+                instance: std::env::var("HOSTNAME")
+                    .ok()
+                    .filter(|h| !h.is_empty())
+                    .unwrap_or_else(|| format!("{}-local", app_info.name)),
+                release: Some(app_info.version.to_string()),
+                environment: environment.to_string(),
+                job_timeout_seconds: config.jobs.defaults.job_timeout,
+            },
+        );
+    }
+
     let app = App {
         config: config.clone(),
         environment,
@@ -142,6 +190,7 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
         prometheus_handle,
         job_failure_handler,
         user_data_deleter,
+        error_reporter,
     };
 
     // Spawn workers in the background
