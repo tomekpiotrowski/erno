@@ -12,7 +12,7 @@ use chrono::Utc;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection};
 
 use super::{
-    evaluator::observe,
+    evaluator::{observe, ObserveContext},
     notifier::{self, NotifyContext},
     rules::{advance, Comparator, Notify, RuleState, RuleStatus, RuleTiming},
     service,
@@ -34,12 +34,14 @@ pub fn spawn(
     mailer: Mailer,
     context: NotifyContext,
     thresholds: HealthThresholds,
+    prometheus_url: Option<String>,
 ) {
     tokio::spawn(async move {
         run_with_advisory_lock(db, lock_keys::ALERTING, "alert rules", move |db| {
             let mailer = mailer.clone();
             let context = context.clone();
             let thresholds = thresholds.clone();
+            let prometheus_url = prometheus_url.clone();
             async move {
                 let client = match reqwest::Client::builder()
                     .timeout(Duration::from_secs(10))
@@ -54,7 +56,15 @@ pub fn spawn(
 
                 loop {
                     tokio::time::sleep(TICK).await;
-                    if let Err(e) = evaluate_all(&db, &mailer, &client, &context, &thresholds).await
+                    if let Err(e) = evaluate_all(
+                        &db,
+                        &mailer,
+                        &client,
+                        &context,
+                        &thresholds,
+                        prometheus_url.as_deref(),
+                    )
+                    .await
                     {
                         eprintln!("alerting: evaluation pass failed: {e}");
                     }
@@ -76,12 +86,21 @@ pub async fn evaluate_all(
     client: &reqwest::Client,
     context: &NotifyContext,
     thresholds: &HealthThresholds,
+    prometheus_url: Option<&str>,
 ) -> Result<(), sea_orm::DbErr> {
     let rules = service::enabled(db).await?;
     let now = Utc::now().naive_utc();
 
+    // Built once per pass: every rule reads from the same sources.
+    let ctx = ObserveContext {
+        db,
+        thresholds,
+        http: client,
+        prometheus_url,
+    };
+
     for rule in rules {
-        let observation = match observe(db, &rule, thresholds).await {
+        let observation = match observe(&ctx, &rule).await {
             Ok(observation) => observation,
             Err(e) => {
                 // One broken rule must not stop the others being evaluated.

@@ -21,6 +21,9 @@ struct GlobalArgs {
     /// Disable ANSI colour (also honours NO_COLOR)
     #[arg(long, global = true)]
     no_color: bool,
+    /// Disable emoji, falling back to word markers (also honours ERNO_EMOJI=0)
+    #[arg(long, global = true)]
+    no_emoji: bool,
     /// Print only warnings, errors, and results
     #[arg(long, short = 'q', global = true, conflicts_with = "verbose")]
     quiet: bool,
@@ -78,7 +81,12 @@ struct DeployArgs {
 #[derive(Subcommand)]
 enum DeployCommands {
     /// Generate Dockerfiles, Helm chart, and GitHub Actions workflow
-    Init,
+    Init {
+        /// Which deployment to generate files for. The monitoring stack is a
+        /// separate release in a separate cluster.
+        #[arg(long, value_enum, default_value_t = commands::deploy::Target::App)]
+        target: commands::deploy::Target,
+    },
     /// Deploy a specific version to the cluster
     Install {
         /// Image tag / Helm chart version to deploy (e.g. v1.2.3)
@@ -86,13 +94,21 @@ enum DeployCommands {
         /// Target environment
         #[arg(long, default_value = "production")]
         env: String,
+        /// Which deployment to install
+        #[arg(long, value_enum, default_value_t = commands::deploy::Target::App)]
+        target: commands::deploy::Target,
     },
 }
 
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
-    ui::init(cli.global.no_color, cli.global.quiet, cli.global.verbose);
+    ui::init(
+        cli.global.no_color,
+        cli.global.no_emoji,
+        cli.global.quiet,
+        cli.global.verbose,
+    );
 
     match dispatch(cli.command).await {
         Ok(()) => std::process::ExitCode::SUCCESS,
@@ -133,10 +149,12 @@ async fn dispatch(command: Commands) -> ui::Cmd {
         Commands::Test(args) => commands::test::handle_test(args).await,
         Commands::Upgrade(args) => commands::upgrade::handle_upgrade(args).await,
         Commands::Deploy(args) => match args.command {
-            DeployCommands::Init => commands::deploy::handle_deploy_init().await,
-            DeployCommands::Install { version, env } => {
-                commands::deploy::handle_deploy_install(&version, &env).await
-            }
+            DeployCommands::Init { target } => commands::deploy::handle_deploy_init(target).await,
+            DeployCommands::Install {
+                version,
+                env,
+                target,
+            } => commands::deploy::handle_deploy_install(&version, &env, target).await,
         },
     }
 }

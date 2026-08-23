@@ -16,6 +16,7 @@ pub mod m20260823_130000_create_app_health;
 pub mod m20260823_140000_create_uptime;
 pub mod m20260823_150000_create_status_page;
 pub mod m20260823_160000_create_alert_rule;
+pub mod m20260823_170000_widen_alert_selector;
 
 /// Every collector migration, in order. A monitoring binary chains these into
 /// its own `MigratorTrait` implementation.
@@ -29,6 +30,7 @@ pub fn collector_migrations() -> Vec<Box<dyn MigrationTrait>> {
         Box::new(m20260823_140000_create_uptime::Migration),
         Box::new(m20260823_150000_create_status_page::Migration),
         Box::new(m20260823_160000_create_alert_rule::Migration),
+        Box::new(m20260823_170000_widen_alert_selector::Migration),
     ]
 }
 

@@ -151,7 +151,11 @@ fn build_envelope<'a>(
 ///
 /// Mirrors the collector's writer: parks on `recv` when idle, so an application
 /// that is not producing errors does no work at all.
-pub async fn sender_loop(config: Arc<SenderConfig>, mut rx: mpsc::Receiver<CapturedError>) {
+pub async fn sender_loop(
+    config: Arc<SenderConfig>,
+    mut rx: mpsc::Receiver<CapturedError>,
+    mut shutdown: crate::shutdown::Shutdown,
+) {
     let client = match reqwest::Client::builder()
         .timeout(config.request_timeout)
         .build()
@@ -170,7 +174,28 @@ pub async fn sender_loop(config: Arc<SenderConfig>, mut rx: mpsc::Receiver<Captu
     );
 
     loop {
-        let Some(first) = rx.recv().await else {
+        let first = tokio::select! {
+            queued = rx.recv() => queued,
+            () = shutdown.recv() => {
+                // Drain whatever is already queued and send it as one last
+                // batch. Anything arriving after this is lost, which is the
+                // right trade: the process is going away either way, and
+                // waiting indefinitely would hold the pod open past its grace
+                // period.
+                let mut remaining = Vec::new();
+                while let Ok(error) = rx.try_recv() {
+                    remaining.push(error);
+                    if remaining.len() >= config.batch_size {
+                        break;
+                    }
+                }
+                if !remaining.is_empty() {
+                    deliver(&client, &config, &mut breaker, remaining).await;
+                }
+                return;
+            }
+        };
+        let Some(first) = first else {
             break;
         };
 

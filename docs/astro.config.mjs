@@ -94,6 +94,7 @@ export default defineConfig({
             { label: 'Alerts', link: '/monitoring/alerts/' },
             { label: 'Status page', link: '/monitoring/status-page/' },
             { label: 'Metrics', link: '/monitoring/metrics/' },
+            { label: 'Deployment', link: '/monitoring/deployment/' },
           ],
         },
         {

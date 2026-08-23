@@ -29,9 +29,43 @@ the result for a while before believing it.
 | `errors` | `all`, `api`, `app`, `admin` | Error events in the window |
 | `uptime` | `all`, or a check name | Checks currently down |
 | `subsystem` | `down` (default), `degraded` | Application instances not healthy |
+| `promql` | Any instant PromQL query | The first sample the query returns |
 
-A PromQL source is the natural fourth and is deliberately left unbuilt rather
-than half-built.
+## The PromQL source
+
+`promql` makes everything Prometheus scrapes alertable without teaching the
+collector each individual signal:
+
+```json
+{
+  "name": "5xx rate",
+  "source": "promql",
+  "selector": "sum(rate(http_requests_total{status=~\"5..\"}[5m]))",
+  "comparator": "gt",
+  "threshold": 0.05
+}
+```
+
+It reads `[collector.prometheus] url`, which the chart sets to the in-cluster
+Service. Empty means the source is unavailable.
+
+Two behaviours worth knowing:
+
+- **An empty result is not zero.** A query returning no samples reads as "no
+  value", not as `0` — otherwise a `less than` rule would fire every time a
+  series went quiet. `NaN`, `+Inf` and `-Inf` are rejected the same way, since
+  `NaN` compares false against every threshold and would make a rule
+  undecidable.
+- **A Prometheus outage un-fires every PromQL rule.** A failed query reads as
+  not breaching, consistent with an unrecognised source. That is the honest
+  trade — the alternative is firing every PromQL rule whenever Prometheus
+  restarts — but it is a real blind spot. The collector increments
+  `erno_alert_source_unavailable_total{source="promql"}` when it happens, and
+  Prometheus scrapes the collector, so one rule closes the gap:
+
+  ```
+  increase(erno_alert_source_unavailable_total[10m]) > 0
+  ```
 
 ```sh
 curl -X POST https://monitoring.example.com/api/collector/alerts \

@@ -138,12 +138,42 @@ impl ErrorReportingConfig {
         format!("{}/api/errors", self.collector_url.trim_end_matches('/'))
     }
 
+    /// Full URL for anonymising one user's stored events.
+    ///
+    /// The trusted machine route — authenticated by `ingest_token`, not by
+    /// operator credentials, because the application calls it during account
+    /// deletion.
+    #[must_use]
+    pub fn user_events_endpoint(&self, user_id: uuid::Uuid) -> String {
+        format!(
+            "{}/api/collector/users/{user_id}/events",
+            self.collector_url.trim_end_matches('/')
+        )
+    }
+
     /// Whether a tracing target is excluded from capture.
     #[must_use]
     pub fn is_ignored_target(&self, target: &str) -> bool {
         self.ignore_targets
             .iter()
             .any(|ignored| target.starts_with(ignored.as_str()))
+    }
+}
+
+/// The bundled Prometheus, for `promql` alert rules.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PrometheusConfig {
+    /// Base URL, e.g. `http://<release>-prometheus:9090`.
+    #[serde(default)]
+    pub url: String,
+}
+
+impl PrometheusConfig {
+    /// The URL to query, or `None` when unconfigured.
+    #[must_use]
+    pub fn url(&self) -> Option<&str> {
+        let trimmed = self.url.trim();
+        (!trimmed.is_empty()).then_some(trimmed)
     }
 }
 
@@ -224,6 +254,13 @@ pub struct CollectorConfig {
     #[serde(default)]
     pub status: StatusConfig,
 
+    /// The bundled Prometheus, for alert rules whose source is `promql`.
+    ///
+    /// Reached in-cluster, never through the ingress. Empty disables the
+    /// `promql` alert source; rules using it then read as not breaching.
+    #[serde(default)]
+    pub prometheus: PrometheusConfig,
+
     /// Forget an instance that has not reported for this long, so retired
     /// replicas do not pile up in the console after every rolling deploy.
     #[serde(default = "default_instance_retention_seconds")]
@@ -250,6 +287,7 @@ impl Default for CollectorConfig {
             alerts: AlertsConfig::default(),
             health: HealthThresholds::default(),
             status: StatusConfig::default(),
+            prometheus: PrometheusConfig::default(),
             instance_retention_seconds: default_instance_retention_seconds(),
         }
     }

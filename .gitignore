@@ -1,6 +1,10 @@
 # Rust
 target/
 Cargo.lock
+# One workspace, one lock — and this one is tracked, because the repo ships two
+# binaries (erno-cli, erno-monitoring) alongside the library. The blanket ignore
+# above still covers any project scaffolded into the tree by `erno new`.
+!/Cargo.lock
 
 # IDE (consider moving editor-specific patterns to ~/.gitignore_global)
 .idea/

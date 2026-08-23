@@ -1,2 +1,9 @@
 [production]
 kubernetes_context = "{{kubernetes_context}}"
+# Where `erno deploy install` reports that a version went live. Plaintext on
+# purpose — a hostname is not a secret, and secrets.<env>.yaml is SOPS-encrypted
+# and therefore unreadable from the application deploy path.
+#
+# The token comes from $ERNO_INGEST_TOKEN. Without both, the webhook is skipped
+# with a one-line notice and the deploy proceeds.
+monitoring_url = ""

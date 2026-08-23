@@ -169,7 +169,7 @@ where
     .await;
 }
 
-fn register_builtin_jobs<ExtraConfig>(job_registry: &mut JobRegistry<ExtraConfig>)
+pub(crate) fn register_builtin_jobs<ExtraConfig>(job_registry: &mut JobRegistry<ExtraConfig>)
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
@@ -182,6 +182,21 @@ where
     job_registry.register_job::<DeleteUserFilesJob<ExtraConfig>>();
     job_registry
         .register_job::<crate::storage::delete_record_attachments_job::DeleteRecordAttachmentsJob<ExtraConfig>>();
+    job_registry
+        .register_job::<crate::error_reporting::anonymize_user_job::AnonymizeCollectorEventsJob<ExtraConfig>>();
+}
+
+/// Job types the framework registers on every app's behalf.
+///
+/// Derived from [`register_builtin_jobs`] rather than listed by hand, so the
+/// two cannot drift — adding a built-in automatically makes it known here.
+///
+/// Used by the worker-coverage check: an app author cannot be expected to have
+/// listed a job type that did not exist when they wrote their config.
+pub(crate) fn builtin_job_names() -> std::collections::HashSet<&'static str> {
+    let mut registry = JobRegistry::<()>::new();
+    register_builtin_jobs(&mut registry);
+    registry.job_names().copied().collect()
 }
 
 #[must_use]

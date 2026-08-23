@@ -51,8 +51,16 @@ impl LogSink {
     }
 }
 
+/// What a child says that is worth interrupting the banner for.
+///
+/// Only two things qualify: something went wrong, or something is waiting on an
+/// answer. Progress and readiness do not — the banner has a row per service and
+/// probes each one, so a forwarded "Local: http://localhost:4200/" or "Database
+/// is ready" says what the row beneath it already says, a second time and in
+/// the child's words. `--verbose` is there for anyone who wants the raw
+/// multiplex, and `.erno/dev.log` has every line either way.
 pub fn should_print_line(line: &str, verbose: bool) -> bool {
-    verbose || is_error_line(line) || is_notable_line(line) || is_prompt_line(line)
+    verbose || is_error_line(line) || is_prompt_line(line)
 }
 
 /// A child waiting on stdin must never be invisible: quiet mode still forwards
@@ -72,9 +80,9 @@ fn is_prompt_line(line: &str) -> bool {
             .any(|suffix| lower.ends_with(suffix))
 }
 
-// The emoji these two match on come from the `api` crate's own startup and
-// migration output, not from this CLI — the CLI's no-emoji rule does not reach
-// text it only forwards. Changing these means changing `api/`.
+// The `✖` here comes from the `api` crate's own output, not from this CLI —
+// the CLI's own icons are a separate set, and text it only forwards is not
+// ours to restyle. Changing this means changing `api/`.
 fn is_error_line(line: &str) -> bool {
     let plain = ui::strip_ansi(line);
     let lower = plain.to_ascii_lowercase();
@@ -83,15 +91,6 @@ fn is_error_line(line: &str) -> bool {
         || lower.contains("panic")
         || plain.contains('✖')
         || plain.contains("error[E")
-}
-
-fn is_notable_line(line: &str) -> bool {
-    let plain = ui::strip_ansi(line);
-    plain.contains("Local:")
-        || plain.contains("Database is ready")
-        || plain.contains("Server starting")
-        || plain.contains("compiled successfully")
-        || plain.contains("Application bundle generation complete")
 }
 
 #[cfg(test)]
@@ -124,15 +123,17 @@ mod tests {
     }
 
     #[test]
-    fn ready_events_print_in_quiet_mode() {
-        assert!(should_print_line(
+    fn readiness_chatter_stays_in_the_log_file() {
+        // The banner says all of this, per service, and keeps saying it.
+        for line in [
             "  Local:   http://localhost:4200/",
-            false
-        ));
-        assert!(should_print_line("✅ Database is ready!", false));
-        assert!(should_print_line(
+            "✅ Database is ready!",
             "🌐 Server starting on http://0.0.0.0:3000",
-            false
-        ));
+            "Application bundle generation complete. [1.688 seconds]",
+            "compiled successfully",
+        ] {
+            assert!(!should_print_line(line, false), "{line}");
+            assert!(should_print_line(line, true), "{line}");
+        }
     }
 }

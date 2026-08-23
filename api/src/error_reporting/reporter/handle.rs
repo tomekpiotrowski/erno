@@ -68,8 +68,27 @@ impl ErrorReporter {
         app_info: AppInfo,
         environment: Environment,
     ) -> Self {
+        Self::start_with_shutdown(config, app_info, environment, crate::shutdown::never()).0
+    }
+
+    /// Like [`Self::start`], but the sender drains and exits on shutdown.
+    ///
+    /// Returns the sender's join handle so the boot path can wait for that
+    /// final drain — the errors that caused a shutdown are exactly the ones
+    /// worth not losing.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called outside a Tokio runtime.
+    #[must_use]
+    pub fn start_with_shutdown(
+        config: &ErrorReportingConfig,
+        app_info: AppInfo,
+        environment: Environment,
+        shutdown: crate::shutdown::Shutdown,
+    ) -> (Self, Option<tokio::task::JoinHandle<()>>) {
         if !config.is_active() {
-            return Self::Disabled;
+            return (Self::Disabled, None);
         }
 
         let sender_config = Arc::new(SenderConfig {
@@ -87,8 +106,8 @@ impl ErrorReporter {
         });
 
         let (tx, rx) = mpsc::channel(config.queue_capacity.max(1));
-        tokio::spawn(sender_loop(sender_config, rx));
-        Self::Remote(tx)
+        let handle = tokio::spawn(sender_loop(sender_config, rx, shutdown));
+        (Self::Remote(tx), Some(handle))
     }
 
     /// Queue a report.

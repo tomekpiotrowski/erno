@@ -313,7 +313,7 @@ mod tests {
         tests::setup_test::{setup_test, test_boot},
     };
 
-    fn no_router(app: App) -> Router {
+    fn no_router(_app: App) -> Router {
         Router::new()
     }
 

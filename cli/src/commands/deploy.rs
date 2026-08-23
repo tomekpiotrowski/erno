@@ -39,6 +39,8 @@ const TEMPLATE_REGISTRY_SECRET: &str =
     include_str!("../../templates/deploy/chart/templates/registry_secret.yaml");
 const TEMPLATE_GITHUB_WORKFLOW: &str =
     include_str!("../../templates/deploy/github/workflows/build.yaml");
+const TEMPLATE_MON_WORKFLOW: &str =
+    include_str!("../../templates/deploy/github/workflows/monitoring.yaml");
 const TEMPLATE_API_PRODUCTION_TOML: &str =
     include_str!("../../templates/api/config/production.toml");
 const TEMPLATE_ADMIN_DOCKERFILE: &str = include_str!("../../templates/deploy/admin/Dockerfile");
@@ -47,27 +49,131 @@ const TEMPLATE_ADMIN_ENTRYPOINT: &str = include_str!("../../templates/deploy/adm
 const TEMPLATE_ADMIN_DEPLOYMENT: &str =
     include_str!("../../templates/deploy/chart/templates/admin.yaml");
 
-pub async fn handle_deploy_init() -> ui::Cmd {
-    validate_project_root();
+// The monitoring deployment: its own chart, its own release, its own cluster.
+const TEMPLATE_MON_DOCKERFILE: &str = include_str!("../../templates/deploy/monitoring/Dockerfile");
+const TEMPLATE_MON_UI_DOCKERFILE: &str =
+    include_str!("../../templates/deploy/monitoring/ui/Dockerfile");
+const TEMPLATE_MON_UI_NGINX: &str =
+    include_str!("../../templates/deploy/monitoring/ui/docker/nginx.conf");
+const TEMPLATE_MON_UI_ENTRYPOINT: &str =
+    include_str!("../../templates/deploy/monitoring/ui/docker/entrypoint.sh");
+const TEMPLATE_MON_CHART_YAML: &str =
+    include_str!("../../templates/deploy/monitoring/chart/Chart.yaml");
+const TEMPLATE_MON_VALUES_YAML: &str =
+    include_str!("../../templates/deploy/monitoring/chart/values.yaml");
+const TEMPLATE_MON_SECRETS_EXAMPLE: &str =
+    include_str!("../../templates/deploy/monitoring/chart/secrets.example.yaml");
+const TEMPLATE_MON_DEPLOY_TOML: &str =
+    include_str!("../../templates/deploy/monitoring/chart/deploy.toml");
+const TEMPLATE_MON_HELPERS_TPL: &str =
+    include_str!("../../templates/deploy/monitoring/chart/templates/_helpers.tpl");
+const TEMPLATE_MON_COLLECTOR: &str =
+    include_str!("../../templates/deploy/monitoring/chart/templates/collector.yaml");
+const TEMPLATE_MON_CONSOLE: &str =
+    include_str!("../../templates/deploy/monitoring/chart/templates/console.yaml");
+const TEMPLATE_MON_INGRESS: &str =
+    include_str!("../../templates/deploy/monitoring/chart/templates/ingress.yaml");
+const TEMPLATE_MON_PROMETHEUS: &str =
+    include_str!("../../templates/deploy/monitoring/chart/templates/prometheus.yaml");
+const TEMPLATE_MON_ISSUER: &str =
+    include_str!("../../templates/deploy/monitoring/chart/templates/letsencrypt_issuer.yaml");
+const TEMPLATE_MON_REGISTRY_SECRET: &str =
+    include_str!("../../templates/deploy/monitoring/chart/templates/registry_secret.yaml");
+
+/// Which deployment a `deploy` command acts on.
+///
+/// The two are independent releases in independent clusters — that separation
+/// is the whole point of the monitoring split, so every path, name and context
+/// is derived from here rather than threaded through as booleans.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, clap::ValueEnum)]
+pub enum Target {
+    #[default]
+    App,
+    Monitoring,
+}
+
+/// Everything that differs between the two deployments, resolved once.
+struct TargetSpec {
+    target: Target,
+    /// The helm release name.
+    release: String,
+    /// The chart directory, relative to the project root.
+    chart_dir: &'static str,
+    /// The OCI chart reference.
+    chart_ref: String,
+}
+
+impl TargetSpec {
+    fn resolve(target: Target, name: &str, github_repo: &str) -> Self {
+        let release = match target {
+            Target::App => name.to_string(),
+            Target::Monitoring => format!("{name}-monitoring"),
+        };
+        Self {
+            chart_ref: format!("oci://ghcr.io/{github_repo}/{release}"),
+            chart_dir: match target {
+                Target::App => "chart",
+                Target::Monitoring => "monitoring/deploy/chart",
+            },
+            release,
+            target,
+        }
+    }
+
+    fn secrets_file(&self, env: &str) -> String {
+        format!("{}/secrets.{env}.yaml", self.chart_dir)
+    }
+
+    fn deploy_toml(&self) -> String {
+        format!("{}/deploy.toml", self.chart_dir)
+    }
+
+    fn label(&self) -> &'static str {
+        match self.target {
+            Target::App => "application",
+            Target::Monitoring => "monitoring",
+        }
+    }
+}
+
+pub async fn handle_deploy_init(target: Target) -> ui::Cmd {
+    validate_project_root(target);
 
     let name = read_project_name();
     let github_repo = read_github_repo();
-    let k8s_context = prompt_k8s_context();
+    let spec = TargetSpec::resolve(target, &name, &github_repo);
+    let k8s_context = prompt_k8s_context(target);
 
     ui::section(
         ui::icon::DEPLOY,
-        format!("Generating deployment files for '{name}'"),
+        format!("Generating {} deployment files for '{name}'", spec.label()),
     );
     ui::blank();
 
+    // A separate console with separate credentials, so the monitoring target
+    // generates its own rather than reusing the application's.
     let (admin_password, admin_password_hash) = generate_admin_password();
+    // The trusted server-to-server token. Generated here so the operator never
+    // has to invent one, and so both halves of the link can be written at once.
+    let ingest_token = generate_token();
 
     let vars: &[(&str, &str)] = &[
         ("{{name}}", &name),
         ("{{github_repo}}", &github_repo),
         ("{{kubernetes_context}}", &k8s_context),
+        ("{{monitoring_kubernetes_context}}", &k8s_context),
         ("{{admin_password_hash}}", &admin_password_hash),
+        ("{{ingest_token}}", &ingest_token),
     ];
+
+    if target == Target::Monitoring {
+        write_monitoring_files(vars);
+        setup_sops(&name, &github_repo, &spec).await;
+        link_ingest_token(&ingest_token);
+        print_admin_password_once(&admin_password);
+        print_monitoring_next_steps(&name);
+        return Ok(());
+    }
 
     write_file("api/Dockerfile", render(TEMPLATE_API_DOCKERFILE, vars));
     write_file("app/Dockerfile", render(TEMPLATE_APP_DOCKERFILE, vars));
@@ -155,11 +261,114 @@ pub async fn handle_deploy_init() -> ui::Cmd {
 
     ensure_production_toml(&name);
 
-    setup_sops(&name, &github_repo).await;
+    setup_sops(&name, &github_repo, &spec).await;
 
     print_admin_password_once(&admin_password);
     print_next_steps(&name, &github_repo);
     Ok(())
+}
+
+/// The monitoring deployment's own files. Every path is under `monitoring/`,
+/// which is what keeps the two targets from colliding.
+fn write_monitoring_files(vars: &[(&str, &str)]) {
+    write_file(
+        "monitoring/Dockerfile",
+        render(TEMPLATE_MON_DOCKERFILE, vars),
+    );
+    write_file(
+        "monitoring/ui/Dockerfile",
+        render(TEMPLATE_MON_UI_DOCKERFILE, vars),
+    );
+    write_file(
+        "monitoring/ui/docker/nginx.conf",
+        render(TEMPLATE_MON_UI_NGINX, vars),
+    );
+    write_file(
+        "monitoring/ui/docker/entrypoint.sh",
+        render(TEMPLATE_MON_UI_ENTRYPOINT, vars),
+    );
+    for (path, template) in [
+        ("Chart.yaml", TEMPLATE_MON_CHART_YAML),
+        ("values.yaml", TEMPLATE_MON_VALUES_YAML),
+        ("secrets.example.yaml", TEMPLATE_MON_SECRETS_EXAMPLE),
+        ("deploy.toml", TEMPLATE_MON_DEPLOY_TOML),
+        ("templates/_helpers.tpl", TEMPLATE_MON_HELPERS_TPL),
+        ("templates/collector.yaml", TEMPLATE_MON_COLLECTOR),
+        ("templates/console.yaml", TEMPLATE_MON_CONSOLE),
+        ("templates/ingress.yaml", TEMPLATE_MON_INGRESS),
+        ("templates/prometheus.yaml", TEMPLATE_MON_PROMETHEUS),
+        ("templates/letsencrypt_issuer.yaml", TEMPLATE_MON_ISSUER),
+        (
+            "templates/registry_secret.yaml",
+            TEMPLATE_MON_REGISTRY_SECRET,
+        ),
+    ] {
+        write_file(
+            &format!("monitoring/deploy/chart/{path}"),
+            render(template, vars),
+        );
+    }
+    // Its own workflow, never the application's: two independent deployables
+    // with independent release cadences, and merging YAML with a `str::replace`
+    // renderer is not a thing.
+    write_file(
+        ".github/workflows/monitoring.yaml",
+        render(TEMPLATE_MON_WORKFLOW, vars),
+    );
+}
+
+/// A URL-safe random token, for the shared ingest secret.
+fn generate_token() -> String {
+    use base64::Engine;
+    use rand::RngCore;
+    let mut bytes = [0u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+}
+
+/// Write the generated ingest token into the *application* chart too.
+///
+/// This is the one value that has to match across two charts in two clusters,
+/// and a mismatch fails silently — the API's reports are rejected with a 401
+/// and nothing says so. Filling both sides here is the only place that can
+/// close the loop automatically.
+fn link_ingest_token(token: &str) {
+    let path = Path::new("chart/secrets.example.yaml");
+    if !path.exists() {
+        return;
+    }
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return;
+    };
+    // Only fill an empty field: never overwrite a token already in use.
+    let Some(updated) = fill_empty_ingest_token(&content, token) else {
+        ui::info("chart/secrets.example.yaml already has an ingest_token — left as is");
+        ui::detail(
+            "It must equal collector.server_token in\n             monitoring/deploy/chart/secrets.<env>.yaml.",
+        );
+        return;
+    };
+    if std::fs::write(path, updated).is_ok() {
+        ui::ok("chart/secrets.example.yaml (ingest_token linked)");
+    }
+}
+
+/// Replace an empty `ingest_token: ""` with `token`. `None` when there is no
+/// such key, or it already has a value.
+fn fill_empty_ingest_token(content: &str, token: &str) -> Option<String> {
+    let mut out = Vec::new();
+    let mut filled = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if !filled && (trimmed == "ingest_token: \"\"" || trimmed == "ingest_token: ''") {
+            let indent = &line[..line.len() - line.trim_start().len()];
+            out.push(format!("{indent}ingest_token: \"{token}\""));
+            filled = true;
+        } else {
+            out.push(line.to_string());
+        }
+    }
+    filled.then(|| out.join("\n") + "\n")
 }
 
 /// Generate a high-entropy admin password and its Argon2 hash.
@@ -199,13 +408,14 @@ fn print_admin_password_once(password: &str) {
     );
 }
 
-pub async fn handle_deploy_install(version: &str, env: &str) -> ui::Cmd {
-    validate_project_root();
+pub async fn handle_deploy_install(version: &str, env: &str, target: Target) -> ui::Cmd {
+    validate_project_root(target);
 
     let name = read_project_name();
     let github_repo = read_github_repo();
+    let spec = TargetSpec::resolve(target, &name, &github_repo);
 
-    let context = read_deploy_context(env);
+    let context = read_deploy_context(&spec, env);
 
     ui::section(
         ui::icon::CLOUD,
@@ -213,19 +423,19 @@ pub async fn handle_deploy_install(version: &str, env: &str) -> ui::Cmd {
     );
     run_command("kubectl", &["config", "use-context", &context]);
 
-    let secrets_file = format!("chart/secrets.{env}.yaml");
+    let secrets_file = spec.secrets_file(env);
     if !Path::new(&secrets_file).exists() {
         return Err(format!(
             "missing {secrets_file}\n\
-             Copy chart/secrets.example.yaml to {secrets_file}, fill in values, and encrypt with SOPS."
+             Copy {}/secrets.example.yaml to {secrets_file}, fill in values, and encrypt with SOPS.",
+            spec.chart_dir
         )
         .into());
     }
 
-    let chart_ref = format!("oci://ghcr.io/{github_repo}/{name}");
     ui::section(
         ui::icon::DEPLOY,
-        format!("Deploying {name} {version} to {env}"),
+        format!("Deploying {} {version} to {env}", spec.release),
     );
     run_command(
         "helm",
@@ -233,8 +443,8 @@ pub async fn handle_deploy_install(version: &str, env: &str) -> ui::Cmd {
             "secrets",
             "upgrade",
             "--install",
-            &name,
-            &chart_ref,
+            &spec.release,
+            &spec.chart_ref,
             "--version",
             version,
             "--atomic",
@@ -246,8 +456,92 @@ pub async fn handle_deploy_install(version: &str, env: &str) -> ui::Cmd {
     );
 
     ui::blank();
-    ui::ok(format!("Deployed {name} {version} to {env}"));
+    ui::ok(format!("Deployed {} {version} to {env}", spec.release));
+
+    // A version only becomes a *release* when something starts serving it,
+    // which is here — not when CI publishes the chart. Recording it at publish
+    // time would put deploy markers on charts for versions never installed.
+    //
+    // Deliberately after helm succeeds: `--atomic` means a failed upgrade has
+    // already rolled back, so recording it would be a lie.
+    record_release(&spec, version, env).await;
     Ok(())
+}
+
+/// Tell the collector that a version is now live.
+///
+/// Never fatal. A deployment that actually succeeded must not be reported as
+/// failed because the monitoring deployment was unreachable.
+async fn record_release(spec: &TargetSpec, version: &str, env: &str) {
+    let Some(collector_url) = read_deploy_value(spec, env, "monitoring_url") else {
+        return;
+    };
+    let Ok(token) = std::env::var("ERNO_INGEST_TOKEN") else {
+        ui::info("skipping the release webhook — ERNO_INGEST_TOKEN is not set");
+        return;
+    };
+
+    let url = format!(
+        "{}/api/collector/releases",
+        collector_url.trim_end_matches('/')
+    );
+    let body = serde_json::json!({
+        "version": version,
+        "environment": env,
+        "commit_sha": commit_sha_for(version),
+        "source": "cli",
+    });
+
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    match client
+        .post(&url)
+        .header("X-Erno-Ingest-Key", token)
+        .json(&body)
+        .send()
+        .await
+    {
+        Ok(res) if res.status().is_success() => {
+            ui::ok(format!("recorded release {version} with the collector"));
+        }
+        Ok(res) => ui::warn(format!(
+            "the collector rejected the release webhook ({})",
+            res.status()
+        )),
+        Err(e) => ui::warn(format!("could not reach the collector: {e}")),
+    }
+}
+
+/// The commit this version was built from — but only when the local HEAD really
+/// is that tag. Otherwise the working copy has moved on and a SHA taken from it
+/// would describe something other than what was deployed, which is worse than
+/// sending nothing.
+fn commit_sha_for(version: &str) -> Option<String> {
+    let described = std::process::Command::new("git")
+        .args(["describe", "--exact-match", "--tags"])
+        .output()
+        .ok()?;
+    if !described.status.success() {
+        return None;
+    }
+    let tag = String::from_utf8(described.stdout).ok()?;
+    if tag.trim() != version
+        && tag.trim().trim_start_matches('v') != version.trim_start_matches('v')
+    {
+        return None;
+    }
+    let head = std::process::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .ok()?;
+    head.status
+        .success()
+        .then(|| String::from_utf8_lossy(&head.stdout).trim().to_string())
 }
 
 fn ensure_production_toml(name: &str) {
@@ -272,12 +566,27 @@ fn ensure_production_toml(name: &str) {
 
 // --- helpers ---
 
-fn validate_project_root() {
+fn validate_project_root(target: Target) {
     if !Path::new("api/Cargo.toml").exists() || !Path::new("app/package.json").exists() {
         ui::abort(
             "not an erno project root\n\
              Run this command from the directory that contains api/ and app/.",
         );
+    }
+    if target == Target::Monitoring {
+        // api/Cargo.toml is still where the project name comes from, so the
+        // check above stands; this adds what the monitoring target needs.
+        if !Path::new("monitoring/Cargo.toml").exists() {
+            ui::abort(
+                "this project has no monitoring/\n\
+                 It predates monitoring scaffolding. Copy monitoring/ from an erno\n\
+                 checkout, or re-scaffold with `erno new --erno-path <path-to-erno>`.",
+            );
+        }
+        if !Path::new("monitoring/ui/package.json").exists() {
+            ui::abort("monitoring/ui is missing — the operator console cannot be built");
+        }
+        return;
     }
     if !Path::new("www/package.json").exists() {
         ui::warn("no www/ marketing site found");
@@ -346,7 +655,7 @@ fn extract_github_repo(url: &str) -> String {
     ));
 }
 
-fn prompt_k8s_context() -> String {
+fn prompt_k8s_context(target: Target) -> String {
     // List available contexts from kubeconfig
     let output = std::process::Command::new("kubectl")
         .args(["config", "get-contexts", "-o", "name"])
@@ -369,12 +678,39 @@ fn prompt_k8s_context() -> String {
         }
     }
 
-    ui::prompt("Kubernetes context for production", "")
+    match target {
+        Target::App => ui::prompt("Kubernetes context for production", ""),
+        Target::Monitoring => {
+            let context = ui::prompt(
+                "Kubernetes context for monitoring (a different cluster from the application)",
+                "",
+            );
+            // Sharing a cluster defeats the entire point: the monitoring stack
+            // would go down with the outage it exists to report.
+            if let Ok(existing) = std::fs::read_to_string("chart/deploy.toml") {
+                if existing.contains(&format!("\"{context}\"")) {
+                    ui::warn("that is the same context the application deploys to");
+                    ui::detail(
+                        "A monitoring stack sharing a failure domain with what it monitors\n\
+                         goes down with it. Use separate infrastructure if you can.",
+                    );
+                }
+            }
+            context
+        }
+    }
 }
 
-fn read_deploy_context(env: &str) -> String {
-    let content = std::fs::read_to_string("chart/deploy.toml").unwrap_or_else(|_| {
-        ui::abort("missing chart/deploy.toml — run `erno deploy init` first");
+fn read_deploy_context(spec: &TargetSpec, env: &str) -> String {
+    let path = spec.deploy_toml();
+    let content = std::fs::read_to_string(&path).unwrap_or_else(|_| {
+        ui::abort(&format!(
+            "missing {path} — run `erno deploy init{}` first",
+            match spec.target {
+                Target::App => "",
+                Target::Monitoring => " --target monitoring",
+            }
+        ));
     });
 
     let section = format!("[{env}]");
@@ -402,7 +738,28 @@ fn read_deploy_context(env: &str) -> String {
     ));
 }
 
-async fn setup_sops(name: &str, github_repo: &str) {
+async fn setup_sops(name: &str, github_repo: &str, spec: &TargetSpec) {
+    let sops_path = format!("{}/.sops.yaml", spec.chart_dir);
+
+    // The age key is per *repository*, not per target: one SOPS_AGE_KEY secret
+    // decrypts both charts. So if one already exists, reuse its recipient.
+    // Generating a fresh key here would silently make every existing
+    // secrets.<env>.yaml undecryptable — including the other target's.
+    if let Some(public_key) = existing_age_recipient(&["chart/.sops.yaml", &sops_path]) {
+        write_file(
+            &sops_path,
+            format!("creation_rules:\n  - age: \"{public_key}\"\n"),
+        );
+        ui::section(ui::icon::KEY, "SOPS");
+        ui::ok("reusing the existing age key");
+        ui::detail(format!(
+            "public key:  {public_key}\n\
+             written to:  {sops_path}\n\
+             A new key would make every existing secrets.<env>.yaml undecryptable."
+        ));
+        return;
+    }
+
     // Generate age keypair
     let output = std::process::Command::new("age-keygen").output();
     let Ok(out) = output else {
@@ -434,7 +791,7 @@ async fn setup_sops(name: &str, github_repo: &str) {
 
     // Write .sops.yaml with the public key
     let sops_yaml = format!("creation_rules:\n  - age: \"{public_key}\"\n");
-    write_file("chart/.sops.yaml", sops_yaml);
+    write_file(&sops_path, sops_yaml);
 
     // Try to set GitHub Actions secret via `gh` CLI
     let private_key = private_key_lines.join("\n");
@@ -451,7 +808,7 @@ async fn setup_sops(name: &str, github_repo: &str) {
     ui::ok("age keypair generated");
     ui::detail(format!(
         "public key:  {public_key}\n\
-         written to:  chart/.sops.yaml"
+         written to:  {sops_path}"
     ));
 
     if secret_set {
@@ -468,6 +825,87 @@ async fn setup_sops(name: &str, github_repo: &str) {
     ui::warn("back up your private key — it cannot be recovered");
     ui::detail(private_key_lines.join("\n"));
     let _ = name; // used in template vars
+}
+
+/// A plain (non-secret) key out of a target's deploy.toml.
+///
+/// The collector URL lives here rather than in secrets.<env>.yaml because that
+/// file is SOPS-encrypted and unreadable when deploying the *application*
+/// target — and a hostname is not a secret.
+fn read_deploy_value(spec: &TargetSpec, env: &str, key: &str) -> Option<String> {
+    let content = std::fs::read_to_string(spec.deploy_toml()).ok()?;
+    let section = format!("[{env}]");
+    let mut in_section = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed == section {
+            in_section = true;
+            continue;
+        }
+        if in_section && trimmed.starts_with('[') {
+            break;
+        }
+        if in_section {
+            if let Some(rest) = trimmed.strip_prefix(key) {
+                if let Some(val) = rest.trim().strip_prefix('=') {
+                    let val = val.trim().trim_matches('"');
+                    if !val.is_empty() {
+                        return Some(val.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn print_monitoring_next_steps(name: &str) {
+    ui::next_steps(
+        "Next steps",
+        &[
+            "cp monitoring/deploy/chart/secrets.example.yaml \\\n     monitoring/deploy/chart/secrets.production.yaml".to_string(),
+            "sops -e -i monitoring/deploy/chart/secrets.production.yaml".to_string(),
+            "git tag v0.1.0 && git push --tags".to_string(),
+            format!("erno deploy install v0.1.0 --target monitoring   # release {name}-monitoring"),
+        ],
+    );
+    ui::blank();
+    ui::info("Two values must match across the two charts:");
+    ui::detail(
+        "collector.server_token  ==  api.error_reporting.ingest_token\n\
+         api.metrics_auth_token  ==  the application's api.metrics_auth_token\n\
+         A mismatch fails silently — reports are rejected and nothing says so.",
+    );
+    ui::blank();
+    ui::info("Point monitoring.example.com at the monitoring cluster's LoadBalancer,");
+    ui::detail("and add the app/admin origins to monitoring/config/production.toml [cors].");
+}
+
+/// The age recipient already configured for this repository, if any.
+///
+/// Pure enough to test: it reads files, but the parsing is what matters and
+/// `age_recipient_from` below is what carries the logic.
+fn existing_age_recipient(paths: &[&str]) -> Option<String> {
+    paths.iter().find_map(|p| {
+        std::fs::read_to_string(p)
+            .ok()
+            .as_deref()
+            .and_then(age_recipient_from)
+    })
+}
+
+/// Pull the `age:` recipient out of a `.sops.yaml`.
+fn age_recipient_from(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let trimmed = line.trim().trim_start_matches('-').trim();
+        if let Some(rest) = trimmed.strip_prefix("age:") {
+            let key = rest.trim().trim_matches('"').trim_matches('\'');
+            if !key.is_empty() {
+                return Some(key.to_string());
+            }
+        }
+    }
+    None
 }
 
 async fn try_set_github_secret(
@@ -647,4 +1085,79 @@ fn print_next_steps(name: &str, github_repo: &str) {
     ui::blank();
     ui::detail(format!("GitHub repo: https://github.com/{github_repo}"));
     let _ = name;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_target_gets_its_own_release_chart_and_paths() {
+        let app = TargetSpec::resolve(Target::App, "acme", "acme/acme");
+        assert_eq!(app.release, "acme");
+        assert_eq!(app.chart_dir, "chart");
+        assert_eq!(app.chart_ref, "oci://ghcr.io/acme/acme/acme");
+        assert_eq!(
+            app.secrets_file("production"),
+            "chart/secrets.production.yaml"
+        );
+        assert_eq!(app.deploy_toml(), "chart/deploy.toml");
+
+        let mon = TargetSpec::resolve(Target::Monitoring, "acme", "acme/acme");
+        assert_eq!(mon.release, "acme-monitoring");
+        assert_eq!(mon.chart_dir, "monitoring/deploy/chart");
+        assert_eq!(mon.chart_ref, "oci://ghcr.io/acme/acme/acme-monitoring");
+        assert_eq!(
+            mon.secrets_file("production"),
+            "monitoring/deploy/chart/secrets.production.yaml"
+        );
+        assert_eq!(mon.deploy_toml(), "monitoring/deploy/chart/deploy.toml");
+    }
+
+    #[test]
+    fn the_two_targets_never_share_a_path_or_a_release() {
+        let app = TargetSpec::resolve(Target::App, "acme", "acme/acme");
+        let mon = TargetSpec::resolve(Target::Monitoring, "acme", "acme/acme");
+        assert_ne!(app.release, mon.release);
+        assert_ne!(app.chart_ref, mon.chart_ref);
+        assert_ne!(app.chart_dir, mon.chart_dir);
+        // Every monitoring path is under monitoring/, which is what keeps
+        // `deploy init --target monitoring` from overwriting the app's chart.
+        assert!(mon.chart_dir.starts_with("monitoring/"));
+        assert!(mon.secrets_file("staging").starts_with("monitoring/"));
+    }
+
+    #[test]
+    fn an_empty_ingest_token_is_filled_and_an_existing_one_is_left_alone() {
+        let empty = "api:\n  error_reporting:\n    ingest_token: \"\"\n";
+        let filled = fill_empty_ingest_token(empty, "s3cret").expect("should fill");
+        assert!(filled.contains("ingest_token: \"s3cret\""));
+        // Indentation is preserved, or the YAML stops being valid.
+        assert!(filled.contains("    ingest_token:"));
+
+        // Never clobber a token already in use: the other cluster is using it.
+        let existing = "api:\n  error_reporting:\n    ingest_token: \"live\"\n";
+        assert!(fill_empty_ingest_token(existing, "s3cret").is_none());
+        assert!(fill_empty_ingest_token("api: {}\n", "s3cret").is_none());
+    }
+
+    #[test]
+    fn the_age_recipient_is_read_back_rather_than_regenerated() {
+        // Re-running `deploy init` must reuse the key, or every existing
+        // secrets.<env>.yaml in the repo becomes undecryptable.
+        let sops = "creation_rules:\n  - age: \"age1abc123\"\n";
+        assert_eq!(age_recipient_from(sops).as_deref(), Some("age1abc123"));
+        assert_eq!(age_recipient_from("creation_rules: []\n"), None);
+        assert_eq!(age_recipient_from("  - age: \"\"\n"), None);
+    }
+
+    #[test]
+    fn a_generated_token_is_long_and_url_safe() {
+        let token = generate_token();
+        assert!(token.len() >= 40, "{token}");
+        assert!(token
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        assert_ne!(token, generate_token());
+    }
 }

@@ -28,12 +28,23 @@ import { AlertRule, CollectorApi } from '../core/api';
             <option value="errors">errors</option>
             <option value="uptime">uptime</option>
             <option value="subsystem">subsystem</option>
+            <option value="promql">promql</option>
           </select>
-          <select [(ngModel)]="selector">
-            @for (s of selectorsFor(source()); track s.value) {
-              <option [value]="s.value">{{ s.label }}</option>
-            }
-          </select>
+          <!-- A PromQL query is free text and long, so it gets an input rather
+               than the fixed selector list the other sources use. -->
+          @if (source() === 'promql') {
+            <input
+              [(ngModel)]="selector"
+              placeholder="PromQL, e.g. rate(http_requests_total{status=~&quot;5..&quot;}[5m])"
+              style="flex: 1 1 24rem"
+            />
+          } @else {
+            <select [(ngModel)]="selector">
+              @for (s of selectorsFor(source()); track s.value) {
+                <option [value]="s.value">{{ s.label }}</option>
+              }
+            </select>
+          }
         </div>
         <div class="toolbar">
           <select [(ngModel)]="comparator">
@@ -160,7 +171,9 @@ export class AlertsPage {
   }
 
   onSourceChange(source: string) {
-    this.selector.set(this.selectorsFor(source)[0].value);
+    // promql takes a free-text query, so it starts empty rather than inheriting
+    // the first entry of a fixed list that does not apply to it.
+    this.selector.set(source === 'promql' ? '' : this.selectorsFor(source)[0].value);
   }
 
   add() {

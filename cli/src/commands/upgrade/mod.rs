@@ -32,7 +32,7 @@ pub async fn handle_upgrade(args: UpgradeArgs) -> ui::Cmd {
     let snap = snapshot(&root, args.force)?;
     let plan = plan_upgrade(&snap);
 
-    ui::section("Upgrade plan");
+    ui::section(ui::icon::UPGRADE, "Upgrade plan");
     ui::blank();
     print_plan(&plan);
 
@@ -42,7 +42,7 @@ pub async fn handle_upgrade(args: UpgradeArgs) -> ui::Cmd {
         }
         if plan.is_current() {
             ui::blank();
-            ui::ok("everything current");
+            ui::finished(ui::icon::DONE, "Everything is current.");
         }
         return Ok(());
     }
@@ -52,7 +52,7 @@ pub async fn handle_upgrade(args: UpgradeArgs) -> ui::Cmd {
     }
     if plan.is_current() {
         ui::blank();
-        ui::ok("everything current");
+        ui::finished(ui::icon::DONE, "Everything is current.");
         return Ok(());
     }
 
@@ -64,7 +64,7 @@ pub async fn handle_upgrade(args: UpgradeArgs) -> ui::Cmd {
     }
 
     for step in &plan.steps {
-        ui::section(&step.label);
+        ui::section(ui::icon::PACKAGE, &step.label);
         if !execute_step(&root, step) {
             return Err(ui::Failure::Message(format!(
                 "{} failed — earlier steps were applied; git is the undo",
@@ -86,6 +86,8 @@ pub async fn handle_upgrade(args: UpgradeArgs) -> ui::Cmd {
     }) {
         ui::detail("If the erno crate moved, run `cargo run -- db migrate up` in api/.");
     }
+    let plural = if n == 1 { "update" } else { "updates" };
+    ui::finished(ui::icon::DONE, format!("{n} {plural} applied"));
     Ok(())
 }
 

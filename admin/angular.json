@@ -15,8 +15,15 @@
             "browser": "src/main.ts",
             "tsConfig": "tsconfig.app.json",
             "inlineStyleLanguage": "scss",
-            "assets": [{ "glob": "**/*", "input": "public" }],
-            "styles": ["src/styles.scss"]
+            "assets": [
+              {
+                "glob": "**/*",
+                "input": "public"
+              }
+            ],
+            "styles": [
+              "src/styles.scss"
+            ]
           },
           "configurations": {
             "production": {
@@ -33,10 +40,20 @@
         "serve": {
           "builder": "@angular/build:dev-server",
           "configurations": {
-            "production": { "buildTarget": "erno-admin:build:production" },
-            "development": { "buildTarget": "erno-admin:build:development" }
+            "production": {
+              "buildTarget": "erno-admin:build:production"
+            },
+            "development": {
+              "buildTarget": "erno-admin:build:development"
+            }
           },
           "defaultConfiguration": "development"
+        },
+        "test": {
+          "builder": "@angular/build:unit-test",
+          "options": {
+            "tsConfig": "tsconfig.spec.json"
+          }
         }
       }
     }

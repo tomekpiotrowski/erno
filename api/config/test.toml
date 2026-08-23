@@ -33,7 +33,16 @@ batch_size = 1000
 
 # Explicit per-pool retry values are still honoured (they override defaults).
 [jobs.workers.default]
-jobs = []
+jobs = [
+  "send_verification_email",
+  "send_password_reset_email",
+  "send_already_registered_email",
+  "cancel_stripe_subscription",
+  "delete_stripe_customer",
+  "delete_user_files",
+  "delete_record_attachments",
+  "anonymize_collector_events",
+]
 count = 1
 job_timeout = 300
 max_retries = 4

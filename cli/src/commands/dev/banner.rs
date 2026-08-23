@@ -20,6 +20,14 @@ impl ServiceState {
         }
     }
 
+    fn icon(self) -> &'static str {
+        match self {
+            Self::Starting => ui::icon::STARTING,
+            Self::Migrating => ui::icon::MIGRATING,
+            Self::Ready => ui::icon::READY,
+        }
+    }
+
     fn style(self) -> anstyle::Style {
         match self {
             Self::Starting | Self::Migrating => ui::YELLOW,
@@ -34,6 +42,13 @@ pub struct DevUrls {
     pub app: Option<String>,
     pub www: Option<String>,
     pub prometheus: Option<String>,
+    /// The monitoring collector. An Erno app of its own, so it gets the same
+    /// readiness/liveness treatment as `api` — it migrates its database on boot
+    /// and the banner should say so rather than sitting on "starting".
+    pub monitoring: Option<String>,
+    /// The monitoring operator console.
+    pub console: Option<String>,
+    pub admin: Option<String>,
     /// Extra `[[package.dev]]` services: (name, url), declaration order.
     pub extra: Vec<(String, String)>,
 }
@@ -46,6 +61,9 @@ impl DevUrls {
             app: start_app.then(|| "http://localhost:4200".to_string()),
             www: start_www.then(|| "http://localhost:4321".to_string()),
             prometheus: start_api.then(|| super::prometheus::LISTEN_URL.to_string()),
+            monitoring: start_api.then(super::monitoring_url),
+            console: start_api.then(|| super::CONSOLE_URL.to_string()),
+            admin: start_api.then(|| super::ADMIN_URL.to_string()),
             extra: Vec::new(),
         }
     }
@@ -66,6 +84,18 @@ impl DevUrls {
             .map(|u| format!("{}/liveness", u.trim_end_matches('/')))
     }
 
+    pub fn monitoring_readiness(&self) -> Option<String> {
+        self.monitoring
+            .as_deref()
+            .map(|u| format!("{}/readiness", u.trim_end_matches('/')))
+    }
+
+    pub fn monitoring_liveness(&self) -> Option<String> {
+        self.monitoring
+            .as_deref()
+            .map(|u| format!("{}/liveness", u.trim_end_matches('/')))
+    }
+
     pub fn prometheus_ready(&self) -> Option<String> {
         self.prometheus
             .as_deref()
@@ -79,114 +109,124 @@ pub struct BannerSnapshot {
     pub app: Option<ServiceState>,
     pub www: Option<ServiceState>,
     pub prometheus: Option<ServiceState>,
+    pub monitoring: Option<ServiceState>,
+    pub console: Option<ServiceState>,
+    pub admin: Option<ServiceState>,
     pub extra: Vec<ServiceState>,
 }
 
-/// One row of the banner: a service (with a readiness state) or a hidden
-/// surface (with a static note).
+/// One row of the banner: a service, its URL, its readiness, and anything else
+/// worth knowing about it.
 struct BannerRow {
     name: String,
     url: String,
-    state: Option<ServiceState>,
+    state: ServiceState,
     note: Option<&'static str>,
 }
 
-fn banner_rows(urls: &DevUrls, snap: &BannerSnapshot) -> (Vec<BannerRow>, Vec<BannerRow>) {
-    let mut services = Vec::new();
-    let mut surfaces = Vec::new();
-
-    let mut push = |name: &str, url: &str, state| {
-        services.push(BannerRow {
+/// The banner's rows, in banner order.
+///
+/// Every row is a service that was actually started, so every row has a state.
+/// The `/dev/emails` and `/dev/jobs` links used to sit here too, as stateless
+/// rows below a blank line; they were three rows of the pinned region spent on
+/// two URLs nobody looked up from the banner.
+fn banner_rows(urls: &DevUrls, snap: &BannerSnapshot) -> Vec<BannerRow> {
+    let mut rows = Vec::new();
+    let mut push = |name: &str, url: &str, state, note| {
+        rows.push(BannerRow {
             name: name.to_string(),
             url: url.to_string(),
-            state: Some(state),
-            note: None,
+            state,
+            note,
         })
     };
     if let (Some(url), Some(state)) = (urls.www.as_deref(), snap.www) {
-        push("www", url, state);
+        push("www", url, state, None);
     }
     if let (Some(url), Some(state)) = (urls.app.as_deref(), snap.app) {
-        push("app", url, state);
+        push("app", url, state, None);
     }
     if let (Some(url), Some(state)) = (urls.api.as_deref(), snap.api) {
-        push("api", url, state);
+        push("api", url, state, None);
     }
     if let (Some(url), Some(state)) = (urls.prometheus.as_deref(), snap.prometheus) {
-        push("prom", url, state);
+        push("prom", url, state, None);
+    }
+    if let (Some(url), Some(state)) = (urls.monitoring.as_deref(), snap.monitoring) {
+        push("mon", url, state, None);
+    }
+    if let (Some(url), Some(state)) = (urls.console.as_deref(), snap.console) {
+        push("console", url, state, Some("password: admin"));
+    }
+    if let (Some(url), Some(state)) = (urls.admin.as_deref(), snap.admin) {
+        push("admin", url, state, Some("password: admin"));
     }
     for ((name, url), state) in urls.extra.iter().zip(&snap.extra) {
-        push(name, url, *state);
+        push(name, url, *state, None);
     }
-
-    // The surfaces the API exposes but does not announce. Grouped after the
-    // services rather than wedged between them.
-    if let Some(api) = urls.api.as_deref() {
-        let base = api.trim_end_matches('/');
-        for (name, url, note) in [
-            (
-                "admin",
-                "http://localhost:4300".to_string(),
-                Some("password: admin"),
-            ),
-            ("mail", format!("{base}/dev/emails"), None),
-            ("jobs", format!("{base}/dev/jobs"), None),
-        ] {
-            surfaces.push(BannerRow {
-                name: name.to_string(),
-                url,
-                state: None,
-                note,
-            });
-        }
-    }
-
-    (services, surfaces)
+    rows
 }
 
 pub fn render_banner(urls: &DevUrls, snap: &BannerSnapshot) -> String {
-    render_banner_when(ui::color(), urls, snap)
+    render_banner_when(ui::Face::current(), urls, snap)
 }
 
-pub fn render_banner_when(on: bool, urls: &DevUrls, snap: &BannerSnapshot) -> String {
-    let (services, surfaces) = banner_rows(urls, snap);
+pub fn render_banner_when(face: ui::Face, urls: &DevUrls, snap: &BannerSnapshot) -> String {
+    let rows = banner_rows(urls, snap);
 
-    // Both columns are sized from the content, across every row, so the state
-    // and note columns line up no matter how long the URLs are.
-    let all = services.iter().chain(surfaces.iter());
-    let name_w = ui::column_width(all.clone().map(|r| r.name.as_str()));
-    let url_w = ui::column_width(all.map(|r| r.url.as_str()));
+    // Every column is sized from the content, across every row, so they line up
+    // no matter how long the URLs are. `ui::column_width` measures screen
+    // columns, so the icons do not skew it.
+    let name_w = ui::column_width(rows.iter().map(|r| r.name.as_str()));
+    let url_w = ui::column_width(rows.iter().map(|r| r.url.as_str()));
+    let state_w = ui::column_width(rows.iter().map(|r| r.state.label()));
 
     let row = |r: &BannerRow| {
-        let tail = match (r.state, r.note) {
-            (Some(state), _) => ui::paint_when(on, state.style(), state.label()),
-            (None, Some(note)) => ui::paint_when(on, ui::DIM, note),
-            (None, None) => String::new(),
+        let lead = if face.emoji {
+            format!("{} ", ui::label_icon(&r.name))
+        } else {
+            String::new()
         };
         let name = ui::paint_when(
-            on,
+            face.color,
             ui::label_style(&r.name),
             &format!("{:<name_w$}", r.name),
         );
-        format!("  {name}  {:<url_w$}  {tail}\n", r.url)
+        let state = ui::paint_when(face.color, r.state.style(), r.state.label());
+        let state = if face.emoji {
+            format!("{} {state}", r.state.icon())
+        } else {
+            state
+        };
+        // The state column is only padded when something follows it. Padding
+        // inside the paint would put the spaces before the reset, where
+        // `trim_end` cannot see them, and every row would end in whitespace.
+        let tail = match r.note {
+            Some(note) => format!(
+                "{state}{}  {}",
+                " ".repeat(state_w - ui::display_width(r.state.label())),
+                ui::paint_when(face.color, ui::DIM, note),
+            ),
+            None => state,
+        };
+        format!("  {lead}{name}  {:<url_w$}  {tail}\n", r.url)
             .trim_end()
             .to_string()
             + "\n"
     };
 
     let mut out = String::from("\n");
+    let lead = if face.emoji {
+        format!("{} ", ui::icon::DEV)
+    } else {
+        String::new()
+    };
     out.push_str(&format!(
-        "  {}\n",
-        ui::paint_when(on, ui::DIM, "erno — Ctrl+C to stop")
+        "  {lead}{}\n",
+        ui::paint_when(face.color, ui::DIM, "erno — Ctrl+C to stop")
     ));
-    for r in &services {
+    for r in &rows {
         out.push_str(&row(r));
-    }
-    if !surfaces.is_empty() {
-        out.push('\n');
-        for r in &surfaces {
-            out.push_str(&row(r));
-        }
     }
     out.push('\n');
     out
@@ -204,8 +244,8 @@ pub fn print_banner(urls: &DevUrls, snap: &BannerSnapshot) {
 ///
 /// The row count does not depend on the snapshot, so the pinned region never
 /// changes height as services come up.
-pub fn region_lines(on: bool, urls: &DevUrls, snap: &BannerSnapshot) -> Vec<String> {
-    let text = render_banner_when(on, urls, snap);
+pub fn region_lines(face: ui::Face, urls: &DevUrls, snap: &BannerSnapshot) -> Vec<String> {
+    let text = render_banner_when(face, urls, snap);
     let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
     while lines.last().is_some_and(|l| l.trim().is_empty()) {
         lines.pop();
@@ -222,7 +262,7 @@ pub fn region_lines(on: bool, urls: &DevUrls, snap: &BannerSnapshot) -> Vec<Stri
 /// session: dropping it takes the region down.
 pub fn start(urls: &DevUrls) -> Option<ui::Pinned> {
     let snap = starting_snapshot(urls);
-    let pinned = ui::pin(&region_lines(ui::color(), urls, &snap));
+    let pinned = ui::pin(&region_lines(ui::Face::current(), urls, &snap));
     if pinned.is_none() {
         print_banner(urls, &snap);
     }
@@ -237,7 +277,7 @@ pub struct Transition {
 }
 
 /// The banner's built-in services, in banner order.
-const SERVICES: [&str; 4] = ["www", "app", "api", "prom"];
+const SERVICES: [&str; 7] = ["www", "app", "api", "prom", "mon", "console", "admin"];
 
 fn transitions(urls: &DevUrls, prev: &BannerSnapshot, next: &BannerSnapshot) -> Vec<Transition> {
     let pairs = [
@@ -245,6 +285,9 @@ fn transitions(urls: &DevUrls, prev: &BannerSnapshot, next: &BannerSnapshot) -> 
         (prev.app, next.app),
         (prev.api, next.api),
         (prev.prometheus, next.prometheus),
+        (prev.monitoring, next.monitoring),
+        (prev.console, next.console),
+        (prev.admin, next.admin),
     ];
     let mut out: Vec<Transition> = SERVICES
         .iter()
@@ -275,7 +318,9 @@ fn transitions(urls: &DevUrls, prev: &BannerSnapshot, next: &BannerSnapshot) -> 
 /// The banner is printed once; every later change is a single row instead of
 /// another full copy. The name column is sized from every service name, not
 /// just the ones in this batch, so rows printed seconds apart still line up.
-pub fn render_transitions(on: bool, changes: &[Transition], extra_names: &[&str]) -> String {
+/// A state change as a row. The row's own marker carries the state, so unlike
+/// the banner there is no second state icon here — that would say it twice.
+pub fn render_transitions(face: ui::Face, changes: &[Transition], extra_names: &[&str]) -> String {
     let name_w = ui::column_width(SERVICES.iter().copied().chain(extra_names.iter().copied()));
     let mut out = String::new();
     for change in changes {
@@ -283,13 +328,22 @@ pub fn render_transitions(on: bool, changes: &[Transition], extra_names: &[&str]
             ServiceState::Ready => ui::Level::Ok,
             ServiceState::Starting | ServiceState::Migrating => ui::Level::Info,
         };
+        let lead = if face.emoji {
+            format!("{} ", ui::label_icon(&change.name))
+        } else {
+            String::new()
+        };
         let name = ui::paint_when(
-            on,
+            face.color,
             ui::label_style(&change.name),
             &format!("{:<name_w$}", change.name),
         );
-        let state = ui::paint_when(on, change.state.style(), change.state.label());
-        out.push_str(&ui::render_row(on, level, &format!("{name}  {state}")));
+        let state = ui::paint_when(face.color, change.state.style(), change.state.label());
+        out.push_str(&ui::render_row(
+            face,
+            level,
+            &format!("{lead}{name}  {state}"),
+        ));
         out.push('\n');
     }
     out
@@ -302,7 +356,7 @@ fn print_transitions(changes: &[Transition], extra_names: &[&str]) {
     }
     ui::emit_block(
         ui::Stream::Err,
-        &render_transitions(ui::color(), changes, extra_names),
+        &render_transitions(ui::Face::current(), changes, extra_names),
     );
 }
 
@@ -312,6 +366,9 @@ pub fn starting_snapshot(urls: &DevUrls) -> BannerSnapshot {
         app: urls.app.as_ref().map(|_| ServiceState::Starting),
         www: urls.www.as_ref().map(|_| ServiceState::Starting),
         prometheus: urls.prometheus.as_ref().map(|_| ServiceState::Starting),
+        monitoring: urls.monitoring.as_ref().map(|_| ServiceState::Starting),
+        console: urls.console.as_ref().map(|_| ServiceState::Starting),
+        admin: urls.admin.as_ref().map(|_| ServiceState::Starting),
         extra: urls.extra.iter().map(|_| ServiceState::Starting).collect(),
     }
 }
@@ -335,7 +392,7 @@ pub fn spawn_readiness_watcher(urls: DevUrls, sticky: bool) {
             let next = probe_all(&client, &urls).await;
             if next != last {
                 if sticky {
-                    ui::repin(&region_lines(ui::color(), &urls, &next));
+                    ui::repin(&region_lines(ui::Face::current(), &urls, &next));
                 } else {
                     let names: Vec<&str> = urls.extra_names().collect();
                     print_transitions(&transitions(&urls, &last, &next), &names);
@@ -349,7 +406,7 @@ pub fn spawn_readiness_watcher(urls: DevUrls, sticky: bool) {
 
 async fn probe_all(client: &Client, urls: &DevUrls) -> BannerSnapshot {
     let api = match urls.api.as_deref() {
-        Some(_) => Some(probe_api(client, urls).await),
+        Some(_) => Some(probe_erno(client, urls.api_readiness(), urls.api_liveness()).await),
         None => None,
     };
     let app = match urls.app.as_deref() {
@@ -364,6 +421,25 @@ async fn probe_all(client: &Client, urls: &DevUrls) -> BannerSnapshot {
         Some(url) => Some(probe_http(client, &url).await),
         None => None,
     };
+    let monitoring = match urls.monitoring.as_deref() {
+        Some(_) => Some(
+            probe_erno(
+                client,
+                urls.monitoring_readiness(),
+                urls.monitoring_liveness(),
+            )
+            .await,
+        ),
+        None => None,
+    };
+    let console = match urls.console.as_deref() {
+        Some(url) => Some(probe_http(client, url).await),
+        None => None,
+    };
+    let admin = match urls.admin.as_deref() {
+        Some(url) => Some(probe_http(client, url).await),
+        None => None,
+    };
     let mut extra = Vec::with_capacity(urls.extra.len());
     for (_, url) in &urls.extra {
         extra.push(probe_http(client, url).await);
@@ -373,17 +449,29 @@ async fn probe_all(client: &Client, urls: &DevUrls) -> BannerSnapshot {
         app,
         www,
         prometheus,
+        monitoring,
+        console,
+        admin,
         extra,
     }
 }
 
-async fn probe_api(client: &Client, urls: &DevUrls) -> ServiceState {
-    let Some(readiness) = urls.api_readiness() else {
+/// Probe an Erno service, which serves both `/readiness` and `/liveness`.
+///
+/// The two endpoints together distinguish "not up yet" from "up but still
+/// migrating", which is why this is not just [`probe_http`]. Both the api and
+/// the monitoring collector are Erno apps, so both go through here.
+async fn probe_erno(
+    client: &Client,
+    readiness: Option<String>,
+    liveness: Option<String>,
+) -> ServiceState {
+    let Some(readiness) = readiness else {
         return ServiceState::Starting;
     };
     if is_up(client, &readiness).await {
         ServiceState::Ready
-    } else if let Some(liveness) = urls.api_liveness() {
+    } else if let Some(liveness) = liveness {
         if is_up(client, &liveness).await {
             ServiceState::Migrating
         } else {
@@ -413,6 +501,25 @@ async fn is_up(client: &Client, url: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// The full treatment: colour and icons.
+    const FANCY: ui::Face = ui::Face {
+        color: true,
+        emoji: true,
+    };
+
+    fn snapshot(state: ServiceState, urls: &DevUrls) -> BannerSnapshot {
+        BannerSnapshot {
+            api: urls.api.as_ref().map(|_| state),
+            app: urls.app.as_ref().map(|_| state),
+            www: urls.www.as_ref().map(|_| state),
+            prometheus: urls.prometheus.as_ref().map(|_| state),
+            monitoring: urls.monitoring.as_ref().map(|_| state),
+            console: urls.console.as_ref().map(|_| state),
+            admin: urls.admin.as_ref().map(|_| state),
+            extra: urls.extra.iter().map(|_| state).collect(),
+        }
+    }
+
     #[test]
     fn banner_includes_urls_and_states() {
         let urls = DevUrls::defaults(true, true, true);
@@ -421,18 +528,48 @@ mod tests {
             app: Some(ServiceState::Starting),
             www: Some(ServiceState::Ready),
             prometheus: Some(ServiceState::Ready),
+            monitoring: Some(ServiceState::Ready),
+            console: Some(ServiceState::Ready),
+            admin: Some(ServiceState::Ready),
             extra: vec![],
         };
-        let text = render_banner(&urls, &snap);
+        let text = render_banner_when(ui::Face::PLAIN, &urls, &snap);
         assert!(text.contains("http://localhost:3000"));
         assert!(text.contains("http://localhost:4200"));
         assert!(text.contains("http://localhost:4321"));
         assert!(text.contains("http://localhost:9090"));
+        assert!(text.contains("http://localhost:4300"));
         assert!(text.contains("ready"));
         assert!(text.contains("starting"));
-        assert!(text.contains("http://localhost:4300"));
-        assert!(text.contains("/dev/emails"));
-        assert!(text.contains("/dev/jobs"));
+    }
+
+    #[test]
+    fn the_banner_is_services_only() {
+        // `mail` and `jobs` were three rows of a pinned region spent on two
+        // URLs that never changed. Every row here is a service with a state.
+        let urls = DevUrls::defaults(true, true, true);
+        let text = render_banner_when(ui::Face::PLAIN, &urls, &starting_snapshot(&urls));
+        assert!(!text.contains("/dev/emails"));
+        assert!(!text.contains("/dev/jobs"));
+        // And no blank line wedged into the middle of the list.
+        let body: Vec<&str> = text.trim_matches('\n').lines().collect();
+        assert!(
+            body.iter().all(|l| !l.trim().is_empty()),
+            "the banner has a gap in it:\n{text}"
+        );
+    }
+
+    #[test]
+    fn no_banner_row_ends_in_whitespace() {
+        // Trailing spaces would be invisible here and load-bearing there: they
+        // count against the pinned region's width budget on every redraw.
+        let urls = DevUrls::defaults(true, true, true);
+        let snap = snapshot(ServiceState::Ready, &urls);
+        for face in [ui::Face::PLAIN, FANCY] {
+            for line in render_banner_when(face, &urls, &snap).lines() {
+                assert_eq!(line, line.trim_end(), "trailing whitespace: {line:?}");
+            }
+        }
     }
 
     #[test]
@@ -443,9 +580,12 @@ mod tests {
             app: Some(ServiceState::Starting),
             www: None,
             prometheus: Some(ServiceState::Starting),
+            monitoring: Some(ServiceState::Migrating),
+            console: None,
+            admin: None,
             extra: vec![],
         };
-        let text = render_banner(&urls, &snap);
+        let text = render_banner_when(ui::Face::PLAIN, &urls, &snap);
         assert!(text.contains("migrating"));
         assert!(!text.contains("www"));
     }
@@ -454,26 +594,51 @@ mod tests {
     fn banner_omits_www_when_absent() {
         let urls = DevUrls::defaults(true, true, false);
         let snap = starting_snapshot(&urls);
-        let text = render_banner(&urls, &snap);
+        let text = render_banner_when(ui::Face::PLAIN, &urls, &snap);
         assert!(!text.contains("www"));
         assert!(text.contains("api"));
         assert!(urls.www.is_none());
     }
 
     #[test]
-    fn hidden_surfaces_use_api_origin() {
-        let mut urls = DevUrls::defaults(true, false, false);
-        urls.api = Some("http://localhost:3010/".to_string());
-        let text = render_banner_when(false, &urls, &starting_snapshot(&urls));
-        assert!(text.contains("http://localhost:3010/dev/emails"));
-        assert!(text.contains("http://localhost:3010/dev/jobs"));
-        assert!(text.contains("password: admin"));
+    fn admin_is_a_service_row_with_a_state_and_its_password() {
+        let urls = DevUrls::defaults(true, false, false);
+        let text = render_banner_when(ui::Face::PLAIN, &urls, &starting_snapshot(&urls));
+        let row = text
+            .lines()
+            .find(|l| l.contains(super::super::ADMIN_URL))
+            .expect("an admin row");
+        assert!(row.contains("starting"));
+        assert!(row.contains("password: admin"));
+
+        // And it flips like any other service.
+        let ready = render_banner_when(
+            ui::Face::PLAIN,
+            &urls,
+            &snapshot(ServiceState::Ready, &urls),
+        );
+        assert!(ready
+            .lines()
+            .any(|l| l.contains(super::super::ADMIN_URL) && l.contains("ready")));
+    }
+
+    #[test]
+    fn a_service_without_a_url_has_no_row() {
+        let mut urls = DevUrls::defaults(true, true, true);
+        urls.admin = None;
+        // The monitoring console's note also reads "password: admin", so this
+        // has to drop both to say anything about the word.
+        urls.console = None;
+        let text = render_banner_when(ui::Face::PLAIN, &urls, &starting_snapshot(&urls));
+        assert!(!text.contains(super::super::ADMIN_URL));
+        assert!(!text.contains("admin"));
+        assert!(!text.contains("password"));
     }
 
     #[test]
     fn banner_has_no_escapes_when_colour_is_off() {
         let urls = DevUrls::defaults(true, true, true);
-        let text = render_banner_when(false, &urls, &starting_snapshot(&urls));
+        let text = render_banner_when(ui::Face::PLAIN, &urls, &starting_snapshot(&urls));
         assert!(!text.contains('\u{1b}'));
     }
 
@@ -487,28 +652,36 @@ mod tests {
             app: Some(ServiceState::Starting),
             www: Some(ServiceState::Ready),
             prometheus: Some(ServiceState::Ready),
+            monitoring: Some(ServiceState::Ready),
+            console: Some(ServiceState::Ready),
+            admin: Some(ServiceState::Migrating),
             extra: vec![],
         };
-        let text = render_banner_when(false, &urls, &snap);
-
-        let offsets: Vec<usize> = text
-            .lines()
-            .filter_map(|l| l.find("ready").or_else(|| l.find("starting")))
-            .collect();
-        assert!(
-            offsets.len() >= 4,
-            "expected a state word on every service row"
-        );
-        assert!(
-            offsets.windows(2).all(|w| w[0] == w[1]),
-            "state column ragged: {offsets:?}\n{text}"
-        );
+        for face in [ui::Face::PLAIN, FANCY] {
+            let text = render_banner_when(face, &urls, &snap);
+            // Measured in screen columns, because under FANCY the rows carry
+            // two-column icons that a byte or `char` offset would misjudge.
+            let offsets: Vec<usize> = text
+                .lines()
+                .filter_map(|l| {
+                    ["ready", "starting", "migrating"]
+                        .iter()
+                        .find_map(|w| l.find(w))
+                        .map(|byte| ui::display_width(&l[..byte]))
+                })
+                .collect();
+            assert_eq!(offsets.len(), 7, "expected a state on every row:\n{text}");
+            assert!(
+                offsets.windows(2).all(|w| w[0] == w[1]),
+                "state column ragged: {offsets:?}\n{text}"
+            );
+        }
     }
 
     #[test]
     fn banner_omits_unselected_services() {
         let urls = DevUrls::defaults(true, false, false);
-        let text = render_banner(&urls, &starting_snapshot(&urls));
+        let text = render_banner_when(ui::Face::PLAIN, &urls, &starting_snapshot(&urls));
         assert!(text.contains("api"));
         assert!(text.contains("prom"));
         assert!(text.contains("http://localhost:9090"));
@@ -520,8 +693,8 @@ mod tests {
     fn region_lines_are_the_banner_without_the_trailing_blank() {
         let urls = DevUrls::defaults(true, true, true);
         let snap = starting_snapshot(&urls);
-        let lines = region_lines(false, &urls, &snap);
-        let text = render_banner_when(false, &urls, &snap);
+        let lines = region_lines(ui::Face::PLAIN, &urls, &snap);
+        let text = render_banner_when(ui::Face::PLAIN, &urls, &snap);
 
         assert_eq!(lines.first().map(String::as_str), Some(""));
         assert!(!lines.last().unwrap().trim().is_empty());
@@ -536,15 +709,18 @@ mod tests {
         // A region that grew or shrank between redraws would leave the
         // cursor-up count wrong and eat a row of log output.
         let urls = DevUrls::defaults(true, true, true);
-        let starting = region_lines(false, &urls, &starting_snapshot(&urls));
+        let starting = region_lines(ui::Face::PLAIN, &urls, &starting_snapshot(&urls));
         let ready = region_lines(
-            false,
+            ui::Face::PLAIN,
             &urls,
             &BannerSnapshot {
                 api: Some(ServiceState::Ready),
                 app: Some(ServiceState::Ready),
                 www: Some(ServiceState::Migrating),
                 prometheus: Some(ServiceState::Ready),
+                monitoring: Some(ServiceState::Ready),
+                console: Some(ServiceState::Ready),
+                admin: Some(ServiceState::Ready),
                 extra: vec![],
             },
         );
@@ -567,8 +743,8 @@ mod tests {
                 state: ServiceState::Ready,
             }]
         );
-        let text = render_transitions(false, &changes, &[]);
-        assert_eq!(text, "  ok    api   ready\n");
+        let text = render_transitions(ui::Face::PLAIN, &changes, &[]);
+        assert_eq!(text, "  ok    api      ready\n");
     }
 
     #[test]
@@ -576,7 +752,7 @@ mod tests {
         let urls = DevUrls::defaults(true, true, true);
         let snap = starting_snapshot(&urls);
         assert!(transitions(&urls, &snap, &snap).is_empty());
-        assert_eq!(render_transitions(false, &[], &[]), "");
+        assert_eq!(render_transitions(ui::Face::PLAIN, &[], &[]), "");
     }
 
     #[test]
@@ -587,14 +763,21 @@ mod tests {
             app: None,
             www: None,
             prometheus: Some(ServiceState::Ready),
+            monitoring: Some(ServiceState::Ready),
+            console: None,
+            admin: None,
             extra: vec![],
         };
         let restarting = BannerSnapshot {
             api: Some(ServiceState::Starting),
             ..ready.clone()
         };
-        let text = render_transitions(false, &transitions(&urls, &ready, &restarting), &[]);
-        assert_eq!(text, "        api   starting\n");
+        let text = render_transitions(
+            ui::Face::PLAIN,
+            &transitions(&urls, &ready, &restarting),
+            &[],
+        );
+        assert_eq!(text, "        api      starting\n");
         assert!(urls.api.is_some());
     }
 
@@ -602,22 +785,16 @@ mod tests {
     fn transition_rows_share_one_state_column() {
         let urls = DevUrls::defaults(true, true, true);
         let before = starting_snapshot(&urls);
-        let after = BannerSnapshot {
-            api: Some(ServiceState::Ready),
-            app: Some(ServiceState::Ready),
-            www: Some(ServiceState::Ready),
-            prometheus: Some(ServiceState::Ready),
-            extra: vec![],
-        };
-        let text = render_transitions(false, &transitions(&urls, &before, &after), &[]);
+        let after = snapshot(ServiceState::Ready, &urls);
+        let text = render_transitions(ui::Face::PLAIN, &transitions(&urls, &before, &after), &[]);
         let offsets: Vec<usize> = text.lines().filter_map(|l| l.find("ready")).collect();
-        assert_eq!(offsets.len(), 4);
+        assert_eq!(offsets.len(), 7);
         assert!(
             offsets.windows(2).all(|w| w[0] == w[1]),
             "state column ragged: {offsets:?}\n{text}"
         );
-        // `prom` is the widest name, so every row is padded to it.
-        assert!(text.contains("prom  ready"));
+        // `console` is the widest name, so every row is padded to it.
+        assert!(text.contains("console  ready"));
     }
 
     #[test]
@@ -629,11 +806,15 @@ mod tests {
             app: Some(ServiceState::Ready),
             ..before.clone()
         };
-        let text = render_transitions(false, &transitions(&urls, &before, &after), &[]);
+        let text = render_transitions(ui::Face::PLAIN, &transitions(&urls, &before, &after), &[]);
         assert!(!text.contains('\u{1b}'));
+        let coloured = ui::Face {
+            color: true,
+            emoji: false,
+        };
         assert_eq!(
             ui::strip_ansi(&render_transitions(
-                true,
+                coloured,
                 &transitions(&urls, &before, &after),
                 &[]
             )),
@@ -645,30 +826,30 @@ mod tests {
     fn banner_omits_prometheus_when_disabled() {
         let mut urls = DevUrls::defaults(true, false, false);
         urls.prometheus = None;
-        let text = render_banner(&urls, &starting_snapshot(&urls));
+        let text = render_banner_when(ui::Face::PLAIN, &urls, &starting_snapshot(&urls));
         assert!(text.contains("api"));
         assert!(!text.contains("prom"));
         assert!(!text.contains("9090"));
     }
 
     #[test]
-    fn extra_service_row_follows_prom() {
+    fn extra_service_row_follows_admin() {
         let mut urls = DevUrls::defaults(true, false, false);
         urls.extra.push((
             "vision".into(),
             "http://localhost:8765/tools/solve_studio/".into(),
         ));
-        let text = render_banner_when(false, &urls, &starting_snapshot(&urls));
-        let prom = text.find("prom").expect("prom row");
+        let text = render_banner_when(ui::Face::PLAIN, &urls, &starting_snapshot(&urls));
+        let admin = text.find("admin").expect("admin row");
         let vision = text.find("vision").expect("vision row");
-        assert!(vision > prom, "{text}");
+        assert!(vision > admin, "{text}");
         assert!(text.contains("http://localhost:8765/tools/solve_studio/"));
     }
 
     #[test]
     fn extra_service_row_is_omitted_when_empty() {
         let urls = DevUrls::defaults(true, false, false);
-        let text = render_banner(&urls, &starting_snapshot(&urls));
+        let text = render_banner_when(ui::Face::PLAIN, &urls, &starting_snapshot(&urls));
         assert!(!text.contains("vision"));
         assert!(!text.contains("8765"));
     }
@@ -678,10 +859,10 @@ mod tests {
         let mut urls = DevUrls::defaults(true, false, false);
         urls.extra
             .push(("vision".into(), "http://localhost:8765/".into()));
-        let starting = region_lines(false, &urls, &starting_snapshot(&urls));
+        let starting = region_lines(ui::Face::PLAIN, &urls, &starting_snapshot(&urls));
         let mut ready = starting_snapshot(&urls);
         ready.extra = vec![ServiceState::Ready];
-        let ready_lines = region_lines(false, &urls, &ready);
+        let ready_lines = region_lines(ui::Face::PLAIN, &urls, &ready);
         assert_eq!(starting.len(), ready_lines.len());
     }
 
@@ -702,7 +883,7 @@ mod tests {
             }]
         );
         let names = ["vision"];
-        let text = render_transitions(false, &changes, &names);
+        let text = render_transitions(ui::Face::PLAIN, &changes, &names);
         assert!(text.contains("vision"));
         assert!(text.contains("ready"));
     }

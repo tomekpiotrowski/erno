@@ -134,11 +134,16 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
     // hooks can be armed immediately: a panic during the rest of boot is
     // exactly the kind of failure worth catching.
     let error_reporting = Arc::new(config.error_reporting.clone());
-    let error_reporter = crate::error_reporting::reporter::ErrorReporter::start(
-        &error_reporting,
-        app_info,
-        environment,
-    );
+    // Installed before anything long-running starts, so a signal arriving
+    // during boot is not missed.
+    let (shutdown_signal, shutdown) = crate::shutdown::listen();
+    let (error_reporter, reporter_task) =
+        crate::error_reporting::reporter::ErrorReporter::start_with_shutdown(
+            &error_reporting,
+            app_info,
+            environment,
+            shutdown.clone(),
+        );
     if error_reporter.is_active() {
         crate::error_reporting::reporter::capture::install(
             error_reporter.clone(),
@@ -193,12 +198,14 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
         error_reporter,
     };
 
-    // Spawn workers in the background
-    tokio::spawn(job_supervisor(
+    // Spawn workers in the background. The handle is retained: this is the one
+    // task whose abrupt death corrupts state, by leaving job rows in `running`.
+    let jobs_task = tokio::spawn(job_supervisor(
         config.jobs,
         app.clone(),
         job_registry,
         job_schedule,
+        shutdown.clone(),
     ));
 
     // Spawn WebSocket listener in the background
@@ -236,8 +243,34 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
     let _ = liveness_server_task.await;
 
     // Start the full server
-    let router = router(app, app_router);
-    start_server(router, port).await;
+    let router = router(app.clone(), app_router);
+    start_server(router, port, shutdown).await;
+
+    // Past this point the listener is closed and in-flight requests have
+    // finished. Now let the parts that hold state finish tidying up.
+    shutdown_signal.trigger();
+
+    // Workers first: a job left in `running` is invisible until the stuck-job
+    // sweeper reclaims it, which is the only shutdown failure that outlives the
+    // process.
+    match tokio::time::timeout(crate::shutdown::DRAIN_TIMEOUT, jobs_task).await {
+        Ok(_) => info!("✅ Job workers stopped cleanly"),
+        Err(_) => tracing::warn!(
+            "Job workers did not stop within the drain timeout; \
+             any job still running will be reclaimed by the stuck-job sweeper"
+        ),
+    }
+
+    // Then the error reporter, so the errors that caused the shutdown are
+    // actually reported rather than dying with the buffer.
+    if let Some(task) = reporter_task {
+        match tokio::time::timeout(Duration::from_secs(5), task).await {
+            Ok(_) => info!("✅ Error reports flushed"),
+            Err(_) => tracing::warn!("Error reporter did not flush in time; reports were dropped"),
+        }
+    }
+
+    info!("👋 Shutdown complete");
 }
 
 // Minimal server that only serves liveness endpoint during migrations
@@ -250,7 +283,7 @@ async fn start_liveness_server(port: u16) {
 }
 
 // Full server with all endpoints
-async fn start_server(router: Router, port: u16) {
+async fn start_server(router: Router, port: u16, mut shutdown: crate::shutdown::Shutdown) {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = TcpListener::bind(addr).await.unwrap();
 
@@ -259,6 +292,13 @@ async fn start_server(router: Router, port: u16) {
         listener,
         router.into_make_service_with_connect_info::<SocketAddr>(),
     )
+    // Stops accepting connections on SIGTERM and waits for in-flight requests.
+    // Bounded, because a long-poll or a websocket would otherwise hold the pod
+    // open until Kubernetes loses patience and SIGKILLs it mid-drain.
+    .with_graceful_shutdown(async move {
+        shutdown.recv().await;
+        info!("🚪 No longer accepting connections; finishing in-flight requests");
+    })
     .await
     .unwrap();
 }

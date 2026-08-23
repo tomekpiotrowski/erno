@@ -51,7 +51,7 @@ impl CheckResult {
 pub async fn handle_doctor() -> ui::Cmd {
     let results = run_checks().await;
 
-    ui::section("Environment");
+    ui::section(ui::icon::DOCTOR, "Environment");
     ui::blank();
     let rows: Vec<Row> = results.iter().map(|r| r.row.clone()).collect();
     ui::print_rows(&rows);
@@ -65,8 +65,14 @@ pub async fn handle_doctor() -> ui::Cmd {
              Fix the issues above and run `erno doctor` again."
         )));
     }
-    ui::blank();
-    ui::ok("All required checks passed.");
+    // `doctor`'s result is its exit code, which is what makes `erno doctor -q`
+    // usable as a check in a script: a healthy environment says nothing at all.
+    // Every other command's result is a line, so `ui::finished` survives
+    // `--quiet` and this is the one caller that opts out.
+    if !ui::quiet() {
+        ui::blank();
+        ui::finished(ui::icon::DONE, "Everything checks out.");
+    }
     Ok(())
 }
 

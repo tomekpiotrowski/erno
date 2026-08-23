@@ -19,9 +19,10 @@ cargo install --path .                   # install globally as `erno`
 | `erno new <name>` | Scaffolds a full-stack Erno project (Rust API + Ionic Angular standalone app + Astro www) |
 | `erno upgrade` | Inventories Erno-managed packages and runs official migrators (`ng update`, `@ionic/migrate`) toward this CLI generation |
 | `erno dev` | Starts api + app + www dev servers, readiness banner, `--ios`/`--android` live reload (`--target <id>` picks the device) |
-| `erno dev` | Also starts Prometheus (if installed) and `admin/` on :4300; `--package` / `--all` add `[[package.dev]]` extras |
+| `erno dev` | Also starts Prometheus (if installed), `admin/` on :4300, and — when `monitoring/` is present — the collector on :3001 and its console on :4400 (`--no-monitoring` to skip); `--package` / `--all` add `[[package.dev]]` extras; every banner row is probed |
 | `erno deploy init` | Scaffolds Docker/Helm deploy files; generates admin password hash for production |
 | `erno deploy install` | Installs a chart version to the cluster (`helm secrets upgrade --install`) |
+| `erno deploy … --target monitoring` | Acts on the monitoring deployment instead: its own chart, release and kubeconfig context |
 | `erno build` | Builds every package declared in `erno.toml`, in declaration order |
 | `erno lint` | Format-checks, lints, and typechecks every package; `--fix` applies fixes |
 | `erno test` | Runs each package's test steps, then Playwright e2e |
@@ -65,7 +66,23 @@ dir  = "puzzles"
 | `fix` | Lint only: the argument vector substituted under `--fix`. A step without `fix` runs its check form unchanged. |
 | `default` | `false` makes the step itself opt-in — used for slow guards and optional bundles. |
 
-Unknown keys are rejected, so typos fail loudly. When `erno.toml` is absent the CLI falls back to the conventional layout (`api/Cargo.toml`, `app/package.json`, `e2e/playwright.config.ts`), so a freshly scaffolded project needs no manifest.
+Unknown keys are rejected, so typos fail loudly. When `erno.toml` is absent the CLI falls back to the conventional layout, so a freshly scaffolded project needs no manifest. Each package is gated on its own marker file, and each npm step on the script actually existing:
+
+| Package | Dir | Marker | Database |
+|---------|-----|--------|----------|
+| `api` | `api` | `Cargo.toml` | yes |
+| `monitoring` | `monitoring` | `Cargo.toml` | yes — its own `config/test.toml` |
+| `app` | `app` | `package.json` | no |
+| `www` | `www` | `package.json` | no |
+| `admin` | `admin` | `package.json` | no |
+| `console` | `monitoring/ui` | `package.json` | no |
+| `e2e` | (playwright dir) | `playwright.config.ts` | yes — the api's |
+
+`database` is per package: `erno test` creates each one's database from
+`{dir}/config/test.toml`, falling back to the api's for packages without their
+own. The collector and the console are separate packages because a package runs
+its steps in one directory, and npm-in-`monitoring/ui` cannot share one with
+cargo-in-`monitoring`.
 
 ### `erno new` options
 
@@ -125,21 +142,29 @@ ALTER USER erno CREATEDB;
 
 ### The visual language
 
+Two faces, one geometry. `ui::Face { color, emoji }` carries both decisions and every `render_*` takes one; `Face::current()` is what the printing wrappers pass, `Face::PLAIN` is what the tests pass.
+
 ```text
-==> Section header              column 0, `==>` blue+bold, title bold
-  ok    a row                   column 2, marker green
-  warn  another row             marker yellow
-  fail  a third row             marker red
-        a continuation line     column 8, dim
-error: something went wrong     column 0, `error:` red+bold
-[api] a forwarded child line    `[api]` in the service colour, text verbatim
+ emoji face                      ascii face                      geometry
+
+🩺 Section header                ==> Section header              column 0, title bold
+  ✅    a row                      ok    a row                   column 2, marker green
+  ⚠️    another row                warn  another row             marker yellow
+  ❌    a third row                fail  a third row             marker red
+        a continuation line              a continuation line     column 8, dim
+❌ error: something went wrong    error: something went wrong     column 0, `error:` red+bold
+🎉 the command finished          done: the command finished      column 0, a command's result
+[api] a forwarded child line     [api] a forwarded child line    service colour, text verbatim
 ```
 
-- **Markers are ASCII words, never emoji.** `✅`/`❌` are East-Asian Wide (2 columns) while `⚠️`/`ℹ️` are 1 column plus a variation selector and render at 1 *or* 2 depending on terminal and font — no single pad count aligns them everywhere. Words are one column per character on every terminal, and they survive `--no-color` and piping.
-- **Colour is decoration only.** Nothing is communicated by colour alone.
-- **One indent rule**: rows at 2, their continuations at 8 (`ui::CONTINUATION`), section headers and fatal errors at 0. Nothing else has an indent. Pass multi-line text to `ui::detail` rather than hand-indenting with `\n      `.
-- **Column widths are computed** with `ui::column_width`, never hardcoded.
-- The exception is text the CLI only *forwards*: `dev/log.rs` matches on emoji emitted by the `api/` crate's own startup and migration output. That is not ours to restyle.
+- **The two faces share one geometry.** An icon is padded to the same marker width as the widest word, so row text is at column 8 either way. That holds only while **every icon is exactly two columns wide**, which is why the icons are a curated set in `ui::icon` (plus `ui::label_icon` for services) and why `every_icon_is_two_columns_wide` measures each one. Adding an icon means adding it to `icon::ALL`.
+- **Pick glyphs with `Emoji_Presentation=Yes`** — wide on their own, no variation selector needed. `⚠️` is the one exception the set makes (no wide synonym reads as "warning"), and `ui::display_width` handles it by treating anything followed by U+FE0F as two columns. `⚙️`/`🛠️`/`ℹ️` are *not* in the set for exactly this reason; `🦀` and `🧰` stand in for api and admin.
+- **The ASCII face is the fallback, and it is load-bearing.** It engages under `--no-emoji`, `ERNO_EMOJI=0`, and anywhere colour is already off — pipes, redirects, CI, `NO_COLOR`, a terminal without ANSI. That is the same set of situations where a two-column glyph is a gamble, which is why `resolve_emoji` rides on the colour decision rather than repeating it.
+- **Colour and emoji are decoration only.** Nothing is communicated by either alone; the marker word and the state word are always in the text.
+- **One indent rule**: rows at 2, their continuations at 8 (`ui::CONTINUATION`), section headers, fatal errors, and result lines at 0. Nothing else has an indent. Pass multi-line text to `ui::detail` rather than hand-indenting with `\n      `, and a title plus commands to `ui::next_steps`.
+- **Widths are computed in screen columns** with `ui::column_width` / `ui::display_width`, never hardcoded and never with `chars().count()` — an icon costs one more column than its char count suggests, which is what would go ragged.
+- **A command ends with its result.** `ui::finished(icon, message)` is that line, and like the `run_phase` summary it survives `--quiet` because it is what the command was run to find out. `doctor` is the one caller that opts out, because its result is its exit code and `erno doctor -q` is meant to be silent on a healthy machine. Durations are formatted by `ui::fmt_duration`.
+- The exception to all of this is text the CLI only *forwards*: `dev/log.rs` matches on emoji emitted by the `api/` crate's own startup and migration output. That is not ours to restyle.
 
 ### stdout vs stderr
 
@@ -147,11 +172,11 @@ error: something went wrong     column 0, `error:` red+bold
 
 ### Global flags
 
-`--no-color`, `--quiet`/`-q`, and `--verbose`/`-v` are `global = true`, so they work on either side of the subcommand. `ui::init` resolves them once in `main` into module state; deep call sites read `ui::color()` / `ui::quiet()` / `ui::verbose()` rather than threading a context struct.
+`--no-color`, `--no-emoji`, `--quiet`/`-q`, and `--verbose`/`-v` are `global = true`, so they work on either side of the subcommand. `ui::init` resolves them once in `main` into module state; deep call sites read `ui::color()` / `ui::emoji()` / `ui::quiet()` / `ui::verbose()` — or `ui::Face::current()` — rather than threading a context struct.
 
-Colour resolution order: `--no-color`, then `NO_COLOR`, then `CLICOLOR_FORCE`, then "is stderr a TTY that understands ANSI".
+Colour resolution order: `--no-color`, then `NO_COLOR`, then `CLICOLOR_FORCE`, then "is stderr a TTY that understands ANSI". Emoji resolution order: `--no-emoji`, then `ERNO_EMOJI=0`, then whatever colour resolved to.
 
-`--quiet` suppresses section headers, `ok`/`info` rows, and details. It never suppresses warnings, errors, forwarded child output, or a command's final result (the per-package `ok`/`fail` summary).
+`--quiet` suppresses section headers, `ok`/`info` rows, details, and next-steps blocks. It never suppresses warnings, errors, forwarded child output, a failing step's row, or a command's final result (the per-package summary and the `ui::finished` line).
 
 ### Errors and exit codes
 
@@ -161,7 +186,9 @@ Prefer returning `Failure` over exiting: it unwinds, so guards like `DevLock` st
 
 ### Testing output
 
-Everything visible is a pure `render_*(on: bool, …) -> String` with a thin printing wrapper. Test the pure half — that keeps tests free of global state and order-independent. `ui::init` is never called under `cargo test`, so colour defaults to off.
+Everything visible is a pure `render_*(face: Face, …) -> String` with a thin printing wrapper. Test the pure half — that keeps tests free of global state and order-independent. `ui::init` is never called under `cargo test`, so both flags default to off, and tests pass their face explicitly anyway (`Face::PLAIN` for the ASCII form, a locally-defined `FANCY` for the emoji one).
+
+Anything measured in columns must be asserted in columns: use `ui::display_width` on the prefix rather than a byte or `char` offset, or an emoji row will look aligned to the test and ragged on screen. `banner_columns_line_up` and `no_banner_row_ends_in_whitespace` are the examples.
 
 The pinned region follows the same rule: `render_frame`, `truncate_display`, `fit_region`, `region_fits`, and `strip_cursor_control` are pure and unit-tested; only `pin`/`repin`/`frame` touch the terminal. What is left — the `ioctl`, real cursor motion, and cross-task interleaving — has no pty harness in the tree and is verified by hand:
 
@@ -179,9 +206,11 @@ erno dev --no-color / -q / -v / ERNO_STICKY=0 / TERM=dumb   # fallback in all fi
 `erno dev` pins its status banner to the last rows of the terminal and redraws it in place as services become ready, with logs scrolling above it. This is the only cursor control in the CLI, it lives entirely in `ui.rs`, and it is stderr-only.
 
 - **`ui::pin(lines) -> Option<Pinned>`** starts it; `ui::repin(lines)` replaces the content; dropping the `Pinned` guard erases the region and leaves its final contents in the scrollback. The guard is modelled on `DevLock` — it is what makes an early `?` safe. `ui::fatal` also clears the region, which covers the paths that `exit` without unwinding.
+- **The banner is services only.** Every row is a service that was started, with a URL and a readiness state — `www`, `app`, `api`, `prom`, `admin`. The API's `/dev/emails` and `/dev/jobs` links used to sit below a blank line as stateless rows; they were three rows of a pinned region spent on two URLs that never change, and they are gone. `admin`'s URL is `dev::ADMIN_URL`, which has to agree with the `ng serve --port 4300` in `admin/package.json`, and it is resolved before the banner is pinned because the region's height cannot change afterwards.
 - **`None` means fall back**, and the fallback is the behaviour the CLI has always had: the banner printed once, then one `ok`/`info` row per state change. `dev/banner.rs` keeps both renderers, and `spawn_readiness_watcher` takes a `sticky` flag rather than reading a global. Transition rows are suppressed while the region is live — the region already shows every state, and printing both is the duplication this replaced.
 - **The predicate**: a unix terminal on stderr (`is_terminal` is checked separately from `color()`, because `CLICOLOR_FORCE` can make colour true for a file), ANSI enabled, not `--quiet`, not `--verbose` (that is the raw multiplex), `ERNO_STICKY != 0`, and `ui::region_fits` — the whole region fitting as it is, with rows to spare above it.
 - **The invariant**: the region occupies the last `drawn` rows and the cursor sits at column 0 below it, so every frame emits exactly `body + region` newlines. Terminal size comes from `TIOCGWINSZ` on each redraw (`SIGWINCH` is not handled); `ui::fit_region` and `ui::truncate_display` guarantee no region line wraps, because a wrapped region line would break the cursor-up count. Forwarded child text is passed through `ui::strip_cursor_control` while a region is live, so a tool drawing its own progress cannot dislodge it.
+- **The banner is the readiness report, so nothing else is.** `dev/log.rs` forwards a child line only when it is an error or a prompt; progress and "listening on …" chatter goes to `.erno/dev.log` and to `--verbose`. Every service in the banner is probed, so a forwarded readiness line would only repeat the row under it in the child's words.
 - **One output mutex** serialises every write on both streams, which is what makes erase → write → redraw atomic against `dev`'s ~19 printing tasks. Nothing holding that lock may call a `ui` function that takes it. Multi-line renders go out through `ui::emit_block` as one frame, so another task's `[api] …` can no longer land mid-banner.
 
 ### Deliberate non-goals

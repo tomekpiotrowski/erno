@@ -11,5 +11,10 @@
 #
 # The suite takes roughly forty seconds serially, which is a fair price for tests
 # that exercise the real sweeps rather than a scoped imitation of them.
+#
+# Cargo finds this file by walking up from the working directory, so it applies
+# to `cd monitoring && cargo test` and NOT to `cargo test --workspace` from the
+# repo root. `require_single_test_thread` in the suite itself covers that gap:
+# it panics with an explanation rather than letting the deadlocks happen.
 [env]
 RUST_TEST_THREADS = "1"

@@ -14,7 +14,7 @@ use erno::{
     boot::BootConfig,
     error_reporting::collector::collector_router,
     jobs::job_registry::JobRegistry,
-    tests::{no_fixtures, setup_test, TestUtils},
+    tests::{no_fixtures, require_single_test_thread, setup_test, TestUtils},
 };
 use sea_orm::{ConnectionTrait, DbBackend, EntityTrait, Statement};
 use serde_json::{json, Value};
@@ -46,8 +46,49 @@ fn boot(router: fn(App<MonitorConfig>) -> Router) -> BootConfig<MonitorConfig> {
     )
 }
 
+/// Every test in this suite boots through here, so the single-thread guard
+/// cannot be skipped by adding a test that mounts its own router.
+///
+/// See [`require_single_test_thread`]: this suite issues table-wide statements
+/// that deadlock against other tests' uncommitted rows when run in parallel.
+async fn setup_with(router: fn(App<MonitorConfig>) -> Router) -> TestUtils {
+    require_single_test_thread("erno-monitoring");
+    setup_test::<MonitorMigrator, MonitorConfig>(boot(router), no_fixtures).await
+}
+
 async fn setup() -> TestUtils {
-    setup_test::<MonitorMigrator, MonitorConfig>(boot(collector_test_router), no_fixtures).await
+    setup_with(collector_test_router).await
+}
+
+/// Named so the failure is greppable, and so the constraint is stated as a test
+/// rather than only as a comment in .cargo/config.toml.
+#[test]
+fn the_monitoring_suite_must_run_single_threaded() {
+    require_single_test_thread("erno-monitoring");
+}
+
+/// Evaluate a rule the way the runner does.
+///
+/// The PromQL source is left unconfigured: these tests exercise the database
+/// sources, and a rule that queried a Prometheus that is not running would be
+/// testing the unavailable path by accident.
+async fn observe_rule(
+    t: &TestUtils,
+    rule: &erno::error_reporting::collector::models::alert_rule::Model,
+) -> Result<erno::error_reporting::collector::alerting::evaluator::Observation, sea_orm::DbErr> {
+    use erno::error_reporting::collector::alerting::evaluator::{observe, ObserveContext};
+    let http = reqwest::Client::new();
+    let thresholds = erno::health::HealthThresholds::default();
+    observe(
+        &ObserveContext {
+            db: &t.db,
+            thresholds: &thresholds,
+            http: &http,
+            prometheus_url: None,
+        },
+        rule,
+    )
+    .await
 }
 
 /// One scalar from the test's own transaction.
@@ -394,9 +435,7 @@ async fn an_ignored_issue_stays_ignored_when_it_recurs() {
 
 #[tokio::test]
 async fn a_disabled_collector_mounts_no_routes() {
-    let t =
-        setup_test::<MonitorMigrator, MonitorConfig>(boot(disabled_collector_router), no_fixtures)
-            .await;
+    let t = setup_with(disabled_collector_router).await;
 
     let response = t
         .server
@@ -429,7 +468,7 @@ const ISSUES: &str = "/api/collector/issues";
 const OPERATOR: &str = "Basic YWRtaW46YWRtaW4=";
 
 async fn seed(t: &TestUtils, error_type: &str, message: &str) {
-    post_browser(&t, &envelope(vec![event(error_type, message)])).await;
+    post_browser(t, &envelope(vec![event(error_type, message)])).await;
 }
 
 async fn first_issue_id(t: &TestUtils) -> String {
@@ -1325,7 +1364,7 @@ async fn deleting_a_check_removes_its_results() {
 
     t.db.execute(Statement::from_string(
         DbBackend::Postgres,
-        &format!(
+        format!(
             "INSERT INTO uptime_result (id, check_id, ok, duration_ms, checked_at)
              VALUES (gen_random_uuid(), '{id}', true, 12, (now() AT TIME ZONE 'utc'))"
         ),
@@ -1365,7 +1404,7 @@ async fn uptime_ratio_and_percentiles_come_from_recorded_probes() {
         let ok = i >= 2;
         t.db.execute(Statement::from_string(
             DbBackend::Postgres,
-            &format!(
+            format!(
                 "INSERT INTO uptime_result (id, check_id, ok, duration_ms, checked_at)
                  VALUES (gen_random_uuid(), '{id}', {ok}, {}, (now() AT TIME ZONE 'utc'))",
                 (i + 1) * 10
@@ -1520,7 +1559,7 @@ async fn old_probe_results_are_pruned() {
 
     t.db.execute(Statement::from_string(
         DbBackend::Postgres,
-        &format!(
+        format!(
             "INSERT INTO uptime_result (id, check_id, ok, duration_ms, checked_at)
              VALUES (gen_random_uuid(), '{id}', true, 10, (now() AT TIME ZONE 'utc') - interval '30 days')"
         ),
@@ -1648,7 +1687,7 @@ async fn component_uptime_history_comes_from_probe_results() {
     for (days_ago, ok) in [(2, true), (2, true), (1, true), (1, false)] {
         t.db.execute(Statement::from_string(
             DbBackend::Postgres,
-            &format!(
+            format!(
                 "INSERT INTO uptime_result (id, check_id, ok, duration_ms, checked_at)
                  VALUES (gen_random_uuid(), '{check_id}', {ok}, 10,
                          (now() AT TIME ZONE 'utc') - interval '{days_ago} days')"
@@ -1893,8 +1932,7 @@ async fn a_rule_needs_a_name() {
 /// The alert Alertmanager structurally cannot express.
 #[tokio::test]
 async fn an_errors_rule_fires_on_new_issue_types() {
-    use erno::error_reporting::collector::alerting::{evaluator, service};
-    use erno::health::HealthThresholds;
+    use erno::error_reporting::collector::alerting::service;
 
     let t = setup().await;
     create_rule(
@@ -1911,25 +1949,20 @@ async fn an_errors_rule_fires_on_new_issue_types() {
 
     let rule = service::enabled(&t.db).await.expect("rules").remove(0);
 
-    let quiet = evaluator::observe(&t.db, &rule, &HealthThresholds::default())
-        .await
-        .expect("observe");
+    let quiet = observe_rule(&t, &rule).await.expect("observe");
     assert_eq!(quiet.value, 0.0);
 
     post_browser(&t, &envelope(vec![event("TypeError", "boom")])).await;
     post_browser(&t, &envelope(vec![event("RangeError", "out of bounds")])).await;
 
-    let noisy = evaluator::observe(&t.db, &rule, &HealthThresholds::default())
-        .await
-        .expect("observe");
+    let noisy = observe_rule(&t, &rule).await.expect("observe");
     assert_eq!(noisy.value, 2.0);
     assert!(noisy.description.contains("new error type"));
 }
 
 #[tokio::test]
 async fn an_errors_rule_can_count_event_volume_by_source() {
-    use erno::error_reporting::collector::alerting::{evaluator, service};
-    use erno::health::HealthThresholds;
+    use erno::error_reporting::collector::alerting::service;
 
     let t = setup().await;
     create_rule(
@@ -1952,17 +1985,14 @@ async fn an_errors_rule_can_count_event_volume_by_source() {
         .await;
 
     let rule = service::enabled(&t.db).await.expect("rules").remove(0);
-    let observed = evaluator::observe(&t.db, &rule, &HealthThresholds::default())
-        .await
-        .expect("observe");
+    let observed = observe_rule(&t, &rule).await.expect("observe");
 
     assert_eq!(observed.value, 1.0, "only the app-sourced event counts");
 }
 
 #[tokio::test]
 async fn an_uptime_rule_counts_checks_that_are_down() {
-    use erno::error_reporting::collector::alerting::{evaluator, service};
-    use erno::health::HealthThresholds;
+    use erno::error_reporting::collector::alerting::service;
 
     let t = setup().await;
     create_check(&t, "API", "https://api.example.com/liveness").await;
@@ -1973,13 +2003,7 @@ async fn an_uptime_rule_counts_checks_that_are_down() {
     .await;
 
     let rule = service::enabled(&t.db).await.expect("rules").remove(0);
-    assert_eq!(
-        evaluator::observe(&t.db, &rule, &HealthThresholds::default())
-            .await
-            .expect("observe")
-            .value,
-        0.0
-    );
+    assert_eq!(observe_rule(&t, &rule).await.expect("observe").value, 0.0);
 
     t.db.execute(Statement::from_string(
         DbBackend::Postgres,
@@ -1988,19 +2012,12 @@ async fn an_uptime_rule_counts_checks_that_are_down() {
     .await
     .expect("mark down");
 
-    assert_eq!(
-        evaluator::observe(&t.db, &rule, &HealthThresholds::default())
-            .await
-            .expect("observe")
-            .value,
-        1.0
-    );
+    assert_eq!(observe_rule(&t, &rule).await.expect("observe").value, 1.0);
 }
 
 #[tokio::test]
 async fn a_subsystem_rule_counts_unhealthy_instances() {
-    use erno::error_reporting::collector::alerting::{evaluator, service};
-    use erno::health::HealthThresholds;
+    use erno::error_reporting::collector::alerting::service;
 
     let t = setup().await;
     create_rule(
@@ -2011,31 +2028,18 @@ async fn a_subsystem_rule_counts_unhealthy_instances() {
     let rule = service::enabled(&t.db).await.expect("rules").remove(0);
 
     post_health(&t, &health_snapshot("api-0")).await;
-    assert_eq!(
-        evaluator::observe(&t.db, &rule, &HealthThresholds::default())
-            .await
-            .expect("observe")
-            .value,
-        0.0
-    );
+    assert_eq!(observe_rule(&t, &rule).await.expect("observe").value, 0.0);
 
     let mut broken = health_snapshot("api-1");
     broken["jobs"]["stuck_running"] = json!(3);
     post_health(&t, &broken).await;
 
-    assert_eq!(
-        evaluator::observe(&t.db, &rule, &HealthThresholds::default())
-            .await
-            .expect("observe")
-            .value,
-        1.0
-    );
+    assert_eq!(observe_rule(&t, &rule).await.expect("observe").value, 1.0);
 }
 
 #[tokio::test]
 async fn an_unknown_source_reads_as_nothing_wrong_rather_than_firing() {
-    use erno::error_reporting::collector::alerting::{evaluator, service};
-    use erno::health::HealthThresholds;
+    use erno::error_reporting::collector::alerting::service;
 
     let t = setup().await;
     create_rule(
@@ -2053,9 +2057,7 @@ async fn an_unknown_source_reads_as_nothing_wrong_rather_than_firing() {
     .expect("corrupt");
 
     let rule = service::enabled(&t.db).await.expect("rules").remove(0);
-    let observed = evaluator::observe(&t.db, &rule, &HealthThresholds::default())
-        .await
-        .expect("observe");
+    let observed = observe_rule(&t, &rule).await.expect("observe");
     assert_eq!(observed.value, 0.0, "a typo must not page anyone");
 }
 
@@ -2141,7 +2143,7 @@ async fn the_evaluator_moves_a_rule_through_its_lifecycle_and_notifies() {
     let thresholds = HealthThresholds::default();
 
     // Nothing has happened yet.
-    runner::evaluate_all(&t.db, &t.mailer, &client, &context, &thresholds)
+    runner::evaluate_all(&t.db, &t.mailer, &client, &context, &thresholds, None)
         .await
         .expect("evaluate");
     assert_eq!(list_rules(&t).await["rules"][0]["state"], "ok");
@@ -2149,7 +2151,7 @@ async fn the_evaluator_moves_a_rule_through_its_lifecycle_and_notifies() {
 
     // An error appears; `for_seconds` is zero so it is believed immediately.
     post_browser(&t, &envelope(vec![event("TypeError", "boom")])).await;
-    runner::evaluate_all(&t.db, &t.mailer, &client, &context, &thresholds)
+    runner::evaluate_all(&t.db, &t.mailer, &client, &context, &thresholds, None)
         .await
         .expect("evaluate");
 
@@ -2160,7 +2162,7 @@ async fn the_evaluator_moves_a_rule_through_its_lifecycle_and_notifies() {
     assert_eq!(sent[0].to, "ops@example.com");
 
     // Still firing, but `repeat_seconds` is zero: notify once only.
-    runner::evaluate_all(&t.db, &t.mailer, &client, &context, &thresholds)
+    runner::evaluate_all(&t.db, &t.mailer, &client, &context, &thresholds, None)
         .await
         .expect("evaluate");
     assert_eq!(
@@ -2177,7 +2179,7 @@ async fn the_evaluator_moves_a_rule_through_its_lifecycle_and_notifies() {
     .await
     .expect("clear");
 
-    runner::evaluate_all(&t.db, &t.mailer, &client, &context, &thresholds)
+    runner::evaluate_all(&t.db, &t.mailer, &client, &context, &thresholds, None)
         .await
         .expect("evaluate");
 
@@ -2226,6 +2228,7 @@ async fn a_silenced_rule_still_tracks_state_but_sends_nothing() {
             console_url: "http://localhost:4400".to_string(),
         },
         &HealthThresholds::default(),
+        None,
     )
     .await
     .expect("evaluate");

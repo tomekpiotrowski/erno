@@ -25,6 +25,12 @@ pub fn discover_urls(root: &Path, sel: &ServiceSelection) -> DevUrls {
         app: sel.app.then_some(app_url),
         www: sel.www.then_some(www_url),
         prometheus: None,
+        // Filled in by `handle_dev` once it knows whether monitoring/ is
+        // present — but before the banner is pinned, since its height is fixed
+        // at that point.
+        monitoring: None,
+        console: None,
+        admin: None,
         extra: Vec::new(),
     }
 }
@@ -42,6 +48,15 @@ pub fn ports_to_check(urls: &DevUrls) -> Vec<u16> {
     }
     if let Some(url) = &urls.prometheus {
         ports.push(port_from_url(Some(url)).unwrap_or(9090));
+    }
+    if let Some(url) = &urls.admin {
+        ports.push(port_from_url(Some(url)).unwrap_or(4300));
+    }
+    if let Some(url) = &urls.monitoring {
+        ports.push(port_from_url(Some(url)).unwrap_or(3001));
+    }
+    if let Some(url) = &urls.console {
+        ports.push(port_from_url(Some(url)).unwrap_or(4400));
     }
     for (_, url) in &urls.extra {
         if let Some(port) = port_from_url(Some(url)) {
@@ -124,10 +139,18 @@ pub fn read_angular_port(root: &Path) -> Option<u16> {
 }
 
 pub fn read_www_port(root: &Path) -> Option<u16> {
-    let content = std::fs::read_to_string(root.join("www/package.json")).ok()?;
+    port_from_package_script(&root.join("www"), "dev")
+}
+
+/// The `--port` a package.json script passes, for the projects whose port is
+/// declared there rather than in `angular.json`.
+///
+/// `monitoring/ui`'s serve block has no `options.port`, so `read_angular_port`
+/// returns `None` for it and this is what finds 4400.
+pub fn port_from_package_script(dir: &Path, script: &str) -> Option<u16> {
+    let content = std::fs::read_to_string(dir.join("package.json")).ok()?;
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
-    let script = json["scripts"]["dev"].as_str()?;
-    port_from_script(script)
+    port_from_script(json["scripts"][script].as_str()?)
 }
 
 pub fn port_from_script(script: &str) -> Option<u16> {
@@ -190,6 +213,11 @@ port = 3005
         assert_eq!(port_from_script("astro dev --port 4321"), Some(4321));
         assert_eq!(port_from_script("astro dev --port=4400"), Some(4400));
         assert_eq!(port_from_script("astro dev"), None);
+        // The monitoring console's actual start script.
+        assert_eq!(
+            port_from_script("ng serve --port 4400 --proxy-config proxy.conf.json"),
+            Some(4400)
+        );
     }
 
     #[test]
@@ -214,6 +242,9 @@ port = 3005
             app: None,
             www: None,
             prometheus: None,
+            monitoring: None,
+            console: None,
+            admin: None,
             extra: vec![("local".into(), "http://localhost/tools/".into())],
         };
         assert!(ports_to_check(&urls).is_empty());
