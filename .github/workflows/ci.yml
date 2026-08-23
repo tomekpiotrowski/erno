@@ -10,88 +10,74 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
+# This mirrors ./build.sh, which is the entry point developers actually use.
+# Keep the two in step: a check that only exists here is a check nobody can
+# reproduce locally.
+#
+# Linux and stable only, deliberately. The test suites need a real PostgreSQL
+# and the crates are built to be deployed to Linux containers, so a
+# Windows/macOS matrix tested a configuration nothing ships.
 jobs:
+  check:
+    name: Format and lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Check formatting
+        run: cargo fmt --all --check
+      - name: Run clippy
+        run: cargo clippy --workspace --all-features --all-targets -- -D warnings
+
   test:
     name: Test
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        rust: [stable, beta]
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@master
-      with:
-        toolchain: ${{ matrix.rust }}
-
-    - name: Cache cargo registry
-      uses: actions/cache@v4
-      with:
-        path: ~/.cargo/registry
-        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-
-    - name: Cache cargo index
-      uses: actions/cache@v4
-      with:
-        path: ~/.cargo/git
-        key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
-
-    - name: Cache target directory
-      uses: actions/cache@v4
-      with:
-        path: target
-        key: ${{ runner.os }}-target-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
-
-    - name: Run tests
-      run: cargo test --all-features
-
-    - name: Run tests (no default features)
-      run: cargo test --no-default-features
-
-  fmt:
-    name: Format
     runs-on: ubuntu-latest
-
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: erno
+          POSTGRES_PASSWORD: erno
+          POSTGRES_DB: erno
+        ports: [ '5432:5432' ]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
 
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        components: rustfmt
+      # The collector has its own database; see monitoring/config/test.toml.
+      - name: Create the collector's test database
+        run: PGPASSWORD=erno createdb -h localhost -U erno erno_monitoring_test
 
-    - name: Check formatting
-      run: cargo fmt -- --check
+      - name: Test api
+        run: cargo test -p erno --all-features
 
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
+      - name: Test cli
+        run: cargo test -p erno-cli
 
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        components: clippy
-
-    - name: Run Clippy
-      run: cargo clippy --all-features -- -D warnings
+      # Deliberately `cd`s rather than using `-p`: monitoring/.cargo/config.toml
+      # sets RUST_TEST_THREADS=1, and cargo finds that by walking up from the
+      # working directory. The suite deadlocks against itself in parallel.
+      - name: Test monitoring
+        run: cargo test
+        working-directory: monitoring
 
   docs:
     name: Documentation
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v4
-
-    - name: Install Rust
-      uses: dtolnay/rust-toolchain@stable
-
-    - name: Check documentation
-      run: cargo doc --no-deps --all-features
-      env:
-        RUSTDOCFLAGS: -D warnings
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check documentation
+        run: cargo doc -p erno --no-deps --all-features
+        env:
+          RUSTDOCFLAGS: -D warnings

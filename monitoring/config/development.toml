@@ -51,6 +51,7 @@ jobs = [
   "delete_stripe_customer",
   "delete_user_files",
   "delete_record_attachments",
+  "anonymize_collector_events",
 ]
 count = 1
 
@@ -87,6 +88,11 @@ name = "Erno status"
 # — object storage behind a CDN — or the page goes down with the collector.
 output_path = "status/status.json"
 refresh_seconds = 30
+
+# Alert rules with source = "promql" query this. `erno dev` starts Prometheus
+# on 9090; empty would disable the source.
+[collector.prometheus]
+url = "http://localhost:9090"
 
 [collector.alerts]
 enabled = true

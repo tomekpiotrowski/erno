@@ -26,8 +26,6 @@ spec:
               value: {{ .Release.Name }}-api
             - name: API_PORT
               value: {{ .Values.api.port | quote }}
-            - name: PROM_HOST
-              value: {{ .Release.Name }}-prometheus
 ---
 apiVersion: v1
 kind: Service

@@ -51,6 +51,7 @@ jobs = [
   "delete_stripe_customer",
   "delete_user_files",
   "delete_record_attachments",
+  "anonymize_collector_events",
 ]
 count = 1
 

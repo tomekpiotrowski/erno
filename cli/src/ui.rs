@@ -7,21 +7,30 @@
 //!
 //! # The visual language
 //!
+//! Two faces, one geometry. [`Face`] carries the two decisions — colour and
+//! emoji — and every `render_*` takes one:
+//!
 //! ```text
-//! ==> Section header              column 0, `==>` blue+bold, title bold
-//!   ok    a row                   column 2, marker green/yellow/red
-//!   warn  another row
-//!   fail  a third row
-//!         a continuation line     column 8, dim
-//! error: something went wrong     column 0, `error:` red+bold
-//! [api] a forwarded child line    column 0, `[api]` in the service colour
+//!  emoji face                      ascii face
+//!
+//! 🩺 Section header                ==> Section header
+//!   ✅    a row                      ok    a row
+//!   ⚠️    another row                warn  another row
+//!   ❌    a third row                fail  a third row
+//!         a continuation line              a continuation line
+//! ❌ error: something went wrong    error: something went wrong
+//! [api] a forwarded child line     [api] a forwarded child line
 //! ```
 //!
-//! Markers are ASCII words, never emoji: `✅`/`❌` are East-Asian Wide while
-//! `⚠️`/`ℹ️` are one column plus a variation selector, so no single pad count
-//! aligns them on every terminal. Words are one column per character
-//! everywhere, and they survive `--no-color` and piping — colour is decoration
-//! only, and nothing is communicated by colour alone.
+//! Row text sits at column 8 in both, because an icon is padded to the same
+//! marker width as the widest word (`warn`/`fail`). That only holds while every
+//! icon is exactly two columns wide, so the icons are a curated set in [`icon`]
+//! and a unit test measures every one of them with [`display_width`].
+//!
+//! The ASCII face is the fallback, and it engages wherever emoji are a gamble:
+//! `--no-emoji`, `ERNO_EMOJI=0`, and anywhere colour is already off — pipes,
+//! CI, `--no-color`, `NO_COLOR`, a terminal that does not do ANSI. Colour and
+//! emoji are decoration only; nothing is communicated by either alone.
 //!
 //! # The pinned region
 //!
@@ -43,6 +52,7 @@ use anstyle::{AnsiColor, Color, Effects, Style};
 // ── Global state, set once from main ─────────────────────────────────────────
 
 static COLOR: AtomicBool = AtomicBool::new(false);
+static EMOJI: AtomicBool = AtomicBool::new(false);
 static QUIET: AtomicBool = AtomicBool::new(false);
 static VERBOSE: AtomicBool = AtomicBool::new(false);
 /// The pinned region lives on stderr, so a stdout write only has to dodge it
@@ -52,8 +62,10 @@ static STDOUT_TTY: AtomicBool = AtomicBool::new(false);
 /// Called once from `main`, before any output. The values are immutable
 /// afterwards, which is why they live here rather than being threaded through
 /// every `handle_*` signature into closures that outlive their caller.
-pub fn init(no_color: bool, quiet: bool, verbose: bool) {
-    COLOR.store(resolve_color(no_color), Ordering::Relaxed);
+pub fn init(no_color: bool, no_emoji: bool, quiet: bool, verbose: bool) {
+    let color = resolve_color(no_color);
+    COLOR.store(color, Ordering::Relaxed);
+    EMOJI.store(resolve_emoji(no_emoji, color), Ordering::Relaxed);
     QUIET.store(quiet, Ordering::Relaxed);
     VERBOSE.store(verbose, Ordering::Relaxed);
     STDOUT_TTY.store(std::io::stdout().is_terminal(), Ordering::Relaxed);
@@ -61,6 +73,10 @@ pub fn init(no_color: bool, quiet: bool, verbose: bool) {
 
 pub fn color() -> bool {
     COLOR.load(Ordering::Relaxed)
+}
+
+pub fn emoji() -> bool {
+    EMOJI.load(Ordering::Relaxed)
 }
 
 pub fn quiet() -> bool {
@@ -82,6 +98,101 @@ fn resolve_color(no_color_flag: bool) -> bool {
         return true;
     }
     std::io::stderr().is_terminal() && anstyle_query::term_supports_color()
+}
+
+/// `--no-emoji` wins, then `ERNO_EMOJI=0`, then the colour decision.
+///
+/// Riding on `color` is deliberate rather than lazy: the things that turn
+/// colour off — a pipe, a redirect, CI, `NO_COLOR`, a terminal that does not do
+/// ANSI — are the same things that make a two-column glyph a gamble. One switch
+/// covers both, and `ERNO_EMOJI=0` is there for a colour terminal with a font
+/// that cannot draw them.
+fn resolve_emoji(no_emoji_flag: bool, color: bool) -> bool {
+    !no_emoji_flag && std::env::var("ERNO_EMOJI").as_deref() != Ok("0") && color
+}
+
+// ── The face ─────────────────────────────────────────────────────────────────
+
+/// The two rendering decisions, together.
+///
+/// Every `render_*` takes one instead of a bare `on: bool`, so a call site
+/// cannot silently swap the two flags — and so the pure renderers stay pure:
+/// [`Face::PLAIN`] is what the tests pass, and nothing reads global state.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Face {
+    pub color: bool,
+    pub emoji: bool,
+}
+
+impl Face {
+    /// No colour, no emoji: the lowest common denominator, and the face every
+    /// unit test renders with. Nothing at runtime picks a face by hand — that
+    /// is what [`Face::current`] is for — so this exists for the tests only.
+    #[cfg(test)]
+    pub const PLAIN: Face = Face {
+        color: false,
+        emoji: false,
+    };
+
+    /// The face `ui::init` resolved for this run.
+    pub fn current() -> Face {
+        Face {
+            color: color(),
+            emoji: emoji(),
+        }
+    }
+}
+
+// ── Icons ────────────────────────────────────────────────────────────────────
+
+/// Every emoji the CLI emits. One curated set, because the layout depends on
+/// knowing each glyph's width.
+///
+/// The entry price is **exactly two columns**, which in practice means
+/// `Emoji_Presentation=Yes` — a glyph that is wide on its own, with no
+/// variation selector talking a terminal into it. `⚠️` is the one exception the
+/// set makes, for a marker with no wide synonym that reads as "warning"; it is
+/// written with its U+FE0F and, like the rest, measured by
+/// `every_icon_is_two_columns_wide`.
+///
+/// `⚙️` and `🛠️` are absent for the same reason `⚠️` is a note: they are
+/// text-presentation by default. `🦀` (api) and `🧰` (admin) stand in.
+pub mod icon {
+    // Row markers.
+    pub const OK: &str = "✅";
+    pub const WARN: &str = "⚠️";
+    pub const FAIL: &str = "❌";
+
+    // `dev` service states.
+    pub const READY: &str = "✅";
+    pub const STARTING: &str = "⏳";
+    pub const MIGRATING: &str = "🔄";
+
+    // Section headers, one per command.
+    pub const DOCTOR: &str = "🩺";
+    pub const NEW: &str = "✨";
+    pub const SETUP: &str = "🔧";
+    pub const DEV: &str = "🚀";
+    pub const BUILD: &str = "🔨";
+    pub const LINT: &str = "🧹";
+    pub const TEST: &str = "🧪";
+    pub const UPGRADE: &str = "⏫";
+    pub const DEPLOY: &str = "🚢";
+
+    // Section headers, one per topic.
+    pub const PACKAGE: &str = "📦";
+    pub const DATABASE: &str = "🗃️";
+    pub const KEY: &str = "🔑";
+    pub const CLOUD: &str = "☁️";
+    pub const NOTE: &str = "📝";
+    pub const DONE: &str = "🎉";
+
+    /// Every constant above, for the width test and nothing else.
+    #[cfg(test)]
+    pub const ALL: [&str; 20] = [
+        OK, WARN, FAIL, READY, STARTING, MIGRATING, DOCTOR, NEW, SETUP, DEV, BUILD, LINT, TEST,
+        UPGRADE, DEPLOY, PACKAGE, DATABASE, KEY, CLOUD, NOTE,
+    ];
 }
 
 // ── Palette ──────────────────────────────────────────────────────────────────
@@ -397,8 +508,8 @@ pub fn render_frame(drawn: usize, body: &[&str], region: &[String]) -> String {
 /// Escape sequences occupy no columns and are never split — the scanner walks
 /// whole CSI sequences the way [`strip_ansi`] does, but keeps them. A line cut
 /// mid-style gets an explicit reset so colour cannot bleed into the next row.
-/// Width is counted in `char`s, like [`column_width`]; the region holds service
-/// names and URLs, so that is exact.
+/// Columns are counted with [`char_width`], so a two-column glyph is dropped
+/// whole rather than leaving half a cell for the terminal to guess at.
 pub fn truncate_display(line: &str, width: usize) -> String {
     if width == 0 {
         return String::new();
@@ -422,12 +533,17 @@ pub fn truncate_display(line: &str, width: usize) -> String {
             }
             continue;
         }
-        if shown == width {
+        let w = if chars.peek() == Some(&EMOJI_PRESENTATION) {
+            2
+        } else {
+            char_width(c)
+        };
+        if shown + w > width {
             cut = true;
             break;
         }
         out.push(c);
-        shown += 1;
+        shown += w;
     }
     if cut && styled {
         out.push_str("\u{1b}[0m");
@@ -447,11 +563,7 @@ const MIN_SCROLL_ROWS: usize = 4;
 /// [`fit_region`] just truncates — because that is a transient the user is
 /// already watching.
 pub fn region_fits(lines: &[String], cols: usize, rows: usize) -> bool {
-    let widest = lines
-        .iter()
-        .map(|l| strip_ansi(l).chars().count())
-        .max()
-        .unwrap_or(0);
+    let widest = lines.iter().map(display_width).max().unwrap_or(0);
     !lines.is_empty() && widest < cols && rows >= lines.len() + MIN_SCROLL_ROWS
 }
 
@@ -526,6 +638,15 @@ impl Level {
         }
     }
 
+    fn icon(self) -> Option<&'static str> {
+        match self {
+            Level::Ok => Some(icon::OK),
+            Level::Warn => Some(icon::WARN),
+            Level::Fail => Some(icon::FAIL),
+            Level::Info => None,
+        }
+    }
+
     fn style(self) -> Style {
         match self {
             Level::Ok => GREEN,
@@ -545,36 +666,53 @@ const GAP: usize = 2;
 /// Continuation lines align under a row's text: `INDENT + MARKER_WIDTH + GAP`.
 pub const CONTINUATION: &str = "        ";
 
-pub fn render_row(on: bool, level: Level, text: &str) -> String {
-    let word = level.word();
-    let marker = if word.is_empty() {
-        " ".repeat(MARKER_WIDTH)
-    } else {
-        paint_when(on, level.style(), &format!("{word:<MARKER_WIDTH$}"))
-    };
+/// The marker column, in either face.
+///
+/// Both are [`MARKER_WIDTH`] columns wide, which is what keeps row text at
+/// [`CONTINUATION`] whichever face is in play. The emoji is left unpainted on
+/// purpose: it arrives with its own colour, and an SGR wrapper only gives some
+/// terminals licence to override it.
+fn render_marker(face: Face, level: Level) -> String {
+    if face.emoji {
+        return match level.icon() {
+            Some(glyph) => format!("{glyph}{}", " ".repeat(MARKER_WIDTH - display_width(glyph))),
+            None => " ".repeat(MARKER_WIDTH),
+        };
+    }
+    match level.word() {
+        "" => " ".repeat(MARKER_WIDTH),
+        word => paint_when(face.color, level.style(), &format!("{word:<MARKER_WIDTH$}")),
+    }
+}
+
+pub fn render_row(face: Face, level: Level, text: &str) -> String {
     let body = if level == Level::Info {
-        paint_when(on, DIM, text)
+        paint_when(face.color, DIM, text)
     } else {
         text.to_string()
     };
-    format!("{INDENT}{marker}{}{body}", " ".repeat(GAP))
+    format!(
+        "{INDENT}{}{}{body}",
+        render_marker(face, level),
+        " ".repeat(GAP)
+    )
 }
 
 pub fn ok(text: impl AsRef<str>) {
     if !quiet() {
-        narrate(&render_row(color(), Level::Ok, text.as_ref()));
+        narrate(&render_row(Face::current(), Level::Ok, text.as_ref()));
     }
 }
 
 pub fn info(text: impl AsRef<str>) {
     if !quiet() {
-        narrate(&render_row(color(), Level::Info, text.as_ref()));
+        narrate(&render_row(Face::current(), Level::Info, text.as_ref()));
     }
 }
 
 /// Warnings and failures are never suppressed by `--quiet`.
 pub fn warn(text: impl AsRef<str>) {
-    narrate(&render_row(color(), Level::Warn, text.as_ref()));
+    narrate(&render_row(Face::current(), Level::Warn, text.as_ref()));
 }
 
 /// Explanation or remediation under the preceding row. Multi-line input is
@@ -591,18 +729,73 @@ pub fn detail(text: impl AsRef<str>) {
     emit_block(Stream::Err, &block);
 }
 
-pub fn section(title: impl AsRef<str>) {
+/// A section header: `🩺 Environment`, or `==> Environment` without emoji.
+///
+/// The icon replaces the arrow rather than joining it — two lead-ins would put
+/// the title at a different column in each face, and the blank line above is
+/// what separates sections either way.
+pub fn render_section(face: Face, icon: &str, title: &str) -> String {
+    let lead = if face.emoji {
+        icon.to_string()
+    } else {
+        paint_when(face.color, HEADING, "==>")
+    };
+    format!("\n{lead} {}", paint_when(face.color, BOLD, title))
+}
+
+pub fn section(icon: &str, title: impl AsRef<str>) {
     if quiet() {
         return;
     }
     emit_block(
         Stream::Err,
-        &format!(
-            "\n{} {}",
-            paint(HEADING, "==>"),
-            paint(BOLD, title.as_ref())
-        ),
+        &render_section(Face::current(), icon, title.as_ref()),
     );
+}
+
+/// A command's result: the one line that says how it went.
+///
+/// Not narration — this is what the command was run to find out — so it
+/// survives `--quiet`, like the per-package summary in `run_phase`.
+pub fn render_finished(face: Face, icon: &str, message: &str) -> String {
+    if face.emoji {
+        format!("{icon} {message}")
+    } else {
+        format!("{} {message}", paint_when(face.color, GREEN, "done:"))
+    }
+}
+
+pub fn finished(icon: &str, message: impl AsRef<str>) {
+    emit_block(
+        Stream::Err,
+        &render_finished(Face::current(), icon, message.as_ref()),
+    );
+}
+
+/// A titled list of things to run next: `erno new`, `erno deploy init`.
+///
+/// The title is a row and the entries are its continuations, so this adds no
+/// new indent — it is the same two levels every other block uses.
+pub fn render_next_steps(face: Face, title: &str, steps: &[String]) -> String {
+    let mut out = format!("{INDENT}{}\n", paint_when(face.color, BOLD, title));
+    for step in steps {
+        for line in step.lines() {
+            out.push_str(&format!(
+                "{CONTINUATION}{}\n",
+                paint_when(face.color, CYAN, line)
+            ));
+        }
+    }
+    out
+}
+
+pub fn next_steps(title: &str, steps: &[String]) {
+    if !quiet() {
+        emit_block(
+            Stream::Err,
+            &render_next_steps(Face::current(), title, steps),
+        );
+    }
 }
 
 pub fn blank() {
@@ -611,15 +804,20 @@ pub fn blank() {
     }
 }
 
-pub fn render_fatal(on: bool, message: &str) -> String {
+pub fn render_fatal(face: Face, message: &str) -> String {
     let mut lines = message.lines();
     let first = lines.next().unwrap_or_default();
-    let mut out = format!("{} {first}", paint_when(on, ERROR, "error:"));
+    let lead = paint_when(face.color, ERROR, "error:");
+    let mut out = if face.emoji {
+        format!("{} {lead} {first}", icon::FAIL)
+    } else {
+        format!("{lead} {first}")
+    };
     for hint in lines {
         out.push('\n');
         out.push_str(&format!(
             "{INDENT}{}",
-            paint_when(on, DIM, hint.trim_start())
+            paint_when(face.color, DIM, hint.trim_start())
         ));
     }
     out
@@ -632,7 +830,7 @@ pub fn render_fatal(on: bool, message: &str) -> String {
 /// and `dev::process`'s spawn failure both `exit` without dropping [`Pinned`].
 pub fn fatal(message: &str) {
     clear_region();
-    emit_block(Stream::Err, &render_fatal(color(), message));
+    emit_block(Stream::Err, &render_fatal(Face::current(), message));
 }
 
 // ── Row model ────────────────────────────────────────────────────────────────
@@ -678,7 +876,7 @@ impl Row {
     }
 }
 
-pub fn render_rows(on: bool, rows: &[Row]) -> String {
+pub fn render_rows(face: Face, rows: &[Row]) -> String {
     let width = column_width(rows.iter().map(|r| r.label.as_str()));
     let mut out = String::new();
     for row in rows {
@@ -686,13 +884,13 @@ pub fn render_rows(on: bool, rows: &[Row]) -> String {
             Some(detail) => format!("{:<width$}{}{detail}", row.label, " ".repeat(GAP)),
             None => row.label.clone(),
         };
-        out.push_str(&render_row(on, row.level, &text));
+        out.push_str(&render_row(face, row.level, &text));
         out.push('\n');
         if let Some(hint) = &row.hint {
             for line in hint.lines() {
                 out.push_str(&format!(
                     "{CONTINUATION}{}\n",
-                    paint_when(on, DIM, line.trim_start())
+                    paint_when(face.color, DIM, line.trim_start())
                 ));
             }
         }
@@ -711,7 +909,7 @@ pub fn print_rows(rows: &[Row]) {
     } else {
         rows.to_vec()
     };
-    emit_block(Stream::Err, &render_rows(color(), &shown));
+    emit_block(Stream::Err, &render_rows(Face::current(), &shown));
 }
 
 // ── Subprocess prefixes ──────────────────────────────────────────────────────
@@ -723,8 +921,24 @@ pub fn label_style(label: &str) -> Style {
         "api" => CYAN,
         "app" => GREEN,
         "www" | "mail" => MAGENTA,
-        "prom" | "admin" => YELLOW,
+        "prom" | "mon" | "console" | "admin" => YELLOW,
         _ => BLUE,
+    }
+}
+
+/// The icon a service wears in the `dev` banner. Paired with [`label_style`] —
+/// same labels, same fallback — so a new service is two lines, not a hunt.
+pub fn label_icon(label: &str) -> &'static str {
+    match label {
+        "api" => "🦀",
+        "app" => "📱",
+        "www" => "🌐",
+        "mail" => "📧",
+        "prom" => "📊",
+        "mon" => "📡",
+        "console" => "🔭",
+        "admin" => "🧰",
+        _ => "🔹",
     }
 }
 
@@ -791,11 +1005,115 @@ pub fn apply_child_env<C: ChildCommand>(cmd: &mut C) {
 
 /// Widest of `items`, for `{:<width$}`. Replaces every hardcoded column width.
 pub fn column_width<'a>(items: impl IntoIterator<Item = &'a str>) -> usize {
-    items
-        .into_iter()
-        .map(|s| s.chars().count())
-        .max()
-        .unwrap_or(0)
+    items.into_iter().map(display_width).max().unwrap_or(0)
+}
+
+/// The columns `s` occupies on screen. Escapes and combining characters take
+/// none; emoji take two.
+///
+/// This is the measurement every column in the CLI is built on, so it has to
+/// agree with the terminal about the icons in [`icon`] and about ASCII. It does
+/// not have to be a general Unicode width implementation, and it is not one —
+/// a crate for that would be several hundred kilobytes of tables to adjudicate
+/// text this CLI never prints.
+pub fn display_width(s: impl AsRef<str>) -> usize {
+    let plain = strip_ansi(s.as_ref());
+    let chars: Vec<char> = plain.chars().collect();
+    (0..chars.len())
+        .map(|i| {
+            // U+FE0F asks for emoji presentation, and emoji presentation is two
+            // columns whatever the base character would be on its own. This is
+            // what makes `⚠️` measure the same as `✅`.
+            if chars.get(i + 1) == Some(&EMOJI_PRESENTATION) {
+                2
+            } else {
+                char_width(chars[i])
+            }
+        })
+        .sum()
+}
+
+/// U+FE0F VARIATION SELECTOR-16: "draw the character before me as an emoji".
+const EMOJI_PRESENTATION: char = '\u{FE0F}';
+
+/// Columns for one `char`: 0 for a modifier, 2 for a wide glyph, 1 otherwise.
+///
+/// The wide set is the East-Asian Wide blocks plus the emoji planes, plus the
+/// scattered `U+2xxx`/`U+3xxx` singles that carry `Emoji_Presentation=Yes` —
+/// those are the ones that surprise you, because their neighbours in the same
+/// block are one column.
+fn char_width(c: char) -> usize {
+    match c as u32 {
+        // Zero-width: combining marks, the joiner, variation selectors, and the
+        // skin-tone modifiers. Each attaches to the glyph before it.
+        0x0300..=0x036F | 0x200B..=0x200F | 0xFE00..=0xFE0F | 0x1F3FB..=0x1F3FF => 0,
+        // Emoji with a default emoji presentation, outside the emoji planes.
+        0x231A..=0x231B
+        | 0x23E9..=0x23EC
+        | 0x23F0
+        | 0x23F3
+        | 0x25FD..=0x25FE
+        | 0x2614..=0x2615
+        | 0x2648..=0x2653
+        | 0x267F
+        | 0x2693
+        | 0x26A1
+        | 0x26AA..=0x26AB
+        | 0x26BD..=0x26BE
+        | 0x26C4..=0x26C5
+        | 0x26CE
+        | 0x26D4
+        | 0x26EA
+        | 0x26F2..=0x26F3
+        | 0x26F5
+        | 0x26FA
+        | 0x26FD
+        | 0x2705
+        | 0x270A..=0x270B
+        | 0x2728
+        | 0x274C
+        | 0x274E
+        | 0x2753..=0x2755
+        | 0x2757
+        | 0x2795..=0x2797
+        | 0x27B0
+        | 0x27BF
+        | 0x2B1B..=0x2B1C
+        | 0x2B50
+        | 0x2B55 => 2,
+        // East-Asian Wide blocks and the emoji planes.
+        0x1100..=0x115F
+        | 0x2E80..=0x303E
+        | 0x3041..=0x33FF
+        | 0x3400..=0x4DBF
+        | 0x4E00..=0x9FFF
+        | 0xA000..=0xA4CF
+        | 0xAC00..=0xD7A3
+        | 0xF900..=0xFAFF
+        | 0xFE30..=0xFE6F
+        | 0xFF00..=0xFF60
+        | 0xFFE0..=0xFFE6
+        | 0x1F300..=0x1F9FF
+        | 0x1FA70..=0x1FAFF
+        | 0x20000..=0x3FFFD => 2,
+        _ => 1,
+    }
+}
+
+/// A duration as a human reads it: `840ms`, `12.4s`, `2m 04s`.
+///
+/// Sub-second work is reported in milliseconds because that is the resolution
+/// the difference lives at; past a minute the seconds are zero-padded so a
+/// column of them lines up.
+pub fn fmt_duration(d: std::time::Duration) -> String {
+    let secs = d.as_secs_f64();
+    if secs < 1.0 {
+        format!("{}ms", d.as_millis())
+    } else if secs < 60.0 {
+        format!("{secs:.1}s")
+    } else {
+        format!("{}m {:02}s", d.as_secs() / 60, d.as_secs() % 60)
+    }
 }
 
 /// Drop ANSI escape sequences, for matching and width maths against text a
@@ -913,8 +1231,21 @@ pub fn abort(message: &str) -> ! {
 mod tests {
     use super::*;
 
-    // Colour is off in these tests by construction: `init` is never called, so
-    // COLOR stays false. The `_when` variants are tested explicitly for both.
+    // Colour and emoji are off in these tests by construction: `init` is never
+    // called, so both statics stay false. Every renderer is given its `Face`
+    // explicitly, so nothing here depends on that or on test order.
+
+    /// Colour on, emoji off — the face that proves colour changes nothing about
+    /// the layout.
+    const COLOURED: Face = Face {
+        color: true,
+        emoji: false,
+    };
+    /// The full treatment.
+    const FANCY: Face = Face {
+        color: true,
+        emoji: true,
+    };
 
     #[test]
     fn paint_when_off_is_the_bare_text() {
@@ -931,18 +1262,18 @@ mod tests {
 
     #[test]
     fn rows_share_one_text_column() {
-        assert_eq!(render_row(false, Level::Ok, "Rust"), "  ok    Rust");
-        assert_eq!(render_row(false, Level::Warn, "Rust"), "  warn  Rust");
-        assert_eq!(render_row(false, Level::Fail, "Rust"), "  fail  Rust");
-        assert_eq!(render_row(false, Level::Info, "Rust"), "        Rust");
+        assert_eq!(render_row(Face::PLAIN, Level::Ok, "Rust"), "  ok    Rust");
+        assert_eq!(render_row(Face::PLAIN, Level::Warn, "Rust"), "  warn  Rust");
+        assert_eq!(render_row(Face::PLAIN, Level::Fail, "Rust"), "  fail  Rust");
+        assert_eq!(render_row(Face::PLAIN, Level::Info, "Rust"), "        Rust");
     }
 
     #[test]
     fn coloured_rows_align_with_uncoloured_ones() {
         for level in [Level::Ok, Level::Warn, Level::Fail, Level::Info] {
             assert_eq!(
-                strip_ansi(&render_row(true, level, "Rust")),
-                render_row(false, level, "Rust"),
+                strip_ansi(&render_row(COLOURED, level, "Rust")),
+                render_row(Face::PLAIN, level, "Rust"),
             );
         }
     }
@@ -950,8 +1281,101 @@ mod tests {
     #[test]
     fn continuation_lines_up_with_row_text() {
         assert_eq!(CONTINUATION.len(), INDENT.len() + MARKER_WIDTH + GAP);
-        let row = render_row(false, Level::Fail, "x");
+        let row = render_row(Face::PLAIN, Level::Fail, "x");
         assert_eq!(row.find('x'), Some(CONTINUATION.len()));
+    }
+
+    // ── The emoji face ───────────────────────────────────────────────────────
+
+    #[test]
+    fn every_icon_is_two_columns_wide() {
+        // The load-bearing assumption of the whole emoji face: an icon fits the
+        // marker column exactly, so row text lands at CONTINUATION either way.
+        // A one-column glyph would shift every row it appears on.
+        for glyph in icon::ALL {
+            assert_eq!(display_width(glyph), 2, "{glyph} is not two columns");
+        }
+        for label in ["api", "app", "www", "mail", "prom", "admin", "puzzles"] {
+            let glyph = label_icon(label);
+            assert_eq!(
+                display_width(glyph),
+                2,
+                "{label}'s {glyph} is not two columns"
+            );
+        }
+    }
+
+    #[test]
+    fn emoji_rows_share_the_same_text_column_as_ascii_ones() {
+        for level in [Level::Ok, Level::Warn, Level::Fail, Level::Info] {
+            let row = render_row(FANCY, level, "Rust");
+            assert_eq!(
+                display_width(row.split("Rust").next().unwrap()),
+                CONTINUATION.len(),
+                "{level:?} does not put its text at column 8: {row:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn display_width_counts_columns_not_chars() {
+        assert_eq!(display_width("abc"), 3);
+        assert_eq!(display_width(""), 0);
+        // Escapes are not on screen.
+        assert_eq!(display_width(paint_when(true, GREEN, "ok")), 2);
+        // An emoji is two columns; its variation selector and joiner are none.
+        assert_eq!(display_width("✅"), 2);
+        assert_eq!(display_width("⚠️"), 2);
+        assert_eq!(display_width("🦀"), 2);
+        assert_eq!(display_width("café"), 4);
+    }
+
+    #[test]
+    fn fmt_duration_reads_at_the_right_resolution() {
+        use std::time::Duration;
+        assert_eq!(fmt_duration(Duration::from_millis(0)), "0ms");
+        assert_eq!(fmt_duration(Duration::from_millis(840)), "840ms");
+        assert_eq!(fmt_duration(Duration::from_millis(1000)), "1.0s");
+        assert_eq!(fmt_duration(Duration::from_millis(12_350)), "12.3s");
+        assert_eq!(fmt_duration(Duration::from_secs(59)), "59.0s");
+        assert_eq!(fmt_duration(Duration::from_secs(124)), "2m 04s");
+    }
+
+    #[test]
+    fn a_section_leads_with_the_icon_or_the_arrow() {
+        assert_eq!(
+            render_section(Face::PLAIN, icon::DOCTOR, "Environment"),
+            "\n==> Environment",
+        );
+        assert_eq!(
+            render_section(FANCY, icon::DOCTOR, "Environment"),
+            format!(
+                "\n{} {}",
+                icon::DOCTOR,
+                paint_when(true, BOLD, "Environment")
+            ),
+        );
+    }
+
+    #[test]
+    fn a_result_line_survives_both_faces() {
+        assert_eq!(
+            render_finished(Face::PLAIN, icon::DONE, "build finished in 1.2s"),
+            "done: build finished in 1.2s",
+        );
+        assert_eq!(
+            render_finished(FANCY, icon::DONE, "build finished in 1.2s"),
+            format!("{} build finished in 1.2s", icon::DONE),
+        );
+    }
+
+    #[test]
+    fn next_steps_uses_the_existing_two_indents() {
+        let steps = ["cd acme".to_string(), "erno dev".to_string()];
+        assert_eq!(
+            render_next_steps(Face::PLAIN, "Next steps", &steps),
+            "  Next steps\n        cd acme\n        erno dev\n",
+        );
     }
 
     #[test]
@@ -961,7 +1385,7 @@ mod tests {
             Row::ok("PostgreSQL client", "16.3"),
             Row::fail("psql", "not found\nInstall it"),
         ];
-        let text = render_rows(false, &rows);
+        let text = render_rows(Face::PLAIN, &rows);
         let lines: Vec<&str> = text.lines().collect();
         assert!(lines[0].starts_with("  ok    Rust "));
         assert!(lines[1].starts_with("  ok    PostgreSQL client  "));
@@ -981,10 +1405,20 @@ mod tests {
     #[test]
     fn render_fatal_puts_hints_under_the_message() {
         assert_eq!(
-            render_fatal(false, "1 required check failed\nFix them and retry."),
+            render_fatal(Face::PLAIN, "1 required check failed\nFix them and retry."),
             "error: 1 required check failed\n  Fix them and retry.",
         );
-        assert_eq!(render_fatal(false, "boom"), "error: boom");
+        assert_eq!(render_fatal(Face::PLAIN, "boom"), "error: boom");
+        assert_eq!(
+            render_fatal(
+                Face {
+                    color: false,
+                    emoji: true
+                },
+                "boom"
+            ),
+            format!("{} error: boom", icon::FAIL),
+        );
     }
 
     #[test]
@@ -1005,10 +1439,13 @@ mod tests {
     }
 
     #[test]
-    fn column_width_measures_characters_not_bytes() {
+    fn column_width_measures_columns_not_bytes() {
         assert_eq!(column_width(["a", "bbb"]), 3);
         assert_eq!(column_width([]), 0);
         assert_eq!(column_width(["café"]), 4);
+        // An icon costs a column more than its `char` count suggests, which is
+        // the whole reason `column_width` cannot go back to counting chars.
+        assert_eq!(column_width(["🦀 api", "📊 prom"]), 7);
     }
 
     #[test]
@@ -1064,6 +1501,17 @@ mod tests {
         assert_eq!(truncate_display("hello", 5), "hello");
         assert_eq!(truncate_display("hello", 3), "hel");
         assert_eq!(truncate_display("hello", 0), "");
+    }
+
+    #[test]
+    fn truncate_display_never_splits_a_wide_glyph() {
+        // Half an emoji is not a thing a terminal can draw, so the budget goes
+        // unspent rather than overrun.
+        assert_eq!(truncate_display("🦀ab", 1), "");
+        assert_eq!(truncate_display("🦀ab", 2), "🦀");
+        assert_eq!(truncate_display("🦀ab", 3), "🦀a");
+        assert_eq!(truncate_display("a⚠️b", 2), "a");
+        assert_eq!(display_width(truncate_display("🦀 api", 4)), 4);
     }
 
     #[test]

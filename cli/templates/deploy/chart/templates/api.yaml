@@ -12,6 +12,11 @@ spec:
       labels:
         app: {{ .Release.Name }}-api
     spec:
+      # Kubernetes removes the pod from the Service and sends SIGTERM at the
+      # same moment, so without this pause the ingress can still route to a
+      # process that has already stopped accepting. Graceful shutdown without
+      # a preStop delay increases 502s rather than removing them.
+      terminationGracePeriodSeconds: 30
       imagePullSecrets:
         - name: {{ .Release.Name }}-registry
       containers:
@@ -22,6 +27,10 @@ spec:
             - containerPort: {{ .Values.api.port }}
           env:
             {{- include "{{name}}.apiEnv" . | nindent 12 }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
           readinessProbe:
             httpGet:
               path: /health

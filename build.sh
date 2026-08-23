@@ -7,8 +7,8 @@
 #   ./build.sh test           run the Rust test suites
 #   ./build.sh help           list every target
 #
-# There is no cargo workspace: api/, cli/ and monitoring/ are independent
-# crates, and app/, admin/, monitoring/ui and docs/ are npm projects. This
+# api/, cli/ and monitoring/ are members of one cargo workspace (see the root
+# Cargo.toml); app/, admin/, monitoring/ui and docs/ are npm projects. This
 # script is the one entry point across all of them.
 
 set -euo pipefail
@@ -27,12 +27,12 @@ ensure_node_modules() {
 
 build_api() {
     step "Building api (erno crate)"
-    (cd api && cargo build --all-features)
+    cargo build -p erno --all-features
 }
 
 build_cli() {
     step "Building cli (erno binary)"
-    (cd cli && cargo build)
+    cargo build -p erno-cli
 }
 
 build_app() {
@@ -45,7 +45,7 @@ build_app() {
 
 build_monitoring() {
     step "Building monitoring (collector)"
-    (cd monitoring && cargo build)
+    cargo build -p erno-monitoring
     ensure_node_modules monitoring/ui
     step "Building monitoring console"
     (cd monitoring/ui && npm run build)
@@ -67,10 +67,16 @@ run_test() {
     # api tests need PostgreSQL at postgres://erno:erno@localhost/erno
     # (api/config/test.toml). cli has no tests yet.
     step "Testing api"
-    (cd api && cargo test --all-features)
+    cargo test -p erno --all-features
     step "Testing cli"
-    (cd cli && cargo test)
+    cargo test -p erno-cli
     # Uses its own database (erno_monitoring_test); see monitoring/config/test.toml.
+    #
+    # Deliberately `cd`s instead of `cargo test -p`: monitoring/.cargo/config.toml
+    # sets RUST_TEST_THREADS=1, and cargo finds that by walking up from the
+    # current directory. Its tests issue table-wide statements that deadlock
+    # against each other's uncommitted rows when run in parallel. A guard in the
+    # suite itself fails loudly if this is ever bypassed.
     step "Testing monitoring"
     (cd monitoring && cargo test)
     ensure_node_modules app
@@ -80,27 +86,19 @@ run_test() {
 
 run_check() {
     step "Checking formatting"
-    (cd api && cargo fmt --check)
-    (cd cli && cargo fmt --check)
-    (cd monitoring && cargo fmt --check)
+    cargo fmt --all --check
     step "Running clippy"
-    (cd api && cargo clippy --all-features -- -D warnings)
-    (cd cli && cargo clippy -- -D warnings)
-    (cd monitoring && cargo clippy -- -D warnings)
+    cargo clippy --workspace --all-features --all-targets -- -D warnings
 }
 
 run_fmt() {
     step "Formatting Rust sources"
-    (cd api && cargo fmt)
-    (cd cli && cargo fmt)
-    (cd monitoring && cargo fmt)
+    cargo fmt --all
 }
 
 run_clean() {
     step "Cleaning build outputs"
-    (cd api && cargo clean)
-    (cd cli && cargo clean)
-    (cd monitoring && cargo clean)
+    cargo clean
     rm -rf app/dist docs/dist admin/dist monitoring/ui/dist
 }
 
@@ -109,18 +107,18 @@ usage() {
 Usage: ./build.sh [target...]
 
 Build targets (all run when no target is given):
-  api         Build the erno crate            (cd api  && cargo build --all-features)
-  cli         Build the erno binary           (cd cli  && cargo build)
+  api         Build the erno crate            (cargo build -p erno --all-features)
+  cli         Build the erno binary           (cargo build -p erno-cli)
   app         Build the erno-angular library  (cd app  && npm run build -- erno-angular)
   admin       Build the operator console      (cd admin && npm run build)
-  monitoring  Build the collector + console   (cd monitoring && cargo build)
+  monitoring  Build the collector + console   (cargo build -p erno-monitoring)
   docs        Build the Astro docs site       (cd docs && npm run build)
 
 Other targets:
   test     Run the test suites (Rust suites require PostgreSQL)
-  check    cargo fmt --check + clippy -D warnings, all Rust crates
-  fmt      cargo fmt, all Rust crates
-  clean    cargo clean every crate, remove all dist directories
+  check    cargo fmt --all --check + clippy --workspace -D warnings
+  fmt      cargo fmt --all
+  clean    cargo clean the workspace, remove all dist directories
   help     Show this message
 
 Targets compose, in the order given:  ./build.sh fmt api test

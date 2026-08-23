@@ -19,6 +19,22 @@
 {{- end }}
 - name: APP__TRACING__LOG_LEVEL
   value: {{ .Values.api.log_level | default "info" | quote }}
+{{/*
+  Error and subsystem-health reporting to the monitoring deployment.
+
+  Both are driven by these two keys — `spawn_health_reporter` derives its
+  endpoint and token from `error_reporting`, so there is no third key to set.
+  Without them the whole monitoring platform is dark in production: the API
+  reports nowhere and nothing errors to say so.
+
+  `ingest_token` MUST equal the monitoring chart's collector.server_token.
+*/}}
+{{- if .Values.api.error_reporting.collector_url }}
+- name: APP__ERROR_REPORTING__COLLECTOR_URL
+  value: {{ .Values.api.error_reporting.collector_url | quote }}
+- name: APP__ERROR_REPORTING__INGEST_TOKEN
+  value: {{ .Values.api.error_reporting.ingest_token | quote }}
+{{- end }}
 - name: APP__EMAIL__TYPE
   value: "smtp"
 - name: APP__EMAIL__HOST

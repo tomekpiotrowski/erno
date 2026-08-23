@@ -1,0 +1,43 @@
+{{/*
+  One public host. Everything — the console, the operator API, and the ingest
+  endpoints browsers post to — is served through the console's nginx.
+
+  Prometheus is deliberately absent: it has no authentication of its own and is
+  reached only in-cluster, or through the console's /prometheus/ location, which
+  gates it behind the collector's operator credentials.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    # Stack traces are not small, and the ingest endpoint accepts batches.
+    nginx.ingress.kubernetes.io/proxy-body-size: 2m
+    {{- if .Values.ingress.rateLimitRps }}
+    # The ingest endpoint is internet-facing and its browser token is public by
+    # design, so the edge is where abuse gets capped.
+    nginx.ingress.kubernetes.io/limit-rps: {{ .Values.ingress.rateLimitRps | quote }}
+    {{- end }}
+    {{- if .Values.ingress.tls }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.issuer }}
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    {{- end }}
+spec:
+  {{- if .Values.ingress.tls }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.monitoring.host }}
+      secretName: {{ .Release.Name }}-tls
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.monitoring.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-console
+                port:
+                  number: 80

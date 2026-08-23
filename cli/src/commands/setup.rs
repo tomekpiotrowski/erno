@@ -4,7 +4,7 @@ use crate::ui;
 pub async fn handle_setup() -> ui::Cmd {
     let defaults = GlobalConfig::default();
 
-    ui::section("Global settings");
+    ui::section(ui::icon::SETUP, "Global settings");
     ui::detail("Configuring ~/.erno/config.toml.");
     ui::blank();
 
@@ -24,7 +24,7 @@ pub async fn handle_setup() -> ui::Cmd {
     })?;
     ui::ok("PostgreSQL connection");
 
-    ui::section("GitHub");
+    ui::section(ui::icon::CLOUD, "GitHub");
     ui::detail(
         "Optional — enables `erno deploy` automation.\n\
          Required scopes: repo, write:packages\n\
@@ -63,8 +63,8 @@ pub async fn handle_setup() -> ui::Cmd {
     let path = GlobalConfig::path()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "~/.erno/config.toml".to_string());
-    ui::section("Done");
-    ui::ok(format!("Config saved to {path}"));
+    ui::section(ui::icon::DONE, "Done");
+    ui::finished(ui::icon::DONE, format!("Config saved to {path}"));
     ui::detail("Run `erno doctor` to verify your environment.");
     Ok(())
 }

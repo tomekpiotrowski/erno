@@ -81,6 +81,7 @@ where
                 console_url: console_url.clone(),
             },
             config.health.clone(),
+            config.prometheus.url().map(ToString::to_string),
         );
         super::retention::spawn(
             app.db.clone(),

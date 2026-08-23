@@ -119,6 +119,17 @@ pub async fn purge_user_account(
             serde_json::json!({ "user_id": user_id }),
         )
         .await?;
+    // The user's error reports live in the monitoring deployment, across a
+    // network boundary. Enqueued unconditionally: the handler no-ops when no
+    // collector is configured, and the job row is then a durable record that
+    // erasure was attempted.
+    job_queue
+        .enqueue_by_name(
+            txn,
+            crate::error_reporting::anonymize_user_job::JOB_NAME,
+            serde_json::json!({ "user_id": user_id }),
+        )
+        .await?;
 
     Ok(())
 }
@@ -274,6 +285,22 @@ mod tests {
                 .unwrap()
                 .len(),
             1
+        );
+        // The user's error reports live in a different deployment, so erasure
+        // there is a queued cross-service call rather than part of this
+        // transaction. Enqueued unconditionally: whether a collector is
+        // configured is the handler's business, and the row is the record that
+        // erasure was attempted.
+        let anonymize = queue
+            .enqueued_jobs_of_type(crate::error_reporting::anonymize_user_job::JOB_NAME)
+            .unwrap();
+        assert_eq!(anonymize.len(), 1);
+        assert_eq!(
+            anonymize[0]
+                .arguments
+                .get("user_id")
+                .and_then(|v| v.as_str()),
+            Some(u.id.to_string().as_str()),
         );
     }
 

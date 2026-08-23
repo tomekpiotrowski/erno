@@ -31,6 +31,7 @@ pub async fn worker<ExtraConfig>(
     worker_config: &WorkerQueueConfig,
     app: App<ExtraConfig>,
     job_registry: &JobRegistry<ExtraConfig>,
+    shutdown: &crate::shutdown::Shutdown,
 ) -> Result<(), DbErr>
 where
     ExtraConfig: Clone + Send + Sync + 'static,
@@ -49,9 +50,24 @@ where
     );
 
     loop {
+        // Stop claiming new work once shutdown starts. Checked here rather than
+        // mid-job on purpose: a job interrupted after being claimed is left in
+        // `running` and stays invisible until the stuck-job sweeper reclaims
+        // it, so finishing the one in hand is always better than abandoning it.
+        if shutdown.is_shutting_down() {
+            info!(
+                "Worker '{}' stopping: no new jobs will be claimed",
+                worker_instance_name
+            );
+            return Ok(());
+        }
+
         // Try to claim and execute all available jobs (drain the queue)
         let mut jobs_processed = 0;
         loop {
+            if shutdown.is_shutting_down() {
+                return Ok(());
+            }
             let job_option = claim_oldest_viable_job(worker_config, &app.db).await?;
 
             let Some(job) = job_option else {

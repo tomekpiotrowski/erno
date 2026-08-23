@@ -18,10 +18,7 @@ export function clearBasicAuth(): void {
 
 export const authInterceptor: HttpInterceptorFn = (req, next) => {
   const token = getBasicAuth();
-  if (
-    token &&
-    (req.url.startsWith('/admin/api') || req.url.startsWith('/prometheus'))
-  ) {
+  if (token && req.url.startsWith('/admin/api')) {
     req = req.clone({ setHeaders: { Authorization: `Basic ${token}` } });
   }
   return next(req);

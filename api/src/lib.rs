@@ -37,6 +37,7 @@ pub mod rate_limiting;
 pub mod router;
 pub mod setup_tracing;
 pub mod share;
+pub mod shutdown;
 pub mod storage;
 pub mod sync;
 pub mod token;

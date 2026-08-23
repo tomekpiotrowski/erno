@@ -1,0 +1,47 @@
+{{/*
+  The operator console, and the only thing this deployment exposes publicly.
+
+  Its nginx proxies /api/ through to the collector, so ingest, the operator API
+  and the console are all one origin. That keeps the browser path same-origin
+  (no CORS preflight per flush) and means `collector_url` in the application's
+  chart, the browser SDK's URL and the console URL are all one string.
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-console
+spec:
+  replicas: {{ .Values.console.replicas | default 1 }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-console
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-console
+    spec:
+      imagePullSecrets:
+        - name: {{ .Release.Name }}-registry
+      containers:
+        - name: console
+          image: "ghcr.io/{{github_repo}}/monitoring-ui:{{ .Values.console.imageTag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 80
+          env:
+            - name: COLLECTOR_HOST
+              value: {{ .Release.Name }}-collector
+            - name: COLLECTOR_PORT
+              value: {{ .Values.collector.port | quote }}
+            - name: PROM_HOST
+              value: {{ .Release.Name }}-prometheus
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-console
+spec:
+  selector:
+    app: {{ .Release.Name }}-console
+  ports:
+    - port: 80

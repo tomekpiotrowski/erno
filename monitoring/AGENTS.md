@@ -29,6 +29,14 @@ Several tests operate table-wide by nature — the retention sweep, the regressi
 tests that resolve every issue — and in parallel those block on rows other tests
 have inserted but not yet rolled back, which Postgres reports as a deadlock.
 
+Cargo finds `.cargo/config.toml` by walking up from the working directory, so it
+applies to `cd monitoring && cargo test` but **not** to `cargo test --workspace`
+from the repo root. `setup_with` therefore calls
+`erno::tests::require_single_test_thread`, which panics with an explanation
+instead of letting the deadlocks happen. Every test boots through `setup_with`
+for exactly that reason — a new test that calls `setup_test` directly would
+bypass the guard.
+
 Run the collector locally with `cargo run -- serve` (port 3001, database
 `erno_monitoring`). Apply migrations with `cargo run -- db migrate up`.
 

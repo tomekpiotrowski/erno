@@ -25,8 +25,19 @@ pub async fn handle_test(args: SelectionArgs) -> ui::Cmd {
     let all = load_packages(&root)?;
     let selected = select(&all, &args)?;
 
-    if selected.iter().any(|p| p.database || p.is_e2e()) {
-        ensure_test_database(&root).await?;
+    // Each package that declares `database` gets its own test database. The
+    // monitoring collector has one of its own, so a single hardcoded
+    // api/config/test.toml is no longer enough. Duplicates are skipped, since
+    // e2e and any package without its own config fall back to the api's.
+    let mut ensured: Vec<String> = Vec::new();
+    for package in selected.iter().filter(|p| p.database || p.is_e2e()) {
+        let config = test_config_path(&root, &package.dir);
+        let key = config.display().to_string();
+        if ensured.contains(&key) {
+            continue;
+        }
+        ensured.push(key);
+        ensure_test_database(&config).await?;
     }
 
     // The e2e package is not a plain command: it allocates ports, boots the API,
@@ -41,7 +52,7 @@ pub async fn handle_test(args: SelectionArgs) -> ui::Cmd {
             if !package.is_e2e() {
                 return None;
             }
-            ui::section(&package.name);
+            ui::section(ui::icon::TEST, &package.name);
             Some(run_e2e(&root, &args.rest))
         },
     );
@@ -222,8 +233,21 @@ fn wait_for_http_while(url: &str, seconds: u64, mut still_running: impl FnMut() 
     false
 }
 
-fn test_database_url(root: &Path) -> Option<String> {
-    let raw = std::fs::read_to_string(root.join("api/config/test.toml")).ok()?;
+/// Which `config/test.toml` describes a package's test database.
+///
+/// A package with its own config owns its own database; anything else — `e2e`
+/// most of all — runs against the api's.
+fn test_config_path(root: &Path, dir: &str) -> std::path::PathBuf {
+    let own = root.join(dir).join("config").join("test.toml");
+    if own.is_file() {
+        own
+    } else {
+        root.join("api").join("config").join("test.toml")
+    }
+}
+
+fn test_database_url(config: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string(config).ok()?;
     let mut in_database = false;
     for line in raw.lines() {
         let line = line.trim();
@@ -262,14 +286,14 @@ fn database_user(url: &str) -> Option<String> {
     }
 }
 
-async fn ensure_test_database(root: &Path) -> Result<(), String> {
+async fn ensure_test_database(config: &Path) -> Result<(), String> {
     let ready = Command::new("pg_isready").status();
     match ready {
         Ok(s) if s.success() => {}
         _ => return Err("PostgreSQL is not running (`pg_isready` failed)".into()),
     }
-    let url = test_database_url(root)
-        .ok_or_else(|| "could not read [database].url from api/config/test.toml".to_string())?;
+    let url = test_database_url(config)
+        .ok_or_else(|| format!("could not read [database].url from {}", config.display()))?;
     let db =
         database_name(&url).ok_or_else(|| format!("could not parse database name from {url}"))?;
     let owner = database_user(&url);
@@ -409,9 +433,31 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            test_database_url(&root).as_deref(),
+            test_database_url(&root.join("api/config/test.toml")).as_deref(),
             Some("postgres://u:p@localhost/x_test")
         );
+
+        // A package with its own config owns its own database. The collector
+        // does; e2e does not, and falls back to the api's.
+        std::fs::create_dir_all(root.join("monitoring/config")).unwrap();
+        std::fs::write(
+            root.join("monitoring/config/test.toml"),
+            "[database]\nurl = \"postgres://u:p@localhost/x_monitoring_test\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            test_config_path(&root, "monitoring"),
+            root.join("monitoring/config/test.toml")
+        );
+        assert_eq!(
+            test_config_path(&root, "e2e"),
+            root.join("api/config/test.toml")
+        );
+        assert_eq!(
+            test_database_url(&test_config_path(&root, "monitoring")).as_deref(),
+            Some("postgres://u:p@localhost/x_monitoring_test")
+        );
+
         let _ = std::fs::remove_dir_all(&root);
     }
 }

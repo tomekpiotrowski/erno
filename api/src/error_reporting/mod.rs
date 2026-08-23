@@ -12,6 +12,7 @@
 //! [`fingerprint`] and [`scrub`] are shared by both and are deliberately pure:
 //! no database, no I/O, no configuration.
 
+pub mod anonymize_user_job;
 pub mod collector;
 pub mod config;
 pub mod fingerprint;

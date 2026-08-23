@@ -14,15 +14,28 @@ Rust/Axum SaaS infrastructure library — batteries-included auth, jobs, billing
 
 ## Building everything
 
-There is no cargo workspace — `api/` and `cli/` are independent crates, and `app/` and `docs/` are npm projects. `./build.sh` is the single entry point across all four:
+`api/`, `cli/` and `monitoring/` are members of one cargo workspace, declared in the root `Cargo.toml`; `app/`, `admin/`, `monitoring/ui` and `docs/` are npm projects. `./build.sh` is the single entry point across all of them:
 
 ```sh
-./build.sh              # build api, cli, app, and docs
+./build.sh              # build api, cli, app, admin, monitoring, and docs
 ./build.sh api cli      # build only those parts
 ./build.sh test         # Rust test suites (api tests require PostgreSQL)
-./build.sh check        # cargo fmt --check + clippy -D warnings, both crates
+./build.sh check        # cargo fmt --all --check + clippy --workspace -D warnings
 ./build.sh help         # list every target
 ```
+
+Shared dependency versions live in `[workspace.dependencies]` in the root
+`Cargo.toml`. Members inherit with `serde = { workspace = true }` and add extra
+features where they need them — `tokio = { workspace = true, features = ["fs"] }`.
+Add a dependency there whenever a second crate starts using it, so the three
+crates cannot drift apart again.
+
+**The monitoring test suite must run single-threaded.** Its tests issue
+table-wide statements that deadlock against each other's uncommitted rows.
+`monitoring/.cargo/config.toml` sets `RUST_TEST_THREADS=1`, and cargo only finds
+it when invoked from inside `monitoring/` — so run the suite via `./build.sh
+test` or `cd monitoring && cargo test`, never `cargo test --workspace` from the
+root. A guard in the suite fails loudly if that happens anyway.
 
 Per-directory instructions below still apply when working inside one part.
 

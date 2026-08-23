@@ -62,7 +62,7 @@ pub async fn create(
         return Err(RuleError::Invalid("name is required".to_string()));
     }
     let source = RuleSource::from_str_opt(&input.source).ok_or_else(|| {
-        RuleError::Invalid("source must be errors, uptime, or subsystem".to_string())
+        RuleError::Invalid("source must be errors, uptime, subsystem, or promql".to_string())
     })?;
     if !input.threshold.is_finite() {
         return Err(RuleError::Invalid("threshold must be a number".to_string()));
@@ -73,9 +73,12 @@ pub async fn create(
         name: Set(truncate(name, 200)),
         enabled: Set(true),
         source: Set(source.as_str().to_string()),
+        // 200 was sized for a check id or a gauge name. A PromQL expression is
+        // routinely longer than that, and silently truncating one produces a
+        // query that still parses and means something else.
         selector: Set(input
             .selector
-            .map(|s| truncate(&s, 200))
+            .map(|s| truncate(&s, 2000))
             .unwrap_or_default()),
         comparator: Set(
             Comparator::from_str_or_gt(input.comparator.as_deref().unwrap_or("gt"))

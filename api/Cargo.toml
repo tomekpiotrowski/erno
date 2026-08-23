@@ -1,7 +1,7 @@
 [package]
 name = "erno"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 authors = ["Erno Contributors"]
 description = "Shared infrastructure library for building REST APIs with Axum"
 license = "MIT"
@@ -11,41 +11,41 @@ documentation = "https://docs.rs/erno"
 readme = "README.md"
 keywords = ["axum", "web", "api", "framework", "jobs"]
 categories = ["web-programming", "asynchronous"]
-rust-version = "1.88.0"
+rust-version.workspace = true
 
 [features]
 default = []
 test-utils = ["dep:axum-test", "dep:lets_expect"]
 
 [dependencies]
-axum = { version = "0.8.4", features = ["ws", "multipart"] }
+axum = { workspace = true, features = ["ws", "multipart"] }
 axum-macros = "0.5.0"
-argon2 = "0.5"
+argon2 = { workspace = true }
 sha2 = "0.10"
-async-trait = "0.1"
-base64 = "0.22"
-chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4.5", features = ["derive"] }
-config_rs = { package = "config", git = "https://github.com/rust-cli/config-rs.git", tag = "v0.15.13" }
+async-trait = { workspace = true }
+base64 = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+config_rs = { workspace = true }
 cron = "0.12"
 dashmap = "6.1"
 fastrand = "2.1"
 jsonwebtoken = "9.3"
 lettre = { version = "0.11.4", features = ["tokio1", "tokio1-native-tls", "builder", "smtp-transport", "serde"] }
 log = "0.4.27"
-rand = "0.8"
-sea-orm = { version = "1.1.0", features = ["sqlx-postgres", "runtime-tokio", "macros", "with-uuid", "with-time"] }
-sea-orm-migration = { version = "1.1.14" , features = ["sqlx-postgres"] }
-serde = { version = "1.0.219", features = ["derive"] }
-serde_json = "1.0"
+rand = { workspace = true }
+sea-orm = { workspace = true }
+sea-orm-migration = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 sqlx = { version = "0.8", features = ["postgres"] }
 strum = { version = "0.26.3", features = ["derive"] }
 thiserror = "2.0.12"
-tokio = { version = "1.47.1", features = ["rt-multi-thread", "fs", "sync", "time", "macros"] }
+tokio = { workspace = true, features = ["fs", "signal"] }
 tower-http = { version = "0.6.6", features = ["cors", "trace", "catch-panic"] }
-tracing = "0.1.41"
+tracing = { workspace = true }
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "time", "local-time"] }
-uuid = { version = "1.12", features = ["v4", "serde"] }
+uuid = { workspace = true }
 regex = "1.11.1"
 validator = { version = "0.20.0", features = ["derive"] }
 time = { version = "0.3.41", features = ["formatting", "local-offset"] }
@@ -54,13 +54,13 @@ async-stripe = { version = "0.40", features = ["runtime-tokio-hyper"] }
 aws-sdk-s3 = "1"
 aws-config = "1"
 bytes = "1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-axum-test = { version = "18.5", optional = true }
+reqwest = { workspace = true }
+axum-test = { workspace = true, optional = true }
 lets_expect = { version = "0.5.1", optional = true }
 metrics = "0.24"
 metrics-exporter-prometheus = "0.16"
 
 
 [dev-dependencies]
-axum-test = "18.5"
-toml = "0.8"
+axum-test = { workspace = true }
+toml = { workspace = true }

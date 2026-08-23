@@ -40,9 +40,13 @@ use super::{job_registry::JobRegistry, scheduled_job::ScheduledJob};
 fn verify_job_types_have_workers<ExtraConfig>(
     workers_config: &WorkersConfig,
     job_registry: &JobRegistry<ExtraConfig>,
-) where
+) -> Vec<&'static str>
+where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
+    // Built-in job types with no pool of their own, handed to the default pool.
+    let mut fallback: Vec<&'static str> = Vec::new();
+
     // Collect all job types that have worker pools configured
     let mut covered_job_types: HashSet<&str> = HashSet::new();
 
@@ -52,12 +56,27 @@ fn verify_job_types_have_workers<ExtraConfig>(
         }
     }
 
+    let builtin = crate::boot::builtin_job_names();
     for job_type in job_registry.job_names() {
+        if covered_job_types.contains(*job_type) {
+            continue;
+        }
+        // A framework upgrade that adds a built-in job type must not panic
+        // every existing deployment at boot: the app author never wrote that
+        // config and could not have opted in. Fall back to the default pool and
+        // say so. An *app's* own unlisted job type is a real mistake — someone
+        // registered a job and forgot the worker — so that still panics.
         assert!(
-            covered_job_types.contains(*job_type),
+            builtin.contains(*job_type),
             "No worker pool configured to handle job type '{job_type}'. Please add a worker pool for this job type."
         );
+        tracing::warn!(
+            "Built-in job type '{job_type}' is in no worker pool; it will run on the default \
+             pool. Add it to a [jobs.workers.*] list to choose its concurrency."
+        );
+        fallback.push(*job_type);
     }
+    fallback
 }
 
 pub async fn job_supervisor<ExtraConfig>(
@@ -65,13 +84,18 @@ pub async fn job_supervisor<ExtraConfig>(
     app: App<ExtraConfig>,
     job_registry: JobRegistry<ExtraConfig>,
     job_schedule: Vec<ScheduledJob>,
+    mut shutdown: crate::shutdown::Shutdown,
 ) where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    // Verify that all registered job types have corresponding worker pools
-    verify_job_types_have_workers(&jobs_config.workers, &job_registry);
+    // Verify that all registered job types have corresponding worker pools.
+    // Built-in types missing from the config are adopted rather than fatal, so
+    // a framework upgrade cannot stop an existing deployment from booting.
+    let mut workers = jobs_config.workers.clone();
+    let fallback = verify_job_types_have_workers(&workers, &job_registry);
+    adopt_into_default_pool(&mut workers, fallback);
     // Start all worker pools
-    start_worker_pools(&jobs_config.workers, &app, &job_registry);
+    start_worker_pools(&workers, &app, &job_registry, &shutdown);
 
     // Start the scheduler
     start_scheduler(&app.db, job_schedule);
@@ -86,15 +110,57 @@ pub async fn job_supervisor<ExtraConfig>(
         &app.db,
     );
 
-    // Keep the supervisor running
-    run_supervisor_loop().await;
+    // Keep the supervisor running until shutdown, then give the workers a
+    // moment to finish whatever they had already claimed.
+    shutdown.recv().await;
+    info!("🧹 Job supervisor stopping; letting in-flight jobs finish");
+    tokio::time::sleep(Duration::from_secs(1)).await;
 }
 
 /// Start all worker pools based on configuration
+/// Give unlisted built-in job types a pool to run on.
+///
+/// Warning about them without this would be worse than the panic it replaces:
+/// the deployment would boot, and those jobs would pile up unprocessed with
+/// only a log line to say why.
+fn adopt_into_default_pool(config: &mut WorkersConfig, fallback: Vec<&'static str>) {
+    if fallback.is_empty() {
+        return;
+    }
+    // Prefer a pool actually named `default`; otherwise any pool is better than
+    // none, and a config with no pools at all gets one.
+    let pool = if config.workers.contains_key("default") {
+        config.workers.get_mut("default")
+    } else {
+        config.workers.values_mut().next()
+    };
+    match pool {
+        Some(pool) => pool
+            .jobs
+            .extend(fallback.into_iter().map(ToString::to_string)),
+        None => {
+            config.workers.insert(
+                "default".to_string(),
+                WorkerQueueConfig {
+                    jobs: fallback.into_iter().map(ToString::to_string).collect(),
+                    count: 1,
+                    // Unset means "inherit jobs.defaults", which is what a pool
+                    // nobody configured should do.
+                    job_timeout: None,
+                    max_retries: None,
+                    base_retry_delay_seconds: None,
+                    retry_backoff_multiplier: None,
+                },
+            );
+        }
+    }
+}
+
 fn start_worker_pools<ExtraConfig>(
     config: &WorkersConfig,
     app: &App<ExtraConfig>,
     job_registry: &JobRegistry<ExtraConfig>,
+    shutdown: &crate::shutdown::Shutdown,
 ) where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
@@ -106,7 +172,7 @@ fn start_worker_pools<ExtraConfig>(
             worker_name, worker_config.count, worker_config.jobs
         );
 
-        start_worker_pool(worker_name, worker_config, app, job_registry);
+        start_worker_pool(worker_name, worker_config, app, job_registry, shutdown);
     }
 }
 
@@ -116,6 +182,7 @@ fn start_worker_pool<ExtraConfig>(
     worker_config: &WorkerQueueConfig,
     app: &App<ExtraConfig>,
     job_registry: &JobRegistry<ExtraConfig>,
+    shutdown: &crate::shutdown::Shutdown,
 ) where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
@@ -124,6 +191,7 @@ fn start_worker_pool<ExtraConfig>(
         let worker_config_clone = worker_config.clone();
         let app_clone = app.clone();
         let job_registry_clone = job_registry.clone();
+        let worker_shutdown = shutdown.clone();
 
         spawn(async move {
             run_worker_with_restart(
@@ -131,6 +199,7 @@ fn start_worker_pool<ExtraConfig>(
                 &worker_config_clone,
                 app_clone,
                 job_registry_clone,
+                worker_shutdown,
             )
             .await;
         });
@@ -143,6 +212,7 @@ async fn run_worker_with_restart<ExtraConfig>(
     worker_config: &WorkerQueueConfig,
     app: App<ExtraConfig>,
     job_registry: JobRegistry<ExtraConfig>,
+    shutdown: crate::shutdown::Shutdown,
 ) where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
@@ -153,12 +223,18 @@ async fn run_worker_with_restart<ExtraConfig>(
             worker_instance_name, worker_config.jobs, restart_count
         );
 
+        // A worker that returned because of shutdown must not be restarted.
+        if shutdown.is_shutting_down() {
+            return;
+        }
+
         let worker_app = app.clone();
         if let Err(e) = worker(
             worker_instance_name,
             worker_config,
             worker_app,
             &job_registry,
+            &shutdown,
         )
         .await
         {
@@ -224,12 +300,6 @@ fn start_recovery_task(
 }
 
 /// Keep the supervisor running indefinitely
-async fn run_supervisor_loop() {
-    loop {
-        sleep(Duration::from_secs(3600)).await;
-    }
-}
-
 async fn run_recovery_loop(
     config: &WorkersConfig,
     defaults: JobRetryDefaults,
@@ -474,4 +544,99 @@ async fn cleanup_jobs_by_status(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        app::App,
+        jobs::{Job, JobError},
+    };
+    use std::collections::HashMap;
+
+    /// An app's own job type — not something the framework registers.
+    struct AppJob;
+    impl Job<()> for AppJob {
+        type Arguments = ();
+        fn name() -> &'static str {
+            "an_app_job"
+        }
+        async fn execute(_: &App<()>, _: Self::Arguments) -> Result<(), JobError> {
+            Ok(())
+        }
+    }
+
+    fn workers(jobs: &[&str]) -> WorkersConfig {
+        let mut map = HashMap::new();
+        map.insert(
+            "default".to_string(),
+            WorkerQueueConfig {
+                jobs: jobs.iter().map(ToString::to_string).collect(),
+                count: 1,
+                job_timeout: None,
+                max_retries: None,
+                base_retry_delay_seconds: None,
+                retry_backoff_multiplier: None,
+            },
+        );
+        WorkersConfig { workers: map }
+    }
+
+    #[test]
+    fn a_builtin_job_type_missing_from_the_config_is_adopted_rather_than_fatal() {
+        // The case that matters: a framework upgrade adds a built-in job type,
+        // and every existing deployment's config predates it. Panicking there
+        // would stop them booting for something the app author never wrote.
+        let mut registry = JobRegistry::<()>::new();
+        crate::boot::register_builtin_jobs(&mut registry);
+
+        let mut config = workers(&[]);
+        let fallback = verify_job_types_have_workers(&config, &registry);
+        assert!(!fallback.is_empty());
+
+        adopt_into_default_pool(&mut config, fallback);
+        let adopted = &config.workers["default"].jobs;
+        // Every built-in ends up somewhere it will actually be processed —
+        // warning about them without this would be worse than the panic, since
+        // the jobs would pile up silently.
+        for name in crate::boot::builtin_job_names() {
+            assert!(adopted.iter().any(|j| j == name), "{name} was not adopted");
+        }
+    }
+
+    #[test]
+    fn an_apps_own_unlisted_job_type_still_panics() {
+        // This is the bug the check exists for: someone registered a job and
+        // forgot the worker pool, so it would never run.
+        let mut registry = JobRegistry::<()>::new();
+        crate::boot::register_builtin_jobs(&mut registry);
+        registry.register_job::<AppJob>();
+
+        let covered: Vec<&str> = crate::boot::builtin_job_names().into_iter().collect();
+        let config = workers(&covered);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            verify_job_types_have_workers(&config, &registry)
+        }));
+        assert!(result.is_err(), "an unlisted app job type must panic");
+    }
+
+    #[test]
+    fn a_fully_configured_deployment_adopts_nothing() {
+        let mut registry = JobRegistry::<()>::new();
+        crate::boot::register_builtin_jobs(&mut registry);
+        let covered: Vec<&str> = crate::boot::builtin_job_names().into_iter().collect();
+        assert!(verify_job_types_have_workers(&workers(&covered), &registry).is_empty());
+    }
+
+    #[test]
+    fn adoption_creates_a_pool_when_the_config_declares_none() {
+        let mut config = WorkersConfig {
+            workers: HashMap::new(),
+        };
+        adopt_into_default_pool(&mut config, vec!["some_builtin"]);
+        assert_eq!(config.workers["default"].jobs, vec!["some_builtin"]);
+        // A pool with zero workers would adopt the job and never run it.
+        assert!(config.workers["default"].count >= 1);
+    }
 }

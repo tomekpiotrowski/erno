@@ -21,20 +21,31 @@ pub struct Observation {
     pub description: String,
 }
 
+/// What [`observe`] needs. A struct rather than five positional arguments, and
+/// built once per evaluation pass by the runner.
+pub struct ObserveContext<'a> {
+    pub db: &'a DatabaseConnection,
+    pub thresholds: &'a HealthThresholds,
+    /// Shared with the notifier; the runner already builds one.
+    pub http: &'a reqwest::Client,
+    /// Base URL of the bundled Prometheus. `None` disables the PromQL source.
+    pub prometheus_url: Option<&'a str>,
+}
+
 /// Evaluate one rule against current data.
 ///
 /// # Errors
 ///
 /// Returns the database error when a query fails.
 pub async fn observe(
-    db: &DatabaseConnection,
+    ctx: &ObserveContext<'_>,
     rule: &alert_rule::Model,
-    thresholds: &HealthThresholds,
 ) -> Result<Observation, DbErr> {
     match RuleSource::from_str_opt(&rule.source) {
-        Some(RuleSource::Errors) => observe_errors(db, rule).await,
-        Some(RuleSource::Uptime) => observe_uptime(db, rule).await,
-        Some(RuleSource::Subsystem) => observe_subsystem(db, rule, thresholds).await,
+        Some(RuleSource::Errors) => observe_errors(ctx.db, rule).await,
+        Some(RuleSource::Uptime) => observe_uptime(ctx.db, rule).await,
+        Some(RuleSource::Subsystem) => observe_subsystem(ctx.db, rule, ctx.thresholds).await,
+        Some(RuleSource::Promql) => Ok(observe_promql(ctx, rule).await),
         // An unrecognised source must read as "nothing wrong" rather than
         // firing on a typo.
         None => Ok(Observation {
@@ -42,6 +53,101 @@ pub async fn observe(
             description: format!("unknown source {:?}", rule.source),
         }),
     }
+}
+
+/// Run the rule's selector as an instant PromQL query.
+///
+/// Infallible by design: `observe` returns `DbErr`, and a Prometheus failure is
+/// not one. A failed or empty query reads as **not breaching**, consistent with
+/// the unknown-source arm.
+///
+/// That has a cost worth stating plainly: while Prometheus is unreachable,
+/// every PromQL rule silently stops firing. The mitigation is the counter
+/// below — the collector's own `/metrics` is scraped by that same Prometheus,
+/// so `erno_alert_source_unavailable_total` is itself alertable, and an
+/// operator can build the one rule that catches the blind spot.
+async fn observe_promql(ctx: &ObserveContext<'_>, rule: &alert_rule::Model) -> Observation {
+    let unavailable = |reason: &str| {
+        metrics::counter!("erno_alert_source_unavailable_total", "source" => "promql").increment(1);
+        Observation {
+            value: 0.0,
+            description: format!("PromQL unavailable ({reason})"),
+        }
+    };
+
+    let Some(base) = ctx.prometheus_url.filter(|u| !u.trim().is_empty()) else {
+        return unavailable("no prometheus url configured");
+    };
+    if rule.selector.trim().is_empty() {
+        return Observation {
+            value: 0.0,
+            description: "PromQL rule has no query".to_string(),
+        };
+    }
+
+    let url = format!("{}/api/v1/query", base.trim_end_matches('/'));
+    let response = match ctx
+        .http
+        .get(&url)
+        .query(&[("query", rule.selector.as_str())])
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => return unavailable(&e.to_string()),
+    };
+    if !response.status().is_success() {
+        return unavailable(&format!("status {}", response.status()));
+    }
+    let Ok(body) = response.text().await else {
+        return unavailable("unreadable response");
+    };
+
+    match scalar_from_instant_response(&body) {
+        Some(value) => Observation {
+            value,
+            description: format!("{} = {value}", truncate_for_display(&rule.selector)),
+        },
+        // An empty result is a real answer from a healthy Prometheus — the
+        // series simply has no samples — so it is not counted as unavailable.
+        None => Observation {
+            value: 0.0,
+            description: format!(
+                "{} returned no samples",
+                truncate_for_display(&rule.selector)
+            ),
+        },
+    }
+}
+
+/// Pull the single scalar out of a Prometheus instant-query response.
+///
+/// Split from the request so it can be asserted against fixtures without a
+/// server, the same split as `render_config` in the CLI.
+#[must_use]
+pub fn scalar_from_instant_response(body: &str) -> Option<f64> {
+    let parsed: serde_json::Value = serde_json::from_str(body).ok()?;
+    if parsed.get("status").and_then(|s| s.as_str()) != Some("success") {
+        return None;
+    }
+    let result = parsed.get("data")?.get("result")?.as_array()?;
+    // `value` for an instant vector or scalar, `values` for a matrix — take the
+    // last sample in that case, which is the most recent.
+    let first = result.first()?;
+    let sample = first
+        .get("value")
+        .or_else(|| first.get("values").and_then(|v| v.as_array()?.last()))?;
+    // Prometheus renders sample values as strings, including "NaN" and "+Inf".
+    let raw = sample.as_array()?.get(1)?.as_str()?;
+    raw.parse::<f64>().ok().filter(|v| v.is_finite())
+}
+
+fn truncate_for_display(query: &str) -> String {
+    if query.chars().count() <= 60 {
+        return query.to_string();
+    }
+    let head: String = query.chars().take(57).collect();
+    format!("{head}...")
 }
 
 async fn observe_errors(
@@ -177,6 +283,58 @@ fn humanize_window(seconds: i64) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::scalar_from_instant_response as scalar;
+
+    #[test]
+    fn a_prometheus_instant_vector_yields_its_sample() {
+        // Prometheus renders sample values as strings, so a naive as_f64()
+        // would silently read every result as "no data".
+        let body = r#"{"status":"success","data":{"resultType":"vector",
+            "result":[{"metric":{"job":"api"},"value":[1700000000,"0.42"]}]}}"#;
+        assert_eq!(scalar(body), Some(0.42));
+    }
+
+    #[test]
+    fn a_matrix_takes_the_most_recent_sample() {
+        let body = r#"{"status":"success","data":{"resultType":"matrix",
+            "result":[{"metric":{},"values":[[1,"1"],[2,"7"]]}]}}"#;
+        assert_eq!(scalar(body), Some(7.0));
+    }
+
+    #[test]
+    fn an_empty_result_is_no_value_rather_than_zero() {
+        // Zero would be a *reading*, and a `lt` rule would fire on it.
+        let body = r#"{"status":"success","data":{"resultType":"vector","result":[]}}"#;
+        assert_eq!(scalar(body), None);
+    }
+
+    #[test]
+    fn an_error_response_yields_nothing() {
+        let body = r#"{"status":"error","errorType":"bad_data","error":"parse error"}"#;
+        assert_eq!(scalar(body), None);
+        assert_eq!(scalar("not json at all"), None);
+        assert_eq!(scalar("{}"), None);
+    }
+
+    #[test]
+    fn non_finite_samples_are_rejected() {
+        // Prometheus emits these literally, and NaN compares false against
+        // every threshold, which would make a rule quietly undecidable.
+        for raw in ["NaN", "+Inf", "-Inf"] {
+            let body = format!(
+                r#"{{"status":"success","data":{{"result":[{{"metric":{{}},"value":[1,"{raw}"]}}]}}}}"#
+            );
+            assert_eq!(scalar(&body), None, "{raw} should not be a reading");
+        }
+    }
+
+    #[test]
+    fn promql_is_a_recognised_source_and_round_trips() {
+        use crate::error_reporting::collector::alerting::rules::RuleSource;
+        assert_eq!(RuleSource::from_str_opt("promql"), Some(RuleSource::Promql));
+        assert_eq!(RuleSource::Promql.as_str(), "promql");
+    }
+
     use super::*;
 
     #[test]

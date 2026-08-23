@@ -19,6 +19,11 @@ pub enum RuleSource {
     Uptime,
     /// Application health readings: how many instances are unhealthy.
     Subsystem,
+    /// An instant PromQL query against the bundled Prometheus.
+    ///
+    /// The source that makes the metrics actionable — everything Prometheus
+    /// scrapes becomes alertable without teaching the collector each signal.
+    Promql,
 }
 
 impl RuleSource {
@@ -29,6 +34,7 @@ impl RuleSource {
             Self::Errors => "errors",
             Self::Uptime => "uptime",
             Self::Subsystem => "subsystem",
+            Self::Promql => "promql",
         }
     }
 
@@ -39,6 +45,7 @@ impl RuleSource {
             "errors" => Some(Self::Errors),
             "uptime" => Some(Self::Uptime),
             "subsystem" => Some(Self::Subsystem),
+            "promql" => Some(Self::Promql),
             _ => None,
         }
     }

@@ -8,6 +8,7 @@
 
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use clap::Args;
 use serde::Deserialize;
@@ -69,6 +70,14 @@ impl Phase {
             Phase::Build => "build",
             Phase::Lint => "lint",
             Phase::Test => "test",
+        }
+    }
+
+    pub fn icon(self) -> &'static str {
+        match self {
+            Phase::Build => ui::icon::BUILD,
+            Phase::Lint => ui::icon::LINT,
+            Phase::Test => ui::icon::TEST,
         }
     }
 }
@@ -242,52 +251,26 @@ fn conventional(root: &Path) -> Vec<Package> {
     let mut packages = Vec::new();
 
     if root.join("api").join("Cargo.toml").is_file() {
-        packages.push(Package {
-            name: "api".into(),
-            dir: "api".into(),
-            default: true,
-            database: true,
-            kind: None,
-            build: vec![step("cargo", &["build"])],
-            lint: vec![
-                lint_step("cargo", &["fmt", "--check"], &["fmt"]),
-                lint_step(
-                    "cargo",
-                    &["clippy", "--all-targets", "--", "-D", "warnings"],
-                    &["clippy", "--all-targets", "--fix", "--allow-dirty"],
-                ),
-            ],
-            test: vec![step("cargo", &["test"])],
-            dev: Vec::new(),
-        });
+        packages.push(rust_package("api", "api"));
     }
 
-    let app = root.join("app");
-    if app.join("package.json").is_file() {
-        let test = if has_npm_script(&app, "test:ci") {
-            step("npm", &["run", "test:ci"])
-        } else {
-            step("npm", &["test", "--", "--watch=false"])
-        };
-        let mut build = Vec::new();
-        if has_npm_script(&app, "build") {
-            build.push(step("npm", &["run", "build"]));
+    // The collector: its own crate, its own test database.
+    if root.join("monitoring").join("Cargo.toml").is_file() {
+        packages.push(rust_package("monitoring", "monitoring"));
+    }
+
+    for (name, dir) in [
+        ("app", "app"),
+        ("www", "www"),
+        ("admin", "admin"),
+        // The monitoring operator console. A separate package from the
+        // collector because a package runs its steps in one directory, and
+        // npm-in-monitoring/ui cannot share one with cargo-in-monitoring.
+        ("console", "monitoring/ui"),
+    ] {
+        if let Some(package) = npm_package(root, name, dir) {
+            packages.push(package);
         }
-        let mut lint = Vec::new();
-        if has_npm_script(&app, "lint") {
-            lint.push(step("npm", &["run", "lint"]));
-        }
-        packages.push(Package {
-            name: "app".into(),
-            dir: "app".into(),
-            default: true,
-            database: false,
-            kind: None,
-            build,
-            lint,
-            test: vec![test],
-            dev: Vec::new(),
-        });
     }
 
     if let Some(dir) = playwright_dir(root) {
@@ -305,6 +288,65 @@ fn conventional(root: &Path) -> Vec<Package> {
     }
 
     packages
+}
+
+/// A cargo crate laid out the way `erno new` scaffolds them.
+fn rust_package(name: &str, dir: &str) -> Package {
+    Package {
+        name: name.into(),
+        dir: dir.into(),
+        default: true,
+        database: true,
+        kind: None,
+        build: vec![step("cargo", &["build"])],
+        lint: vec![
+            lint_step("cargo", &["fmt", "--check"], &["fmt"]),
+            lint_step(
+                "cargo",
+                &["clippy", "--all-targets", "--", "-D", "warnings"],
+                &["clippy", "--all-targets", "--fix", "--allow-dirty"],
+            ),
+        ],
+        test: vec![step("cargo", &["test"])],
+        dev: Vec::new(),
+    }
+}
+
+/// An npm project, with each phase gated on the script actually existing — a
+/// project without a `lint` script must not grow a step that always fails.
+///
+/// `None` when there is no package.json, so a layout missing `www/` or
+/// `admin/` simply has no such package.
+fn npm_package(root: &Path, name: &str, dir: &str) -> Option<Package> {
+    let path = root.join(dir);
+    if !path.join("package.json").is_file() {
+        return None;
+    }
+    let mut build = Vec::new();
+    if has_npm_script(&path, "build") {
+        build.push(step("npm", &["run", "build"]));
+    }
+    let mut lint = Vec::new();
+    if has_npm_script(&path, "lint") {
+        lint.push(step("npm", &["run", "lint"]));
+    }
+    let mut test = Vec::new();
+    if has_npm_script(&path, "test:ci") {
+        test.push(step("npm", &["run", "test:ci"]));
+    } else if has_npm_script(&path, "test") {
+        test.push(step("npm", &["test", "--", "--watch=false"]));
+    }
+    Some(Package {
+        name: name.into(),
+        dir: dir.into(),
+        default: true,
+        database: false,
+        kind: None,
+        build,
+        lint,
+        test,
+        dev: Vec::new(),
+    })
 }
 
 fn step(command: &str, args: &[&str]) -> Step {
@@ -404,23 +446,25 @@ pub fn run_phase(
     args: &SelectionArgs,
     special: &mut dyn FnMut(&Package) -> Option<bool>,
 ) -> bool {
-    let mut results: Vec<(String, bool)> = Vec::new();
+    let started = Instant::now();
+    let mut results: Vec<(String, bool, Duration)> = Vec::new();
 
     for package in selected {
         let steps = steps_to_run(package, phase, args.all);
 
+        let package_started = Instant::now();
         let ok = match special(package) {
             Some(handled) => handled,
             None => {
                 if steps.is_empty() {
                     continue;
                 }
-                ui::section(&package.name);
+                ui::section(phase.icon(), &package.name);
                 run_steps(root, package, &steps, fix, &args.rest)
             }
         };
 
-        results.push((package.name.clone(), ok));
+        results.push((package.name.clone(), ok, package_started.elapsed()));
         if !ok && args.fail_fast {
             break;
         }
@@ -433,18 +477,36 @@ pub fn run_phase(
 
     // The summary is the command's result, not narration, so `--quiet` keeps it
     // — which is why it goes through `emit` rather than `ui::ok`/`ui::fail`.
+    let rows: Vec<ui::Row> = results
+        .iter()
+        .map(|(name, ok, took)| ui::Row {
+            level: if *ok { ui::Level::Ok } else { ui::Level::Fail },
+            label: name.clone(),
+            detail: Some(ui::fmt_duration(*took)),
+            hint: None,
+        })
+        .collect();
     ui::emit(ui::Stream::Err, "");
-    for (name, ok) in &results {
-        let level = if *ok { ui::Level::Ok } else { ui::Level::Fail };
-        ui::emit(ui::Stream::Err, &ui::render_row(ui::color(), level, name));
-    }
+    ui::emit_block(
+        ui::Stream::Err,
+        &ui::render_rows(ui::Face::current(), &rows),
+    );
 
-    let failures = results.iter().filter(|(_, ok)| !ok).count();
+    let total = ui::fmt_duration(started.elapsed());
+    let failures = results.iter().filter(|(_, ok, _)| !ok).count();
     if failures > 0 {
         ui::emit(ui::Stream::Err, "");
-        ui::fatal(&format!("{failures} of {} packages failed", results.len()));
+        ui::fatal(&format!(
+            "{failures} of {} packages failed in {total}",
+            results.len()
+        ));
+        return false;
     }
-    failures == 0
+    ui::finished(
+        ui::icon::DONE,
+        format!("{} finished in {total}", phase.label()),
+    );
+    true
 }
 
 fn run_steps(root: &Path, package: &Package, steps: &[&Step], fix: bool, rest: &[String]) -> bool {
@@ -452,16 +514,47 @@ fn run_steps(root: &Path, package: &Package, steps: &[&Step], fix: bool, rest: &
     if dir.join("package.json").is_file() && !ensure_npm_modules(&dir, &package.name) {
         return false;
     }
-    for step in steps {
+    // Sized up front so every step's time sits in the same column, however
+    // long the command lines are.
+    let labels: Vec<String> = steps
+        .iter()
+        .map(|step| step_label(step, fix, rest))
+        .collect();
+    let width = ui::column_width(labels.iter().map(String::as_str));
+
+    for (step, label) in steps.iter().zip(&labels) {
         let mut cmd = Command::new(&step.command);
         cmd.args(step.resolved_args(fix))
             .args(rest)
             .current_dir(&dir);
-        if !run_prefixed(&mut cmd, &package.name) {
+
+        let started = Instant::now();
+        let ok = run_prefixed(&mut cmd, &package.name);
+
+        // The step's own output has already scrolled past by now, so this row
+        // is what says which step that was and where the time went. A failing
+        // one is a result, not narration, so `--quiet` keeps it.
+        let text = format!("{label:<width$}  {}", ui::fmt_duration(started.elapsed()));
+        if ok {
+            ui::ok(text);
+        } else {
+            ui::emit(
+                ui::Stream::Err,
+                &ui::render_row(ui::Face::current(), ui::Level::Fail, &text),
+            );
             return false;
         }
     }
     true
+}
+
+/// A step as the user would have typed it, for the timing row.
+fn step_label(step: &Step, fix: bool, rest: &[String]) -> String {
+    std::iter::once(step.command.clone())
+        .chain(step.resolved_args(fix).iter().cloned())
+        .chain(rest.iter().cloned())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// `node_modules` is gitignored, so install on first use rather than failing.
