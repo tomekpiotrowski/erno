@@ -5,11 +5,11 @@ sidebar:
   order: 7
 ---
 
-> **Source**: `api/src/metrics/`, `monitoring/deploy/chart/templates/prometheus.yaml`
+> **Source**: `api/src/metrics/`, `cli/src/deploy/render.rs`
 
 ## Prometheus moved
 
-It used to run inside the application's own Helm chart, which meant the thing
+It used to run inside the application's own deploy, which meant the thing
 doing the observing shared a failure domain with the thing being observed. It
 now belongs to the monitoring deployment.
 
@@ -21,15 +21,15 @@ Two consequences:
 - **The collector is scraped too.** An operator needs to know when the thing
   doing the watching is itself struggling.
 
-```yaml
-# monitoring/deploy/chart/values.yaml
-api:
-  target: "api.example.com:443"
-  scheme: https
-  metrics_auth_token: ""   # same value as the application's [metrics] auth_token
-collector:
-  port: 3001
+```toml
+# monitoring/deploy/config.toml
+[production.scrape]
+target = "api.example.com:443"
+scheme = "https"
 ```
+
+`api.metrics_auth_token` in `monitoring/deploy/secrets.<env>.yaml` must equal
+the application's `[metrics] auth_token`.
 
 In development `erno dev` writes a config that scrapes the application, and the
 collector as well when the project has a `monitoring/` directory. A project

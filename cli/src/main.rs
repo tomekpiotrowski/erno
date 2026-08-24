@@ -1,4 +1,5 @@
 mod commands;
+mod deploy;
 mod global_config;
 mod ng;
 mod ui;
@@ -80,7 +81,7 @@ struct DeployArgs {
 
 #[derive(Subcommand)]
 enum DeployCommands {
-    /// Generate Dockerfiles, Helm chart, and GitHub Actions workflow
+    /// Generate Dockerfiles, deploy config, and GitHub Actions workflow
     Init {
         /// Which deployment to generate files for. The monitoring stack is a
         /// separate release in a separate cluster.
@@ -89,7 +90,7 @@ enum DeployCommands {
     },
     /// Deploy a specific version to the cluster
     Install {
-        /// Image tag / Helm chart version to deploy (e.g. v1.2.3)
+        /// Image tag to deploy (e.g. v1.2.3)
         version: String,
         /// Target environment
         #[arg(long, default_value = "production")]
@@ -97,6 +98,47 @@ enum DeployCommands {
         /// Which deployment to install
         #[arg(long, value_enum, default_value_t = commands::deploy::Target::App)]
         target: commands::deploy::Target,
+    },
+    /// Show what would change in the cluster
+    Diff {
+        /// Image tag to compare (e.g. v1.2.3)
+        version: String,
+        #[arg(long, default_value = "production")]
+        env: String,
+        #[arg(long, value_enum, default_value_t = commands::deploy::Target::App)]
+        target: commands::deploy::Target,
+    },
+    /// Show the recorded revision and live deployments
+    Status {
+        #[arg(long, default_value = "production")]
+        env: String,
+        #[arg(long, value_enum, default_value_t = commands::deploy::Target::App)]
+        target: commands::deploy::Target,
+    },
+    /// Re-install the previous revision's image tags
+    Rollback {
+        #[arg(long, default_value = "production")]
+        env: String,
+        #[arg(long, value_enum, default_value_t = commands::deploy::Target::App)]
+        target: commands::deploy::Target,
+    },
+    /// Convert a Helm chart/ tree into deploy/
+    Migrate {
+        #[arg(long, value_enum, default_value_t = commands::deploy::Target::App)]
+        target: commands::deploy::Target,
+    },
+    /// Install cert-manager and ingress-nginx (once per cluster)
+    Setup {
+        #[arg(long, default_value = "production")]
+        env: String,
+        #[arg(long, value_enum, default_value_t = commands::deploy::Target::App)]
+        target: commands::deploy::Target,
+        /// Re-apply even if the add-ons are already present
+        #[arg(long)]
+        upgrade: bool,
+        /// ingress-nginx static manifest: cloud (LoadBalancer), kind, or baremetal
+        #[arg(long, value_enum)]
+        provider: Option<crate::deploy::IngressProvider>,
     },
 }
 
@@ -155,6 +197,24 @@ async fn dispatch(command: Commands) -> ui::Cmd {
                 env,
                 target,
             } => commands::deploy::handle_deploy_install(&version, &env, target).await,
+            DeployCommands::Diff {
+                version,
+                env,
+                target,
+            } => crate::deploy::handle_diff(&version, &env, target).await,
+            DeployCommands::Status { env, target } => {
+                crate::deploy::handle_status(&env, target).await
+            }
+            DeployCommands::Rollback { env, target } => {
+                crate::deploy::handle_rollback(&env, target).await
+            }
+            DeployCommands::Migrate { target } => crate::deploy::handle_migrate(target),
+            DeployCommands::Setup {
+                env,
+                target,
+                upgrade,
+                provider,
+            } => crate::deploy::handle_setup(&env, target, upgrade, provider),
         },
     }
 }

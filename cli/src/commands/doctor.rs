@@ -77,7 +77,7 @@ pub async fn handle_doctor() -> ui::Cmd {
 }
 
 async fn run_checks() -> Vec<CheckResult> {
-    vec![
+    let mut results = vec![
         check_rust(),
         check_node(),
         check_npm(),
@@ -89,7 +89,16 @@ async fn run_checks() -> Vec<CheckResult> {
         check_postgres_admin().await,
         check_sea_orm_cli(),
         check_prometheus(),
-    ]
+    ];
+    if deploy_dir_present() || std::path::Path::new("chart").is_dir() {
+        results.push(check_kubectl());
+        results.push(check_sops());
+        results.push(check_age());
+    }
+    if let Some(row) = check_deploy_layout() {
+        results.push(row);
+    }
+    results
 }
 
 fn check_rust() -> CheckResult {
@@ -316,6 +325,94 @@ fn check_sea_orm_cli() -> CheckResult {
         ),
         Some(v) => CheckResult::pass("sea-orm-cli", v.trim().to_string()),
     }
+}
+
+fn check_kubectl() -> CheckResult {
+    match run_cmd("kubectl", &["version", "--client", "--output=yaml"])
+        .or_else(|| run_cmd("kubectl", &["version", "--client"]))
+    {
+        None => {
+            if deploy_dir_present() {
+                CheckResult::fail(
+                    "kubectl",
+                    "not found",
+                    "Install kubectl 1.26+ — `erno deploy install` applies with server-side apply.",
+                )
+            } else {
+                CheckResult::warn(
+                    "kubectl",
+                    "not found",
+                    "Needed for `erno deploy`. Install kubectl 1.26+.",
+                )
+            }
+        }
+        Some(v) => CheckResult::pass(
+            "kubectl",
+            v.lines().next().unwrap_or(v.trim()).trim().to_string(),
+        ),
+    }
+}
+
+fn check_sops() -> CheckResult {
+    match run_cmd("sops", &["--version"]) {
+        None => {
+            if deploy_dir_present() {
+                CheckResult::fail(
+                    "sops",
+                    "not found",
+                    "Install sops (https://github.com/getsops/sops) to decrypt deploy/secrets.*.yaml.",
+                )
+            } else {
+                CheckResult::warn(
+                    "sops",
+                    "not found",
+                    "Needed to encrypt/decrypt `erno deploy` secrets.",
+                )
+            }
+        }
+        Some(v) => CheckResult::pass(
+            "sops",
+            v.lines().next().unwrap_or(v.trim()).trim().to_string(),
+        ),
+    }
+}
+
+fn check_age() -> CheckResult {
+    match run_cmd("age-keygen", &["--version"]).or_else(|| run_cmd("age", &["--version"])) {
+        None => CheckResult::warn(
+            "age",
+            "not found",
+            "Install age (https://age-encryption.org) for SOPS key material.",
+        ),
+        Some(v) => CheckResult::pass(
+            "age",
+            v.lines().next().unwrap_or(v.trim()).trim().to_string(),
+        ),
+    }
+}
+
+fn check_deploy_layout() -> Option<CheckResult> {
+    let has_new = std::path::Path::new("deploy/config.toml").exists();
+    let has_old = std::path::Path::new("chart").is_dir();
+    match (has_new, has_old) {
+        (false, true) => Some(CheckResult::warn(
+            "deploy/",
+            "this project still has a Helm chart/",
+            "Run: erno deploy migrate",
+        )),
+        (true, true) => Some(CheckResult::warn(
+            "deploy/",
+            "chart/ leftover next to deploy/",
+            "Remove chart/ after a successful install: git rm -r chart",
+        )),
+        (true, false) => Some(CheckResult::pass("deploy/", "config.toml found")),
+        (false, false) => None,
+    }
+}
+
+fn deploy_dir_present() -> bool {
+    std::path::Path::new("deploy/config.toml").exists()
+        || std::path::Path::new("monitoring/deploy/config.toml").exists()
 }
 
 fn check_prometheus() -> CheckResult {

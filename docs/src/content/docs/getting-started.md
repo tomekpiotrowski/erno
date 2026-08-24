@@ -147,4 +147,4 @@ If you only need the Rust library without the CLI scaffold, see [Manual API setu
 - [Authentication (API)](/api/authentication/) — protect handlers with `CurrentUser`
 - [Authentication (App)](/app/authentication/) — login and token refresh on the client
 - [Sync an entity end-to-end](/guides/sync-an-entity/) — first offline-first model
-- [Deploy](/cli/deploy/) — Docker, Helm, and production install
+- [Deploy](/cli/deploy/) — Docker, Kubernetes, and production install

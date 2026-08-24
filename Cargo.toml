@@ -39,5 +39,6 @@ rand              = "0.8"
 sea-orm           = { version = "1.1.0", features = ["sqlx-postgres", "runtime-tokio", "macros", "with-uuid", "with-time"] }
 sea-orm-migration = { version = "1.1.14", features = ["sqlx-postgres"] }
 toml              = "0.8"
+serde_yaml        = "0.9"
 tracing           = "0.1.41"
 uuid              = { version = "1.12", features = ["v4", "serde"] }
