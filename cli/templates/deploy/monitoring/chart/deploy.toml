@@ -1,5 +1,0 @@
-# Deliberately a different context from the application's chart/deploy.toml.
-# A monitoring stack that shares a failure domain with what it monitors is not
-# monitoring — it goes down with the outage it exists to report.
-[production]
-kubernetes_context = "{{monitoring_kubernetes_context}}"

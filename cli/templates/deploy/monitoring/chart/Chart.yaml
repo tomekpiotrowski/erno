@@ -1,5 +1,0 @@
-apiVersion: v2
-appVersion: "0"
-description: {{name}} monitoring — error reporting, uptime, alerts, status page
-name: {{name}}-monitoring
-version: 1.0.0

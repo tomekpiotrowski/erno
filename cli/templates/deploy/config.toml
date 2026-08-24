@@ -1,0 +1,32 @@
+github_repo = "{{github_repo}}"
+
+[production]
+kubernetes_context = "{{kubernetes_context}}"
+namespace = "default"
+# Where `erno deploy install` reports that a version went live, and where the
+# API sends errors. Plaintext on purpose — a hostname is not a secret.
+#
+# The webhook token comes from $ERNO_INGEST_TOKEN. Without both, the webhook is
+# skipped with a one-line notice and the deploy proceeds.
+monitoring_url = ""
+# ingress-nginx variant for `erno deploy setup`: cloud (LoadBalancer), kind, or baremetal
+# ingress_provider = "cloud"
+
+[production.hosts]
+api = "api.example.com"
+app = "app.example.com"
+www = "example.com"
+admin = "admin.example.com"
+
+[production.tls]
+enabled = true
+issuer = "letsencrypt"
+email = ""
+
+[production.workloads]
+admin = true
+www = true
+api_replicas = 1
+app_replicas = 1
+www_replicas = 1
+admin_replicas = 1

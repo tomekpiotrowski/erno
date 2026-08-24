@@ -1,0 +1,35 @@
+github_repo = "{{github_repo}}"
+
+# Deliberately a different context from the application's deploy/config.toml.
+# A monitoring stack that shares a failure domain with what it monitors is not
+# monitoring — it goes down with the outage it exists to report.
+[production]
+kubernetes_context = "{{monitoring_kubernetes_context}}"
+namespace = "default"
+# ingress_provider = "cloud"
+
+[production.hosts]
+monitoring = "monitoring.example.com"
+
+[production.tls]
+enabled = true
+issuer = "letsencrypt"
+email = ""
+
+[production.scrape]
+# The application's /metrics, reachable over the network, not in-cluster.
+target = "api.example.com:443"
+scheme = "https"
+
+[production.ingress]
+rate_limit_rps = 20
+
+[production.prometheus]
+enabled = true
+image = "prom/prometheus:v2.55.1"
+retention = "90d"
+storage = "10Gi"
+
+[production.workloads]
+collector_replicas = 1
+console_replicas = 1

@@ -82,6 +82,6 @@ Background work uses a PostgreSQL-backed queue (advisory locks, workers, cron). 
 | `/admin/api/*` + `admin/` SPA | Users, gifts, jobs, emails (Basic auth). Charts via Prometheus. |
 | Business stats snapshots | Daily SaaS metrics for the TUI |
 | `/metrics` | Prometheus |
-| `erno deploy` | Docker/Helm scaffold and install |
+| `erno deploy` | Docker/Kubernetes scaffold and install |
 
 See [Admin console](/api/console/), [Business stats](/api/business-stats/), and [Deploy](/cli/deploy/).

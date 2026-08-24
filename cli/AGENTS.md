@@ -20,14 +20,17 @@ cargo install --path .                   # install globally as `erno`
 | `erno upgrade` | Inventories Erno-managed packages and runs official migrators (`ng update`, `@ionic/migrate`) toward this CLI generation |
 | `erno dev` | Starts api + app + www dev servers, readiness banner, `--ios`/`--android` live reload (`--target <id>` picks the device) |
 | `erno dev` | Also starts Prometheus (if installed), `admin/` on :4300, and — when `monitoring/` is present — the collector on :3001 and its console on :4400 (`--no-monitoring` to skip); `--package` / `--all` add `[[package.dev]]` extras; every banner row is probed |
-| `erno deploy init` | Scaffolds Docker/Helm deploy files; generates admin password hash for production |
-| `erno deploy install` | Installs a chart version to the cluster (`helm secrets upgrade --install`) |
-| `erno deploy … --target monitoring` | Acts on the monitoring deployment instead: its own chart, release and kubeconfig context |
+| `erno deploy init` | Scaffolds Docker/deploy files; generates admin password hash for production |
+| `erno deploy setup` | Once per cluster: applies cert-manager and ingress-nginx from their static YAML (no Helm) |
+| `erno deploy install` | Renders the topology and server-side-applies a version (`kubectl apply --server-side --prune`) |
+| `erno deploy diff` / `status` / `rollback` | Show a cluster diff, the recorded revision, or re-install the previous image tags |
+| `erno deploy migrate` | Convert a leftover Helm `chart/` tree into `deploy/` |
+| `erno deploy … --target monitoring` | Acts on the monitoring deployment instead: its own config, release and kubeconfig context |
 | `erno build` | Builds every package declared in `erno.toml`, in declaration order |
 | `erno lint` | Format-checks, lints, and typechecks every package; `--fix` applies fixes |
 | `erno test` | Runs each package's test steps, then Playwright e2e |
 
-Narrative docs for the CLI live in `docs/src/content/docs/cli/` (`index.md`, `deploy.md`).
+Narrative docs for the CLI live in `docs/src/content/docs/cli/` (`index.md`, `deploy.md`). `erno deploy` renders a fixed Kubernetes topology in-process and server-side-applies it. Cluster add-ons are `erno deploy setup` (upstream static YAML). Helm is not used.
 
 ## The package manifest: `erno.toml`
 
@@ -135,6 +138,8 @@ ALTER USER erno CREATEDB;
 | `src/commands/lint.rs` | `erno lint` — runs the `lint` phase, with `--fix` |
 | `src/commands/test.rs` | `erno test` — the `test` phase, plus test-database setup and e2e orchestration |
 | `src/commands/upgrade/` | `erno upgrade` — inventory scanners + official migrators; targets are this CLI generation |
+| `src/commands/deploy.rs` | `erno deploy init` — Dockerfiles, deploy config, SOPS, CI |
+| `src/deploy/` | Config parse, Kubernetes renderer, kubectl apply/wait/prune, cluster add-ons, migrate |
 
 ## Output style
 
@@ -230,5 +235,4 @@ The escape vocabulary is exactly two sequences — cursor-up and erase-to-end-of
 ## Adding a new command
 
 1. Create `src/commands/<command>.rs` with a `pub async fn handle_<command>(...)` function.
-2. Add `pub mod <command>;` to `src/commands/mod.rs`.
-3. Add a variant to the `Commands` enum in `src/main.rs` and dispatch it in `main()`.
+2. Add `pub mod <command>;` to `src/commands/mod.rs`

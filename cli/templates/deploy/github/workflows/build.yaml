@@ -174,37 +174,19 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  chart:
+  release:
     runs-on: ubuntu-24.04
     needs:
       - api_docker
       - app_docker
       - www_docker
       - admin_docker
-    env:
-      REGISTRY: ghcr.io
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    defaults:
-      run:
-        working-directory: ./chart
+    permissions:
+      contents: write
+    if: startsWith(github.ref, 'refs/tags/')
     steps:
       - uses: actions/checkout@v4
-      - uses: azure/setup-helm@v4
-      - name: Log into registry
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login -u ${{ github.actor }} --password-stdin ghcr.io
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}/{{name}}
-      - name: Package chart
-        if: startsWith(github.ref, 'refs/tags/')
-        run: helm package . --version ${{ steps.meta.outputs.version }} --app-version ${{ steps.meta.outputs.version }}
-      - name: Push chart
-        if: startsWith(github.ref, 'refs/tags/')
-        run: helm push *.tgz oci://ghcr.io/${{ github.repository }}
       - name: Create release
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
         with:
           generate_release_notes: true

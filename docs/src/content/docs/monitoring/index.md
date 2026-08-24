@@ -8,7 +8,7 @@ sidebar:
 > **Source**: `monitoring/`, `api/src/error_reporting/`
 
 Erno ships a **separate monitoring deployment**: its own binary, its own
-database, its own operator console, its own Helm chart, running on
+database, its own operator console, its own Kubernetes release, running on
 infrastructure separate from the application it watches.
 
 The separation is the point. Monitoring that lives inside the deployment it

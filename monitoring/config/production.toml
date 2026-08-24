@@ -1,7 +1,7 @@
 # Erno monitoring collector — production.
 #
-# Everything secret comes from the Helm chart as APP__* environment variables
-# (see cli/templates/deploy/monitoring/chart/templates/_helpers.tpl). What stays
+# Everything secret comes from `erno deploy` as APP__* environment variables
+# (see cli/src/deploy/render.rs). What stays
 # here is what *cannot* come from the environment: `config_rs::Environment` is
 # built with `.separator("__").try_parsing(true)` and no `list_separator`, so
 # any list-valued key must live in this file.
