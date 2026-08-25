@@ -70,7 +70,7 @@ pub fn resolve_test_threads(
 /// Panic unless this test binary is running on a single thread.
 ///
 /// Call it from the suite's own setup helper. It is deliberately **opt-in**:
-/// [`super::setup_test`] never calls it, so parallel-safe suites are unaffected.
+/// [`super::setup_test()`] never calls it, so parallel-safe suites are unaffected.
 ///
 /// # Panics
 ///

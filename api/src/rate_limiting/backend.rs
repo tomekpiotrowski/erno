@@ -11,7 +11,7 @@ use super::rate_limit_state::ActionRateLimit;
 ///
 /// The default [`InMemoryBackend`] works correctly for single-replica deployments.
 /// For multi-replica setups, implement this trait against a shared store such as
-/// Redis or PostgreSQL and pass it to [`RateLimitState::with_backend`].
+/// Redis or PostgreSQL and pass it to [`super::RateLimitState::with_backend`].
 ///
 /// # Example (Redis backend sketch)
 ///

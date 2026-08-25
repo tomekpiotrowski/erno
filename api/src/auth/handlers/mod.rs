@@ -31,15 +31,23 @@ pub struct TokenPair {
     pub user: UserInfo,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum IssueTokenError {
+    #[error("failed to sign access token")]
+    Jwt(#[from] jsonwebtoken::errors::Error),
+    #[error("failed to persist refresh token")]
+    Database(#[from] sea_orm::DbErr),
+}
+
 /// Generate an access JWT and a fresh refresh token, persisting the refresh token to the DB.
 pub async fn issue_token_pair<ExtraConfig>(
     app: &App<ExtraConfig>,
     user: &user::Model,
-) -> Result<TokenPair, ()>
+) -> Result<TokenPair, IssueTokenError>
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    let access_token = generate_token(&app.config, user.id, user.token_version).map_err(|_| ())?;
+    let access_token = generate_token(&app.config, user.id, user.token_version)?;
 
     let raw_refresh = generate_secure_token(64);
     let expires_at =
@@ -53,8 +61,7 @@ where
         ..Default::default()
     }
     .insert(&app.db)
-    .await
-    .map_err(|_| ())?;
+    .await?;
 
     Ok(TokenPair {
         access_token,

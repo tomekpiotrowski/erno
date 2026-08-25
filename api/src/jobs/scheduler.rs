@@ -91,7 +91,7 @@ async fn run_scheduled_job(scheduled_job: ScheduledJob, db: DatabaseConnection) 
 }
 
 /// Parse cron schedule for a job
-fn parse_cron_schedule(scheduled_job: &ScheduledJob) -> Result<cron::Schedule, ()> {
+fn parse_cron_schedule(scheduled_job: &ScheduledJob) -> Result<cron::Schedule, cron::error::Error> {
     match cron::Schedule::from_str(&scheduled_job.cron_expression) {
         Ok(schedule) => Ok(schedule),
         Err(e) => {
@@ -99,7 +99,7 @@ fn parse_cron_schedule(scheduled_job: &ScheduledJob) -> Result<cron::Schedule, (
                 "❌ Invalid cron expression for job '{}': {}",
                 scheduled_job.name, e
             );
-            Err(())
+            Err(e)
         }
     }
 }

@@ -100,7 +100,7 @@ pub fn fingerprint_parts(input: &FingerprintInput<'_>) -> Vec<String> {
 }
 
 /// Pick the frames that participate in grouping: in-app frames when any exist,
-/// otherwise everything, capped at [`FRAME_DEPTH`].
+/// otherwise everything, capped at `FRAME_DEPTH` (5).
 #[must_use]
 pub fn select_frames(frames: &[Frame]) -> Vec<&Frame> {
     let in_app: Vec<&Frame> = frames

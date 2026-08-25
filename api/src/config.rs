@@ -17,7 +17,7 @@ pub struct S3Config {
     pub region: String,
     pub access_key_id: String,
     pub secret_access_key: String,
-    /// Custom endpoint URL for S3-compatible services, e.g. "https://nyc3.digitaloceanspaces.com"
+    /// Custom endpoint URL for S3-compatible services, e.g. <https://nyc3.digitaloceanspaces.com>
     pub endpoint: Option<String>,
     /// Optional CDN URL prefix; if set, used instead of presigned URLs
     pub cdn_endpoint: Option<String>,

@@ -10,6 +10,7 @@ use crate::{
     config::Config,
     database::DatabaseSetupStatus,
     environment::Environment,
+    error_reporting::reporter::ErrorReporter,
     job_queue::JobQueue,
     jobs::failure_handler::JobFailureHandler,
     jobs::Job,
@@ -42,7 +43,7 @@ pub struct App<ExtraConfig = ()> {
     pub user_data_deleter: Option<Arc<dyn UserDataDeleter>>,
     /// Sends this application's own errors to a monitoring collector.
     /// [`ErrorReporter::Disabled`] when no collector is configured.
-    pub error_reporter: crate::error_reporting::reporter::ErrorReporter,
+    pub error_reporter: ErrorReporter,
 }
 
 impl<ExtraConfig> App<ExtraConfig> {

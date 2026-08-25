@@ -171,7 +171,7 @@ pub fn scrub_url(url: &str) -> String {
 /// Recursively scrub a JSON payload in place.
 ///
 /// Object values under a sensitive key are replaced wholesale; every other
-/// string is passed through [`scrub_text`]. Recursion stops at [`MAX_DEPTH`]
+/// string is passed through [`scrub_text`]. Recursion stops at `MAX_DEPTH` (5)
 /// so a hostile or accidentally cyclic-looking payload cannot blow the stack.
 pub fn scrub_value(value: &mut Value) {
     scrub_value_at(value, 0);
