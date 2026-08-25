@@ -70,6 +70,7 @@ Either form registers all services and the HTTP interceptor that attaches JWT to
 | `ErnoSharedViewService` | [Sharing](./share#consumer-online-shared-view) | Online-only in-memory view of shared data |
 | `ErnoDevtoolsComponent` | [Devtools](./devtools) | Dev overlay (`<erno-devtools>`) |
 | `ErnoDevMailService` | [Devtools](./devtools) | Preview outbound emails without SMTP in development |
+| `ErnoDevJobsService` | [Devtools](./devtools) | List, clear, and retry background jobs in development |
 | `ErnoAlertsService` | [Devtools](./devtools#alerts-ernoalertsservice) | Queued Ionic toast notifications |
 
 ## Configuration

@@ -302,4 +302,88 @@ mod dev_inbox_tests {
         assert_eq!(server.get("/dev/emails").await.status_code(), 404);
         assert_eq!(server.get("/dev/jobs").await.status_code(), 404);
     }
+
+    #[tokio::test]
+    async fn jobs_list_includes_executions() {
+        use sea_orm::ActiveModelTrait;
+        use sea_orm::Set;
+        use serde_json::json;
+
+        use crate::database::models::{
+            job, job_execution, job_result::JobResult, job_status::JobStatus,
+        };
+
+        let t = setup_test::<Migrator, _>(test_boot(empty_router), no_fixtures).await;
+        let now = chrono::Utc::now().naive_utc();
+        let inserted = job::ActiveModel {
+            r#type: Set("charge_pending_orders".to_string()),
+            arguments: Set(json!({ "order_id": 1 })),
+            status: Set(JobStatus::Failed),
+            ..Default::default()
+        }
+        .insert(&t.db)
+        .await
+        .unwrap();
+
+        job_execution::ActiveModel {
+            job_id: Set(inserted.id),
+            result: Set(JobResult::Failed),
+            started_at: Set(now),
+            finished_at: Set(now),
+            execution_time_ms: Set(240),
+            failure_reason: Set(Some("PoolTimedOut".into())),
+            ..Default::default()
+        }
+        .insert(&t.db)
+        .await
+        .unwrap();
+
+        let res = t.server.get("/dev/jobs").await;
+        res.assert_status_ok();
+        let body: serde_json::Value = res.json();
+        assert_eq!(body[0]["type"], "charge_pending_orders");
+        assert_eq!(body[0]["status"], "failed");
+        assert_eq!(body[0]["executions"][0]["result"], "failed");
+        assert_eq!(body[0]["executions"][0]["execution_time_ms"], 240);
+        assert_eq!(body[0]["executions"][0]["failure_reason"], "PoolTimedOut");
+    }
+
+    #[tokio::test]
+    async fn retry_job_requeues_as_pending() {
+        use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+        use serde_json::json;
+
+        use crate::database::models::{job, job_status::JobStatus};
+
+        let t = setup_test::<Migrator, _>(test_boot(empty_router), no_fixtures).await;
+        let inserted = job::ActiveModel {
+            r#type: Set("charge_pending_orders".to_string()),
+            arguments: Set(json!({})),
+            status: Set(JobStatus::Failed),
+            ..Default::default()
+        }
+        .insert(&t.db)
+        .await
+        .unwrap();
+
+        let res = t
+            .server
+            .post(&format!("/dev/jobs/{}/retry", inserted.id))
+            .await;
+        assert_eq!(res.status_code(), 204);
+
+        let reloaded = job::Entity::find_by_id(inserted.id)
+            .one(&t.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(reloaded.status, JobStatus::Pending);
+        assert!(reloaded.next_execution_at.is_none());
+
+        let missing = t
+            .server
+            .post(&format!("/dev/jobs/{}/retry", uuid::Uuid::new_v4()))
+            .await;
+        assert_eq!(missing.status_code(), 404);
+    }
 }

@@ -27,6 +27,7 @@ ng serve                 # dev server on :4200 (demo app)
 | `ErnoErrorReporterService` | `errors/erno-error-reporter.service` | Reports uncaught errors to a monitoring collector; installs a global `ErrorHandler` |
 | `ErnoDevtoolsComponent` | `devtools/erno-devtools.component` | Dev overlay for local development |
 | `ErnoDevMailService` | `devtools/erno-dev-mail.service` | Preview outbound emails in dev without SMTP |
+| `ErnoDevJobsService` | `devtools/erno-dev-jobs.service` | List, clear, and retry background jobs in dev |
 
 ## Architecture notes
 
