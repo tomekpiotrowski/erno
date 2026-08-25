@@ -45,6 +45,12 @@ tokio = { workspace = true, features = ["fs", "signal"] }
 tower-http = { version = "0.6.6", features = ["cors", "trace", "catch-panic"] }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "time", "local-time"] }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+opentelemetry-otlp = { workspace = true }
+opentelemetry-semantic-conventions = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+opentelemetry-appender-tracing = { workspace = true }
 uuid = { workspace = true }
 regex = "1.11.1"
 validator = { version = "0.20.0", features = ["derive"] }
@@ -64,3 +70,4 @@ metrics-exporter-prometheus = "0.16"
 [dev-dependencies]
 axum-test = { workspace = true }
 toml = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["testing"] }

@@ -41,6 +41,7 @@ pub mod shutdown;
 pub mod storage;
 pub mod sync;
 pub mod token;
+pub mod tracing_otel;
 pub mod websocket;
 
 #[cfg(any(test, feature = "test-utils"))]

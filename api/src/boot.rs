@@ -145,7 +145,7 @@ where
     let app_config = read_config::<ExtraConfig>(&environment);
 
     // Set up tracing with appropriate level based on command
-    setup_tracing_for_command(&cli.command, &app_config.tracing.log_level);
+    setup_tracing_for_command(&cli.command, &app_config.tracing);
 
     debug!("Environment set to: {:?}", environment);
     trace!("Configuration loaded");
