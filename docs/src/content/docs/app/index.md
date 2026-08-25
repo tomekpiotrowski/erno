@@ -82,7 +82,7 @@ Either form registers all services and the HTTP interceptor that attaches JWT to
 ## Architecture notes
 
 - **Mirrors backend modules** — each service corresponds to a module in `api/src/`
-- **Token flow** — `ErnoAuthService` stores access + refresh tokens; `ErnoHttpInterceptor` attaches them automatically and triggers a silent refresh on 401
+- **Token flow** — `ErnoAuthService` stores access + refresh tokens; `ErnoHttpInterceptor` attaches them automatically and triggers a silent refresh on 401. A down API does not clear the session; only a `401` from refresh does.
 - **Offline-first** — `ErnoDatabaseService` wraps Dexie (IndexedDB); `ErnoSyncService` pulls deltas from the backend sync endpoints and writes them to the local store
 - **Target consumers** — Angular 22 apps including Ionic 9 / Capacitor; no Ionic-specific code in the library itself (except optional toast alerts)
 

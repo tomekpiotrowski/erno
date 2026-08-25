@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { BehaviorSubject, Observable, from } from 'rxjs';
 import { finalize, shareReplay, switchMap, tap } from 'rxjs/operators';
 import { ERNO_CONFIG, ErnoConfig } from '../erno.config';
@@ -30,6 +30,15 @@ const USER_KEY = 'erno_user';
 /** Read the access token without constructing `ErnoAuthService`. */
 export function ernoAccessToken(): string | null {
   return sessionStorage.getItem(ACCESS_KEY);
+}
+
+/**
+ * A failed `/api/auth/refresh` only means the session is dead when the server
+ * rejected the token (`401`). Network errors, `404` from the boot liveness
+ * server, `5xx`, `429` — those are the API being down, not a revoked session.
+ */
+export function isFatalRefreshError(err: unknown): boolean {
+  return err instanceof HttpErrorResponse && err.status === 401;
 }
 
 @Injectable()
@@ -201,7 +210,11 @@ export class ErnoAuthService {
     // refresh re-issues both and repopulates storage.
     if (!this.accessToken || !this.currentUser) {
       this.refresh().subscribe({
-        error: () => this.clearSession(),
+        error: err => {
+          if (isFatalRefreshError(err)) {
+            this.clearSession();
+          }
+        },
       });
     }
   }

@@ -97,6 +97,36 @@ describe('ErnoHttpInterceptor', () => {
     expect(ok).toHaveBeenCalledWith([{ id: 'p1' }]);
   });
 
+  it.each([
+    { label: 'the boot liveness server (404)', status: 404, statusText: 'Not Found' },
+    { label: 'a restarting process (503)', status: 503, statusText: 'Service Unavailable' },
+  ])('keeps the session when refresh fails because $label', ({ status, statusText }) => {
+    const failed = vi.fn().mockName('failed');
+    client.get(PROJECTS_URL).subscribe({ next: () => undefined, error: failed });
+
+    http.expectOne(PROJECTS_URL).flush('expired', { status: 401, statusText: 'Unauthorized' });
+    http.expectOne(REFRESH_URL).flush('down', { status, statusText });
+
+    expect(failed).toHaveBeenCalled();
+    http.expectNone(LOGOUT_URL);
+    expect(auth.refreshToken).toBe('dead_refresh');
+    expect(auth.accessToken).toBe('stale_access');
+    expect(auth.currentUser).toEqual({ id: 'u', email: 'u@example.com' });
+  });
+
+  it('keeps the session when refresh fails with a network error', () => {
+    const failed = vi.fn().mockName('failed');
+    client.get(PROJECTS_URL).subscribe({ next: () => undefined, error: failed });
+
+    http.expectOne(PROJECTS_URL).flush('expired', { status: 401, statusText: 'Unauthorized' });
+    http.expectOne(REFRESH_URL).error(new ProgressEvent('error'));
+
+    expect(failed).toHaveBeenCalled();
+    http.expectNone(LOGOUT_URL);
+    expect(auth.refreshToken).toBe('dead_refresh');
+    expect(auth.accessToken).toBe('stale_access');
+  });
+
   it('does not start token recovery for a 401 from the ingest endpoint', () => {
     // Otherwise: ingest 401 -> refresh -> refresh fails -> ErrorHandler reports
     // it -> POST to ingest -> 401, for ever.

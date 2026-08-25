@@ -60,7 +60,11 @@ Access tokens are intentionally session-scoped so closing the browser tab drops 
 
 1. Adds `Authorization: Bearer <access_token>` when an access token is present.
 2. On `401` (except the refresh endpoint itself), calls `refresh()` once (coalescing concurrent failures), then retries the request.
-3. If there is no refresh token, triggers `logout()`.
+3. If there is no refresh token, or refresh itself returns `401`, triggers `logout()`. Other refresh failures (network error, `404` from the boot liveness server, `5xx`, `429`) leave the stored session in place so a brief API outage does not sign the user out.
+
+`restoreSession()` on bootstrap follows the same rule: a `401` from refresh clears local tokens; a down API does not.
+
+`isFatalRefreshError(err)` is the shared predicate — use it in app route guards so a failed refresh during an outage does not redirect to login.
 
 You normally do not call the interceptor directly.
 

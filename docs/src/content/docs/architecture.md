@@ -47,7 +47,7 @@ Marketing (`www/`) is a separate static site for SEO. It does not talk to the AP
 1. App → `POST /api/auth/login` → API returns `access_token` + `refresh_token`.
 2. Client stores access in `sessionStorage`, refresh in `localStorage`.
 3. `ErnoHttpInterceptor` adds `Authorization: Bearer <access>` to every request against `baseUrl`.
-4. On `401`, client calls `POST /api/auth/refresh`, stores new tokens, retries the request.
+4. On `401`, client calls `POST /api/auth/refresh`, stores new tokens, retries the request. A `401` from refresh clears the session; a down or restarting API does not.
 5. Logout / password change increments `token_version` on the user, invalidating old JWTs.
 
 Details: [Authentication (API)](/api/authentication/), [Authentication (App)](/app/authentication/).

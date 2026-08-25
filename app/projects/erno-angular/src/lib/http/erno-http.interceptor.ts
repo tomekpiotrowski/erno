@@ -10,7 +10,7 @@ import {
 } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
 import { catchError, switchMap } from 'rxjs/operators';
-import { ErnoAuthService, ernoAccessToken } from '../auth/erno-auth.service';
+import { ErnoAuthService, ernoAccessToken, isFatalRefreshError } from '../auth/erno-auth.service';
 import { ERNO_CONFIG } from '../erno.config';
 
 /**
@@ -54,7 +54,12 @@ function handle401(
   return auth.refresh().pipe(
     switchMap(() => next(addToken(req))),
     catchError(err => {
-      auth.logout().subscribe({ error: () => undefined });
+      // Only a 401 from refresh means the token is dead. A restarting API
+      // answers 404 (liveness-only boot server), 0, 502, 503 — wiping the
+      // session on those is why a dev restart logged the user out.
+      if (isFatalRefreshError(err)) {
+        auth.logout().subscribe({ error: () => undefined });
+      }
       return throwError(() => err);
     }),
   );

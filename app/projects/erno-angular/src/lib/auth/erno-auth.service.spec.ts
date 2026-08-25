@@ -1,9 +1,9 @@
 import { TestBed } from '@angular/core/testing';
-import { provideHttpClient } from '@angular/common/http';
+import { HttpErrorResponse, provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { ERNO_CONFIG } from '../erno.config';
 import { ErnoDatabaseService } from '../sync/erno-database.service';
-import { ErnoAuthService, LoginResponse } from './erno-auth.service';
+import { ErnoAuthService, LoginResponse, isFatalRefreshError } from './erno-auth.service';
 
 const REFRESH_URL = 'http://api/api/auth/refresh';
 
@@ -85,7 +85,7 @@ describe('ErnoAuthService', () => {
     it('releases the shared request after a failure so the next caller retries', () => {
       build();
       http.expectOne(REFRESH_URL).flush('nope', { status: 401, statusText: 'Unauthorized' });
-      // restoreSession() clears the session on failure.
+      // restoreSession() clears the session only when refresh itself is 401.
       expect(service.refreshToken).toBeNull();
 
       localStorage.setItem('erno_refresh_token', 'another_refresh');
@@ -96,6 +96,23 @@ describe('ErnoAuthService', () => {
       expect(req.request.body).toEqual({ refresh_token: 'another_refresh' });
       req.flush(pair('three'));
       expect(retry).toHaveBeenCalledWith(pair('three'));
+    });
+
+    it('keeps the restored session when the API is down', () => {
+      build();
+      http.expectOne(REFRESH_URL).flush('down', { status: 503, statusText: 'Service Unavailable' });
+      expect(service.refreshToken).toBe('stored_refresh');
+      expect(service.currentUser).toEqual({ id: 'user-1', email: 'user@example.com' });
+    });
+  });
+
+  describe('isFatalRefreshError', () => {
+    it('is true only for HTTP 401', () => {
+      expect(isFatalRefreshError(new HttpErrorResponse({ status: 401 }))).toBe(true);
+      expect(isFatalRefreshError(new HttpErrorResponse({ status: 0 }))).toBe(false);
+      expect(isFatalRefreshError(new HttpErrorResponse({ status: 404 }))).toBe(false);
+      expect(isFatalRefreshError(new HttpErrorResponse({ status: 503 }))).toBe(false);
+      expect(isFatalRefreshError(new Error('boom'))).toBe(false);
     });
   });
 
