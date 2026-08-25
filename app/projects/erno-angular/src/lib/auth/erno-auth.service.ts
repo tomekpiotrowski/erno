@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { BehaviorSubject, Observable, from } from 'rxjs';
-import { switchMap, tap } from 'rxjs/operators';
+import { finalize, shareReplay, switchMap, tap } from 'rxjs/operators';
 import { ERNO_CONFIG, ErnoConfig } from '../erno.config';
 import { ErnoDatabaseService } from '../sync/erno-database.service';
 
@@ -27,6 +27,11 @@ const REFRESH_KEY = 'erno_refresh_token';
 /** Persists `{ id, email }` so a page reload does not look signed-out. */
 const USER_KEY = 'erno_user';
 
+/** Read the access token without constructing `ErnoAuthService`. */
+export function ernoAccessToken(): string | null {
+  return sessionStorage.getItem(ACCESS_KEY);
+}
+
 @Injectable()
 export class ErnoAuthService {
   constructor(
@@ -41,8 +46,11 @@ export class ErnoAuthService {
   readonly currentUser$ = this._currentUser.asObservable();
   get currentUser(): AuthUser | null { return this._currentUser.value; }
 
-  get accessToken(): string | null { return sessionStorage.getItem(ACCESS_KEY); }
+  get accessToken(): string | null { return ernoAccessToken(); }
   get refreshToken(): string | null { return localStorage.getItem(REFRESH_KEY); }
+
+  /** The refresh currently in flight, if any. See `refresh()`. */
+  private inFlightRefresh: Observable<LoginResponse> | null = null;
 
   login(email: string, password: string): Observable<LoginResponse> {
     return this.http.post<LoginResponse>(`${this.config.baseUrl}/api/auth/login`, { email, password }).pipe(
@@ -56,7 +64,11 @@ export class ErnoAuthService {
 
   logout(): Observable<void> {
     return this.http.post<void>(`${this.config.baseUrl}/api/auth/logout`, { refresh_token: this.refreshToken }).pipe(
-      tap(() => this.clearSession()),
+      // The local session goes either way. `/logout` needs a live access token,
+      // so the logout that follows a failed refresh is answered with a 401 —
+      // and leaving the dead tokens in storage would have every later request
+      // reach for a refresh that cannot succeed.
+      tap({ next: () => this.clearSession(), error: () => this.clearSession() }),
     );
   }
 
@@ -82,10 +94,26 @@ export class ErnoAuthService {
     }
   }
 
+  /**
+   * Exchange the refresh token for a fresh pair, sharing one in-flight request.
+   *
+   * The server rotates refresh tokens: it deletes the row as it consumes it and
+   * rejects a replay, so two concurrent calls carrying the same token leave one
+   * holding a 401. `restoreSession()`, a route guard and the HTTP interceptor
+   * all reach for a refresh the moment an access token is missing, and on a cold
+   * load they reach at once — so they share a single call rather than race.
+   */
   refresh(): Observable<LoginResponse> {
-    return this.http.post<LoginResponse>(`${this.config.baseUrl}/api/auth/refresh`, { refresh_token: this.refreshToken }).pipe(
-      tap(res => this.storeSession(res)),
-    );
+    this.inFlightRefresh ??= this.http
+      .post<LoginResponse>(`${this.config.baseUrl}/api/auth/refresh`, {
+        refresh_token: this.refreshToken,
+      })
+      .pipe(
+        tap(res => this.storeSession(res)),
+        finalize(() => (this.inFlightRefresh = null)),
+        shareReplay({ bufferSize: 1, refCount: false }),
+      );
+    return this.inFlightRefresh;
   }
 
   verifyEmail(token: string): Observable<LoginResponse> {
