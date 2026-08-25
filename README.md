@@ -1,187 +1,135 @@
 # Erno
 
-[![CI](https://github.com/yourusername/erno/workflows/CI/badge.svg)](https://github.com/yourusername/erno/actions)
-[![Crates.io](https://img.shields.io/crates/v/erno.svg)](https://crates.io/crates/erno)
-[![Documentation](https://docs.rs/erno/badge.svg)](https://docs.rs/erno)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/tomekpiotrowski/erno/actions/workflows/ci.yml/badge.svg)](https://github.com/tomekpiotrowski/erno/actions/workflows/ci.yml)
 
-Full-stack SaaS framework — a Rust/Axum backend library paired with an Angular library for building Ionic web and mobile apps.
+A framework for a SaaS product: Rust/Axum on the server, Angular/Ionic on the client, PostgreSQL underneath. The CLI scaffolds the project and runs it. The libraries cover auth, jobs, billing, offline sync, and files, so application code is mostly product logic.
 
-## Monorepo layout
+This repository is the framework. `erno new` creates a *separate* product repo that depends on it.
 
-| Directory | What it is |
-|-----------|------------|
-| `api/` | Rust library crate — batteries-included backend (auth, jobs, billing, sync, storage) |
-| `app/` | Angular library (`erno-angular`) — consumed by Ionic apps for web and mobile |
-| `docs/` | Astro documentation site |
+## Start a project
 
-## Features
+You need Rust 1.88+, Node 22+, PostgreSQL, and the Angular and Ionic CLIs. `erno doctor` reports anything missing.
 
-### Backend (Rust / `api/`)
+```sh
+git clone https://github.com/tomekpiotrowski/erno.git
+cd erno
+cargo install --path cli
 
-- **Authentication** - JWT access + refresh tokens, registration, password reset, email verification
-- **Offline-first sync** - Delta sync engine with PostgreSQL LISTEN/NOTIFY, conflict detection, soft deletes
-- **Job processing** - Background job queue with advisory locks, retry, cron scheduling
-- **Billing** - Stripe integration, subscription plans, trial management, plan-based feature gates
-- **Storage** - S3 / local file storage abstraction
-- **Rate limiting** - Multi-tier adaptive rate limiting
-- **Authorization** - Pundit-style policy-based authz (`Policy` trait)
-- **WebSocket** - Real-time push to connected clients
-- **Metrics** - Prometheus-compatible `/metrics` endpoint
-- **Admin** - HTTP admin API + Angular operator app (`admin/`)
-
-### Frontend (Angular / `app/`)
-
-- **Auth service** - Login, registration, JWT token management and refresh
-- **HTTP interceptor** - Transparent token injection on every outbound request
-- **Realtime service** - WebSocket connection to backend push events
-- **Offline sync** - Local IndexedDB via Dexie + delta sync with the backend
-- **Storage service** - File upload/download against backend storage
-- **Billing service** - Stripe checkout and portal redirects
-- **Devtools** - Dev overlay and mail preview for local development
-
-## Installation
-
-Add to your `Cargo.toml`:
-
-```toml
-[dependencies]
-erno = { git = "https://github.com/tomekpiotrowski/erno" }
+erno setup     # PostgreSQL admin URL → ~/.erno/config.toml
+erno doctor
 ```
 
-## Quick Start
+The Postgres user in that config must be allowed to create databases:
+
+```sql
+CREATE USER erno WITH PASSWORD 'erno';
+ALTER USER erno CREATEDB;
+```
+
+Then, outside this repo:
+
+```sh
+erno new my_app
+cd my_app
+erno dev
+```
+
+That writes `api/`, `app/`, and `www/`, creates `my_app_development` and `my_app_test`, and starts the dev servers. A verified demo user (`dev@example.com` / `password`) is seeded on first run. `erno new` can start `erno dev` itself — it asks on a TTY; `--dev` / `--no-dev` skip the prompt.
+
+| Surface | URL |
+|---|---|
+| Marketing | http://localhost:4321 |
+| Product app | http://localhost:4200 |
+| API | http://localhost:3000 |
+
+To point the new project at this checkout instead of git (and copy `admin/` in):
+
+```sh
+erno new my_app --erno-path /path/to/erno
+```
+
+`erno dev` then also serves the operator console at http://localhost:4300 (password `admin`). Prometheus is required when the API is started; pass `--no-prometheus` to skip it.
+
+Docs: [getting started](docs/src/content/docs/getting-started.md) and the [CLI overview](docs/src/content/docs/cli/index.md). To read them locally, `cd docs && npm install && npm run dev`.
+
+## What you get
+
+| Area | |
+|---|---|
+| Auth | JWT access + refresh, register, email verification, password reset |
+| Jobs | PostgreSQL queue and cron. No Redis. |
+| Sync | Offline-first: IndexedDB on the client, delta + WebSocket on the server |
+| Billing | Stripe subscriptions, trials, gifts |
+| Storage | Local disk or S3 |
+| Sharing | Secret links and grants, wired into sync |
+| Ops | Admin SPA, Prometheus `/metrics`, a monitoring stack that deploys separately |
+
+The API is the `erno` crate. The client is `erno-angular`, consumed by an Ionic app for web and mobile. `www/` is a static Astro site for SEO; it does not talk to the API. CTAs send people to the product app.
+
+A generated API boots in a few lines. `boot` loads config, runs migrations, and starts the server, workers, and listeners:
 
 ```rust
-use erno::prelude::*;
+use my_app::{boot_config, Migrator};
+use erno::boot::boot;
 
 #[tokio::main]
 async fn main() {
-    boot::<Migrator>(boot_config()).await;
+    boot::<Migrator, ()>(boot_config()).await;
 }
+```
 
+```rust
 pub fn boot_config() -> BootConfig {
-    let app_info = AppInfo::new(
-        env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_VERSION"),
-        env!("CARGO_PKG_DESCRIPTION"),
-    );
-
-    BootConfig::new(app_info, router, job_registry(), job_schedule())
-}
-
-fn router(state: AppState) -> Router {
-    Router::new()
-        .route("/health", get(health_check))
-        // Add your routes here
-        .with_state(state)
-}
-
-fn job_registry() -> JobRegistry {
-    JobRegistry::new()
-        // Register your jobs here
-}
-
-fn job_schedule() -> Vec<Box<dyn ScheduledJob>> {
-    vec![
-        // Add your scheduled jobs here
-    ]
+    BootConfig::new(
+        AppInfo::new("my_app", env!("CARGO_PKG_VERSION"), ""),
+        router,
+        JobRegistry::new(),
+        vec![],
+    )
 }
 ```
 
-## Features
+Product routes go on that `router`. Syncable entities are `.with_sync::<E>()` on the `BootConfig`. The crate can also be added by hand (`erno = { git = "https://github.com/tomekpiotrowski/erno" }`); see [manual API setup](docs/src/content/docs/api/getting-started.md). A new full-stack project should use `erno new`.
 
-### Job Processing
+## CLI
 
-Schedule and run background jobs with advisory locks:
+| Command | |
+|---|---|
+| `erno setup` | Write `~/.erno/config.toml` |
+| `erno doctor` | Check the local environment |
+| `erno new <name>` | Scaffold a product repo |
+| `erno dev` | Run the API, app, www, and whatever else is present |
+| `erno test` / `build` / `lint` | Drive every package from `erno.toml` |
+| `erno upgrade` | Update Erno-managed packages |
+| `erno deploy` | Docker + Kubernetes install (no Helm) |
 
-```rust
-use erno::jobs::*;
+`erno test` creates the test database if needed, runs the API request specs and the app unit tests, then Playwright (`e2e/`).
 
-#[derive(Clone)]
-struct EmailJob;
+## This repository
 
-#[async_trait]
-impl ScheduledJob for EmailJob {
-    fn schedule(&self) -> &str {
-        "0 */5 * * * *" // Every 5 minutes
-    }
+| Directory | |
+|---|---|
+| `api/` | Rust library crate (`erno`) |
+| `app/` | Angular library (`erno-angular`) |
+| `cli/` | `erno` binary |
+| `admin/` | Operator SPA |
+| `monitoring/` | Error collector, uptime, alerts, status page — its own binary, database, and deploy |
+| `docs/` | Astro documentation site |
 
-    async fn execute(&self, ctx: &JobContext) -> Result<JobResult> {
-        // Your job logic here
-        Ok(JobResult::success())
-    }
-}
+`api/`, `cli/`, and `monitoring/` are one Cargo workspace. `app/`, `admin/`, `monitoring/ui`, and `docs/` are npm projects. From the repo root:
 
-// Register and start
-let registry = JobRegistry::new()
-    .register(EmailJob);
-
-let scheduler = Scheduler::new(registry, db);
-scheduler.start().await?;
+```sh
+./build.sh              # api, cli, app, admin, monitoring, docs
+./build.sh api cli      # a subset
+./build.sh test         # Rust suites (need PostgreSQL)
+./build.sh check        # fmt + clippy -D warnings
+./build.sh help
 ```
 
-### Authentication
+API tests use `postgres://erno:erno@localhost/erno`. Monitoring tests use a different database (`erno_monitoring_test`) and must run single-threaded; `./build.sh test` does that. Do not run `cargo test --workspace` from the root.
 
-Protect routes with JWT authentication:
-
-```rust
-use erno::auth::prelude::*;
-
-async fn protected_handler(
-    CurrentUser(user): CurrentUser,
-) -> impl IntoResponse {
-    Json(json!({ "user_id": user.id }))
-}
-```
-
-### Rate Limiting
-
-Apply rate limits to your routes:
-
-```rust
-use erno::rate_limiting::*;
-
-let app = Router::new()
-    .route("/api/data", get(handler))
-    .layer(RateLimitMiddleware::new(
-        RateLimitAction::ApiCall,
-        60, // requests
-        Duration::from_secs(60) // per minute
-    ));
-```
-
-## Development
-
-### Running Tests
-
-```bash
-cargo test --all-features
-```
-
-### Formatting
-
-```bash
-cargo fmt
-```
-
-### Linting
-
-```bash
-cargo clippy --all-features -- -D warnings
-```
-
-## Documentation
-
-Generate and open documentation locally:
-
-```bash
-cargo doc --open
-```
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributor notes for each part live in [AGENTS.md](AGENTS.md).
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT. See [LICENSE](LICENSE).
