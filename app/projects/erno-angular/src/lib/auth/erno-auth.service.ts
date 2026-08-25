@@ -32,6 +32,32 @@ export function ernoAccessToken(): string | null {
   return sessionStorage.getItem(ACCESS_KEY);
 }
 
+/** Access tokens last 15 minutes; refresh this far before `exp`. */
+const EXPIRY_SKEW_SECONDS = 30;
+
+/**
+ * True when `token` is a JWT whose `exp` is at/past now (with skew).
+ *
+ * Missing tokens and opaque non-JWTs are not expired — anonymous sockets and
+ * tests that stub `accessToken: 'tok'` must not trigger a refresh.
+ */
+export function jwtAccessTokenExpired(
+  token: string | null,
+  nowMs = Date.now(),
+  skewSeconds = EXPIRY_SKEW_SECONDS,
+): boolean {
+  if (!token) return false;
+  const part = token.split('.')[1];
+  if (!part) return false;
+  const padded = part.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (part.length % 4)) % 4);
+  try {
+    const payload = JSON.parse(atob(padded)) as { exp?: unknown };
+    return typeof payload.exp === 'number' && payload.exp * 1000 <= nowMs + skewSeconds * 1000;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * A failed `/api/auth/refresh` only means the session is dead when the server
  * rejected the token (`401`). Network errors, `404` from the boot liveness
@@ -206,9 +232,9 @@ export class ErnoAuthService {
       }
     }
 
-    // Missing access token (new tab) or user profile (upgrade / cleared key):
-    // refresh re-issues both and repopulates storage.
-    if (!this.accessToken || !this.currentUser) {
+    // Missing access token (new tab), expired JWT, or user profile (upgrade /
+    // cleared key): refresh re-issues both and repopulates storage.
+    if (!this.accessToken || !this.currentUser || jwtAccessTokenExpired(this.accessToken)) {
       this.refresh().subscribe({
         error: err => {
           if (isFatalRefreshError(err)) {

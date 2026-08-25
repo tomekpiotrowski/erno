@@ -1,12 +1,20 @@
 import { Injectable } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { Subject } from 'rxjs';
+import { of, Subject } from 'rxjs';
 import type { WebSocketSubject } from 'rxjs/webSocket';
 import { ERNO_CONFIG } from '../erno.config';
 import { ErnoAuthService } from '../auth/erno-auth.service';
 import { ErnoAppStateService } from '../app-state/erno-app-state.service';
 import { ErnoNetworkService } from '../network/erno-network.service';
 import { ErnoRealtimeService, SyncPushEvent } from './erno-realtime.service';
+
+function jwtWithExp(exp: number): string {
+  const payload = btoa(JSON.stringify({ exp }))
+    .replace(/=+$/, '')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_');
+  return `eyJhbGciOiJub25lIn0.${payload}.sig`;
+}
 
 @Injectable()
 class TestableRealtimeService extends ErnoRealtimeService {
@@ -223,5 +231,69 @@ describe('ErnoRealtimeService', () => {
     service.openLatest();
 
     expect(seen).toEqual([false, true, false, true]);
+  });
+});
+
+describe('ErnoRealtimeService expired access token', () => {
+  let service: TestableRealtimeService;
+  let appState: ErnoAppStateService;
+  let access: string;
+  let refresh: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    access = jwtWithExp(Date.now() / 1000 - 60);
+    const fresh = jwtWithExp(Date.now() / 1000 + 600);
+    refresh = vi.fn().mockName('refresh').mockImplementation(() => {
+      access = fresh;
+      return of({ access_token: fresh, refresh_token: 'r', user: { id: 'u', email: 'e' } });
+    });
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: ERNO_CONFIG, useValue: { baseUrl: 'http://api', wsUrl: 'ws://api/ws' } },
+        {
+          provide: ErnoAuthService,
+          useValue: {
+            get accessToken() {
+              return access;
+            },
+            refreshToken: 'refresh',
+            refresh,
+          },
+        },
+        ErnoAppStateService,
+        ErnoNetworkService,
+        { provide: ErnoRealtimeService, useClass: TestableRealtimeService },
+      ],
+    });
+    appState = TestBed.inject(ErnoAppStateService);
+    service = TestBed.inject(ErnoRealtimeService) as unknown as TestableRealtimeService;
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  it('refreshes before opening the socket on connect', async () => {
+    service.connect();
+    expect(service.sockets.length).toBe(0);
+    expect(refresh).toHaveBeenCalled();
+    await Promise.resolve();
+    expect(service.sockets.length).toBe(1);
+    expect(service.urls[0]).toContain(access);
+  });
+
+  it('refreshes before reopening on foreground resume', async () => {
+    access = 'tok';
+    service.connect();
+    expect(service.sockets.length).toBe(1);
+
+    appState.notifyStateChange('background');
+    access = jwtWithExp(Date.now() / 1000 - 60);
+    appState.notifyStateChange('active');
+
+    expect(service.sockets.length).toBe(1);
+    expect(refresh).toHaveBeenCalled();
+    await Promise.resolve();
+    expect(service.sockets.length).toBe(2);
+    expect(service.urls[1]).toContain(access);
   });
 });

@@ -62,7 +62,7 @@ Access tokens are intentionally session-scoped so closing the browser tab drops 
 2. On `401` (except the refresh endpoint itself), calls `refresh()` once (coalescing concurrent failures), then retries the request.
 3. If there is no refresh token, or refresh itself returns `401`, triggers `logout()`. Other refresh failures (network error, `404` from the boot liveness server, `5xx`, `429`) leave the stored session in place so a brief API outage does not sign the user out.
 
-`restoreSession()` on bootstrap follows the same rule: a `401` from refresh clears local tokens; a down API does not.
+`restoreSession()` on bootstrap follows the same rule: a `401` from refresh clears local tokens; a down API does not. It also refreshes when the stored access JWT is past `exp`, so a tab that sat for 15 minutes does not come back with a dead token.
 
 `isFatalRefreshError(err)` is the shared predicate — use it in app route guards so a failed refresh during an outage does not redirect to login.
 

@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { BehaviorSubject, Subscription, firstValueFrom } from 'rxjs';
 import { filter } from 'rxjs/operators';
 import { ERNO_CONFIG, ErnoConfig } from '../erno.config';
+import { ErnoAuthService, jwtAccessTokenExpired } from '../auth/erno-auth.service';
 import { ErnoDatabaseService } from './erno-database.service';
 import { ErnoRealtimeService, SyncPushEvent } from '../realtime/erno-realtime.service';
 import { ErnoAppStateService } from '../app-state/erno-app-state.service';
@@ -66,6 +67,7 @@ export class ErnoSyncService implements OnDestroy {
     private realtime: ErnoRealtimeService,
     private appState: ErnoAppStateService,
     private network: ErnoNetworkService,
+    private auth: ErnoAuthService,
   ) {
     // On foreground resume the realtime socket reconnects on its own; pull a
     // delta to catch up on anything missed while the app was backgrounded.
@@ -137,6 +139,13 @@ export class ErnoSyncService implements OnDestroy {
     if (!this.network.connected) {
       this._status.next('offline');
       return;
+    }
+    if (jwtAccessTokenExpired(this.auth.accessToken) && this.auth.refreshToken) {
+      try {
+        await firstValueFrom(this.auth.refresh());
+      } catch {
+        // Non-fatal: continue and let the GET 401 if we still cannot auth.
+      }
     }
     this._status.next('syncing');
     try {

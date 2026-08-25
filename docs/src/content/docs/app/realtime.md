@@ -40,7 +40,7 @@ If the socket drops while a connection is desired, the service reconnects after 
 On Capacitor native platforms the app is suspended when backgrounded, which leaves a stale WebSocket. `ErnoRealtimeService` listens to app state via [`ErnoAppStateService`](#app-state) and:
 
 - **On background** — closes the socket and cancels any pending reconnect.
-- **On foreground resume** — reopens the socket, but only if `connect()` had previously been called and the device is online.
+- **On foreground resume** — reopens the socket, but only if `connect()` had previously been called and the device is online. If the access JWT is past `exp`, it refreshes first so the handshake is not a 401. The HTTP interceptor cannot help here: the token rides the WebSocket URL, not an `Authorization` header.
 
 `ErnoSyncService` complements this by pulling a delta on resume to catch up on events missed while suspended.
 

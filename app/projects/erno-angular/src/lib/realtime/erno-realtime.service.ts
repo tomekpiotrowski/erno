@@ -1,9 +1,9 @@
 import { Inject, Injectable, OnDestroy } from '@angular/core';
-import { BehaviorSubject, Observable, Subject, Subscription } from 'rxjs';
+import { BehaviorSubject, Observable, Subject, Subscription, firstValueFrom } from 'rxjs';
 import { distinctUntilChanged } from 'rxjs/operators';
 import { webSocket, WebSocketSubject } from 'rxjs/webSocket';
 import { ERNO_CONFIG, ErnoConfig } from '../erno.config';
-import { ErnoAuthService } from '../auth/erno-auth.service';
+import { ErnoAuthService, jwtAccessTokenExpired } from '../auth/erno-auth.service';
 import { ErnoAppState, ErnoAppStateService } from '../app-state/erno-app-state.service';
 import { ErnoNetworkService } from '../network/erno-network.service';
 
@@ -63,6 +63,8 @@ export class ErnoRealtimeService implements OnDestroy {
   private requestCounter = 0;
 
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Bumped on every `openSocket` so an in-flight refresh cannot bind a stale socket. */
+  private openGeneration = 0;
   /** Whether the consumer wants a connection (set by connect/disconnect). */
   private shouldBeConnected = false;
   /** Whether the connection is paused because the app is backgrounded. */
@@ -227,9 +229,32 @@ export class ErnoRealtimeService implements OnDestroy {
   }
 
   private openSocket(): void {
+    const gen = ++this.openGeneration;
     this.clearReconnectTimer();
     this.teardownSocket();
 
+    // The handshake puts the JWT in the URL, so it cannot ride the HTTP
+    // interceptor's 401 refresh. Wait for a live token before connecting.
+    if (jwtAccessTokenExpired(this.auth.accessToken) && this.auth.refreshToken) {
+      void this.openSocketAfterRefresh(gen);
+      return;
+    }
+    this.bindSocket();
+  }
+
+  private async openSocketAfterRefresh(gen: number): Promise<void> {
+    try {
+      await firstValueFrom(this.auth.refresh());
+    } catch {
+      // Non-fatal refresh errors leave the stale token; bindSocket still
+      // tries. A 401 from refresh is a dead session — connect anonymously.
+    }
+    if (gen !== this.openGeneration) return;
+    if (!this.shouldBeConnected || this.suspended) return;
+    this.bindSocket();
+  }
+
+  private bindSocket(): void {
     const token = this.auth.accessToken;
     const url = token ? `${this.config.wsUrl}?token=${token}` : this.config.wsUrl;
 

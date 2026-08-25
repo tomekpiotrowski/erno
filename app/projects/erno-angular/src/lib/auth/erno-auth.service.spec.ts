@@ -3,7 +3,20 @@ import { HttpErrorResponse, provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { ERNO_CONFIG } from '../erno.config';
 import { ErnoDatabaseService } from '../sync/erno-database.service';
-import { ErnoAuthService, LoginResponse, isFatalRefreshError } from './erno-auth.service';
+import {
+  ErnoAuthService,
+  LoginResponse,
+  isFatalRefreshError,
+  jwtAccessTokenExpired,
+} from './erno-auth.service';
+
+function jwtWithExp(exp: number): string {
+  const payload = btoa(JSON.stringify({ exp }))
+    .replace(/=+$/, '')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_');
+  return `eyJhbGciOiJub25lIn0.${payload}.sig`;
+}
 
 const REFRESH_URL = 'http://api/api/auth/refresh';
 
@@ -106,6 +119,20 @@ describe('ErnoAuthService', () => {
     });
   });
 
+  describe('jwtAccessTokenExpired', () => {
+    const now = 1_700_000_000_000;
+
+    it('ignores missing and opaque tokens', () => {
+      expect(jwtAccessTokenExpired(null, now)).toBe(false);
+      expect(jwtAccessTokenExpired('tok', now)).toBe(false);
+    });
+
+    it('detects a live vs expired JWT', () => {
+      expect(jwtAccessTokenExpired(jwtWithExp(now / 1000 + 120), now)).toBe(false);
+      expect(jwtAccessTokenExpired(jwtWithExp(now / 1000 - 1), now)).toBe(true);
+    });
+  });
+
   describe('isFatalRefreshError', () => {
     it('is true only for HTTP 401', () => {
       expect(isFatalRefreshError(new HttpErrorResponse({ status: 401 }))).toBe(true);
@@ -120,5 +147,14 @@ describe('ErnoAuthService', () => {
     build();
     http.expectNone(REFRESH_URL);
     expect(service.currentUser).toBeNull();
+  });
+
+  it('refreshes on construct when the stored access token is an expired JWT', () => {
+    sessionStorage.setItem('erno_access_token', jwtWithExp(Date.now() / 1000 - 60));
+    localStorage.setItem('erno_refresh_token', 'stored_refresh');
+    localStorage.setItem('erno_user', JSON.stringify({ id: 'user-1', email: 'user@example.com' }));
+    build();
+    http.expectOne(REFRESH_URL).flush(pair('fresh'));
+    expect(service.accessToken).toBe('access_fresh');
   });
 });
