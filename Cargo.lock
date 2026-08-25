@@ -1690,6 +1690,7 @@ dependencies = [
  "time",
  "tokio",
  "toml 0.8.23",
+ "tower",
  "tower-http",
  "tracing",
  "tracing-opentelemetry",

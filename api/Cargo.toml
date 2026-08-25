@@ -42,7 +42,8 @@ sqlx = { version = "0.8", features = ["postgres"] }
 strum = { version = "0.26.3", features = ["derive"] }
 thiserror = "2.0.12"
 tokio = { workspace = true, features = ["fs", "signal"] }
-tower-http = { version = "0.6.6", features = ["cors", "trace", "catch-panic"] }
+tower = "0.5"
+tower-http = { version = "0.6.6", features = ["cors", "catch-panic"] }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "time", "local-time"] }
 opentelemetry = { workspace = true }

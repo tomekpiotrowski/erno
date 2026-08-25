@@ -2,7 +2,6 @@ use axum::{
     extract::Request, http::HeaderValue, middleware::Next, response::Response, routing::get, Router,
 };
 use tower_http::cors::CorsLayer;
-use tower_http::trace::TraceLayer;
 
 use crate::{
     admin::admin_router,
@@ -57,6 +56,7 @@ where
     let rate_limit_state = app.rate_limit_state.clone();
     let rate_limiting_enabled = app.config.rate_limiting.enabled;
     let metrics_enabled = app.config.metrics.enabled;
+    let traces_enabled = app.config.tracing.otel.traces_enabled();
     let cors_origins: Vec<HeaderValue> = cors_origin_list(&app.config.cors.allowed_origins);
     let metrics_state = MetricsEndpointState {
         handle: app.prometheus_handle.clone(),
@@ -83,7 +83,7 @@ where
         rate_limited = rate_limited.nest("/admin/api", admin_router);
     }
 
-    if metrics_enabled {
+    if metrics_enabled || traces_enabled {
         rate_limited = rate_limited.layer(axum::middleware::from_fn(metrics_middleware));
     }
 
@@ -109,8 +109,7 @@ where
         // it into a clean 500. The report itself comes from the panic hook, so
         // the default responder is used deliberately — a custom one here would
         // report the same panic twice.
-        .layer(tower_http::catch_panic::CatchPanicLayer::new())
-        .layer(TraceLayer::new_for_http());
+        .layer(tower_http::catch_panic::CatchPanicLayer::new());
 
     if metrics_enabled {
         base = base.route(

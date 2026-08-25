@@ -9,9 +9,11 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+use opentelemetry::propagation::{Extractor, Injector};
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry::{global, KeyValue};
 use opentelemetry_otlp::{SpanExporter, WithExportConfig, WithHttpConfig};
+use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider, Tracer};
 use opentelemetry_sdk::Resource;
 use opentelemetry_semantic_conventions::resource::{SERVICE_NAME, SERVICE_VERSION};
@@ -50,6 +52,7 @@ fn provider(config: &OtelConfig) -> Option<&'static SdkTracerProvider> {
             let _ = TRACER_PROVIDER.set(built);
             let provider = TRACER_PROVIDER.get()?;
             global::set_tracer_provider(provider.clone());
+            global::set_text_map_propagator(TraceContextPropagator::new());
             Some(provider)
         }
         Err(e) => {
@@ -113,6 +116,32 @@ fn resource(config: &OtelConfig) -> Resource {
         attrs.push(KeyValue::new("deployment.environment", env));
     }
     Resource::builder().with_attributes(attrs).build()
+}
+
+/// W3C `traceparent` extractor over an http header map.
+pub struct HeaderExtractor<'a>(pub &'a axum::http::HeaderMap);
+
+impl Extractor for HeaderExtractor<'_> {
+    fn get(&self, key: &str) -> Option<&str> {
+        self.0.get(key).and_then(|v| v.to_str().ok())
+    }
+
+    fn keys(&self) -> Vec<&str> {
+        self.0.keys().map(|k| k.as_str()).collect()
+    }
+}
+
+/// W3C `traceparent` injector over a mutable http header map.
+pub struct HeaderInjector<'a>(pub &'a mut axum::http::HeaderMap);
+
+impl Injector for HeaderInjector<'_> {
+    fn set(&mut self, key: &str, value: String) {
+        if let Ok(name) = axum::http::HeaderName::from_bytes(key.as_bytes()) {
+            if let Ok(value) = axum::http::HeaderValue::from_str(&value) {
+                self.0.insert(name, value);
+            }
+        }
+    }
 }
 
 /// Flush outstanding spans. No-op when export was never installed.
