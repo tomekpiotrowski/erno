@@ -73,3 +73,35 @@ describe('provideErno', () => {
     expect(TestBed.inject(ErnoErrorReporterService).active).toBe(false);
   });
 });
+
+describe('provideErno session restore', () => {
+  afterEach(() => {
+    sessionStorage.clear();
+    localStorage.clear();
+  });
+
+  it('does not cycle HTTP_INTERCEPTORS when restoreSession refreshes', () => {
+    sessionStorage.clear();
+    localStorage.setItem('erno_refresh_token', 'refresh-1');
+    localStorage.setItem('erno_user', JSON.stringify({ id: 'u1', email: 'a@b.c' }));
+
+    TestBed.configureTestingModule({
+      providers: [
+        provideErno({ baseUrl: BASE, wsUrl: 'ws://api/ws' }),
+        provideHttpClientTesting(),
+        { provide: ErnoDatabaseService, useValue: { clear: () => Promise.resolve() } },
+      ],
+    });
+
+    expect(() => TestBed.inject(ErnoAuthService)).not.toThrow();
+
+    const httpMock = TestBed.inject(HttpTestingController);
+    httpMock.expectOne(`${BASE}/api/auth/refresh`).flush({
+      access_token: 'new-access',
+      refresh_token: 'refresh-2',
+      user: { id: 'u1', email: 'a@b.c' },
+    });
+    httpMock.verify();
+    expect(TestBed.inject(ErnoAuthService).accessToken).toBe('new-access');
+  });
+});

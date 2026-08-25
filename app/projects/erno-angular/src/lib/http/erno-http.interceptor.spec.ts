@@ -1,15 +1,10 @@
 import { TestBed } from '@angular/core/testing';
-import {
-  HTTP_INTERCEPTORS,
-  HttpClient,
-  provideHttpClient,
-  withInterceptorsFromDi,
-} from '@angular/common/http';
+import { HttpClient, provideHttpClient, withInterceptors } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { ERNO_CONFIG } from '../erno.config';
 import { ErnoDatabaseService } from '../sync/erno-database.service';
 import { ErnoAuthService } from '../auth/erno-auth.service';
-import { ErnoHttpInterceptor } from './erno-http.interceptor';
+import { ernoHttpInterceptor } from './erno-http.interceptor';
 
 const PROJECTS_URL = 'http://api/api/projects';
 const REFRESH_URL = 'http://api/api/auth/refresh';
@@ -31,12 +26,11 @@ describe('ErnoHttpInterceptor', () => {
 
     TestBed.configureTestingModule({
       providers: [
-        provideHttpClient(withInterceptorsFromDi()),
+        provideHttpClient(withInterceptors([ernoHttpInterceptor])),
         provideHttpClientTesting(),
         { provide: ERNO_CONFIG, useValue: { baseUrl: 'http://api', wsUrl: 'ws://api/ws' } },
         { provide: ErnoDatabaseService, useValue: { clear: vi.fn().mockResolvedValue(undefined) } },
         ErnoAuthService,
-        { provide: HTTP_INTERCEPTORS, useClass: ErnoHttpInterceptor, multi: true },
       ],
     });
     http = TestBed.inject(HttpTestingController);
@@ -117,5 +111,36 @@ describe('ErnoHttpInterceptor', () => {
     expect(status).toBe(401);
     // No refresh was attempted.
     http.expectNone(REFRESH_URL);
+  });
+});
+
+describe('ernoHttpInterceptor guest session', () => {
+  afterEach(() => {
+    sessionStorage.clear();
+    localStorage.clear();
+  });
+
+  it('does not throw NG0200 on the first register POST', () => {
+    sessionStorage.clear();
+    localStorage.clear();
+
+    TestBed.configureTestingModule({
+      providers: [
+        provideHttpClient(withInterceptors([ernoHttpInterceptor])),
+        provideHttpClientTesting(),
+        { provide: ERNO_CONFIG, useValue: { baseUrl: 'http://api', wsUrl: 'ws://api/ws' } },
+        { provide: ErnoDatabaseService, useValue: { clear: vi.fn().mockResolvedValue(undefined) } },
+        ErnoAuthService,
+      ],
+    });
+
+    const auth = TestBed.inject(ErnoAuthService);
+    expect(() => auth.register('a@b.c', 'password1').subscribe()).not.toThrow();
+
+    const http = TestBed.inject(HttpTestingController);
+    const req = http.expectOne('http://api/api/auth/register');
+    expect(req.request.headers.has('Authorization')).toBe(false);
+    req.flush(null);
+    http.verify();
   });
 });

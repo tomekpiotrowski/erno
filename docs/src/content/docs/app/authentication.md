@@ -56,7 +56,7 @@ Access tokens are intentionally session-scoped so closing the browser tab drops 
 
 ## HTTP interceptor
 
-`provideErno()` / `ErnoModule.forRoot()` registers `ErnoHttpInterceptor`. For any request whose URL starts with `baseUrl`:
+`provideErno()` / `ErnoModule.forRoot()` registers `ernoHttpInterceptor` (class adapter: `ErnoHttpInterceptor`). For any request whose URL starts with `baseUrl`:
 
 1. Adds `Authorization: Bearer <access_token>` when an access token is present.
 2. On `401` (except the refresh endpoint itself), calls `refresh()` once (coalescing concurrent failures), then retries the request.
