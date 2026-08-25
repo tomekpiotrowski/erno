@@ -144,6 +144,26 @@ impl Injector for HeaderInjector<'_> {
     }
 }
 
+/// Hex trace id of the current span, if an OpenTelemetry context is active.
+///
+/// Used to join captured errors (and later logs) to a Tempo waterfall. `None`
+/// when no span is current or the context is invalid — callers must not invent
+/// an id.
+#[must_use]
+pub fn current_trace_id() -> Option<String> {
+    use opentelemetry::trace::TraceContextExt;
+    use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+    let context = tracing::Span::current().context();
+    let span = context.span();
+    let span_context = span.span_context();
+    if span_context.is_valid() {
+        Some(span_context.trace_id().to_string())
+    } else {
+        None
+    }
+}
+
 /// Flush outstanding spans. No-op when export was never installed.
 pub fn flush() {
     if let Some(provider) = TRACER_PROVIDER.get() {
@@ -220,6 +240,29 @@ mod tests {
             spans.iter().any(|s| s.name == "widget"),
             "expected a widget span, got {spans:?}"
         );
+    }
+
+    #[test]
+    fn current_trace_id_is_none_outside_a_span() {
+        assert_eq!(current_trace_id(), None);
+    }
+
+    #[test]
+    fn current_trace_id_follows_an_active_span() {
+        let exporter = InMemorySpanExporter::default();
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(exporter.clone())
+            .build();
+        let tracer = provider.tracer("test");
+        let subscriber =
+            tracing_subscriber::registry().with(tracing_opentelemetry::layer().with_tracer(tracer));
+        tracing::subscriber::with_default(subscriber, || {
+            let span = tracing::info_span!("widget");
+            let _guard = span.enter();
+            let id = current_trace_id().expect("active span has a trace id");
+            assert_eq!(id.len(), 32);
+            assert!(id.chars().all(|c| c.is_ascii_hexdigit()), "{id}");
+        });
     }
 
     #[test]
