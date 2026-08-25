@@ -174,3 +174,13 @@ Two hooks fire when a job permanently fails (both run, in addition to the error 
   BootConfig::new(app_info, app_router, registry, schedule)
       .on_job_failure(std::sync::Arc::new(AlertOnFailure));
   ```
+
+## Dev inspector
+
+Outside production the API also mounts a small job inspector on its own origin, used by the [devtools overlay](/app/devtools/):
+
+| Route | Purpose |
+|-------|---------|
+| `GET /dev/jobs` | Last 100 jobs, newest first, each with its execution rows (`execution_time_ms`, `failure_reason`) |
+| `DELETE /dev/jobs` | Clear the queue table |
+| `POST /dev/jobs/{id}/retry` | Re-queue a job as `pending` |

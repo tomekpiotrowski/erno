@@ -1,13 +1,44 @@
+use std::collections::HashMap;
+
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
     Json,
 };
-use sea_orm::{EntityTrait, QueryOrder, QuerySelect};
+use chrono::NaiveDateTime;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set};
+use serde::Serialize;
 use uuid::Uuid;
 
-use crate::{app::App, database::models::job};
+use crate::{
+    app::App,
+    database::models::{job, job_execution, job_result::JobResult, job_status::JobStatus},
+};
+
+#[derive(Debug, Serialize)]
+pub struct DevJobExecutionDto {
+    pub id: Uuid,
+    pub result: String,
+    pub execution_time_ms: i64,
+    pub failure_reason: Option<String>,
+    pub started_at: NaiveDateTime,
+    pub finished_at: NaiveDateTime,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DevJobDto {
+    pub id: Uuid,
+    #[serde(rename = "type")]
+    pub job_type: String,
+    pub arguments: serde_json::Value,
+    pub status: String,
+    pub retry_count: i32,
+    pub next_execution_at: Option<NaiveDateTime>,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+    pub executions: Vec<DevJobExecutionDto>,
+}
 
 pub async fn list_emails<ExtraConfig: Clone + Send + Sync + 'static>(
     State(app): State<App<ExtraConfig>>,
@@ -26,14 +57,83 @@ pub async fn clear_emails<ExtraConfig: Clone + Send + Sync + 'static>(
 pub async fn list_jobs<ExtraConfig: Clone + Send + Sync + 'static>(
     State(app): State<App<ExtraConfig>>,
 ) -> impl IntoResponse {
-    match job::Entity::find()
+    let jobs = match job::Entity::find()
         .order_by_desc(job::Column::CreatedAt)
         .limit(100)
         .all(&app.db)
         .await
     {
-        Ok(jobs) => Json(jobs).into_response(),
+        Ok(jobs) => jobs,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+
+    if jobs.is_empty() {
+        return Json(Vec::<DevJobDto>::new()).into_response();
+    }
+
+    let ids: Vec<Uuid> = jobs.iter().map(|j| j.id).collect();
+    let executions = match job_execution::Entity::find()
+        .filter(job_execution::Column::JobId.is_in(ids))
+        .order_by_desc(job_execution::Column::StartedAt)
+        .all(&app.db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+
+    let mut by_job: HashMap<Uuid, Vec<DevJobExecutionDto>> = HashMap::new();
+    for e in executions {
+        by_job
+            .entry(e.job_id)
+            .or_default()
+            .push(DevJobExecutionDto {
+                id: e.id,
+                result: execution_result_label(e.result),
+                execution_time_ms: e.execution_time_ms,
+                failure_reason: e.failure_reason,
+                started_at: e.started_at,
+                finished_at: e.finished_at,
+            });
+    }
+
+    let body: Vec<DevJobDto> = jobs
+        .into_iter()
+        .map(|j| DevJobDto {
+            id: j.id,
+            job_type: j.r#type,
+            arguments: j.arguments,
+            status: job_status_label(j.status),
+            retry_count: j.retry_count,
+            next_execution_at: j.next_execution_at,
+            created_at: j.created_at,
+            updated_at: j.updated_at,
+            executions: by_job.remove(&j.id).unwrap_or_default(),
+        })
+        .collect();
+
+    Json(body).into_response()
+}
+
+pub async fn retry_job<ExtraConfig: Clone + Send + Sync + 'static>(
+    State(app): State<App<ExtraConfig>>,
+    Path(id): Path<Uuid>,
+) -> impl IntoResponse {
+    match job::Entity::find_by_id(id).one(&app.db).await {
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        Ok(Some(_)) => {
+            let active = job::ActiveModel {
+                id: Set(id),
+                status: Set(JobStatus::Pending),
+                next_execution_at: Set(None),
+                ..Default::default()
+            };
+            match job::Entity::update(active).exec(&app.db).await {
+                Ok(_) => StatusCode::NO_CONTENT.into_response(),
+                Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+            }
+        }
     }
 }
 
@@ -156,6 +256,26 @@ pub async fn email_body<ExtraConfig: Clone + Send + Sync + 'static>(
     };
 
     html_response(body)
+}
+
+fn job_status_label(status: JobStatus) -> String {
+    match status {
+        JobStatus::Pending => "pending",
+        JobStatus::PendingRetry => "pending_retry",
+        JobStatus::Running => "running",
+        JobStatus::Completed => "completed",
+        JobStatus::Failed => "failed",
+    }
+    .to_string()
+}
+
+fn execution_result_label(result: JobResult) -> String {
+    match result {
+        JobResult::Completed => "completed",
+        JobResult::Failed => "failed",
+        JobResult::TimedOut => "timed_out",
+    }
+    .to_string()
 }
 
 fn html_response(body: String) -> axum::response::Response {

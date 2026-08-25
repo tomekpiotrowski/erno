@@ -15,13 +15,15 @@ Add the component once in a root template (development builds only):
 <erno-devtools></erno-devtools>
 ```
 
-The overlay is fixed to the bottom-right and exposes three tabs:
+The overlay is a Nocturne panel docked to the bottom-right. A health dot in the header (and on the collapsed pill) turns red when sync is in error or a job has failed, amber while work is in flight, and green otherwise. Collapse it with **—**; **tall** / **short** grows the body.
 
 | Tab | What it shows |
 |-----|----------------|
-| **Status** | WebSocket and sync status; button to force a re-sync |
-| **Emails** | Mock emails captured when the API uses `email.type = "mock"`; newest first, click one to open it in a new tab |
-| **Jobs** | Recent background jobs (type, status, arguments, retries) |
+| **Status** | WebSocket, sync, API liveness, and queue counts; button to force a re-sync |
+| **Emails** | Mock emails captured when the API uses `email.type = "mock"`; newest first, unread until opened, click one to open it in a new tab |
+| **Jobs** | Recent jobs grouped by type, with run counts, filters (`all` / `attention` / `failed`), expand for individual runs, and **retry** on a failed job |
+
+Tab badges show the inbox size, the number of job rows, and `!` on Status when sync is in error. **Clear all** empties the inbox or the job history depending on the open tab. The panel polls every few seconds so counts stay current while it is mounted.
 
 Visibility is gated by Angular’s `isDevMode()` so production builds do not show the panel even if the tag remains in a template.
 
@@ -32,6 +34,7 @@ Visibility is gated by Angular’s `isDevMode()` so production builds do not sho
 | `ErnoDevMailService` | `GET/DELETE /dev/emails` | List, delete one, or clear mock emails |
 | `ErnoDevMailService.previewUrl(id)` | `GET /dev/emails/{id}/preview` | URL of the standalone preview page for one email |
 | `ErnoDevJobsService` | `GET/DELETE /dev/jobs` | List/clear jobs for the Jobs tab |
+| `ErnoDevJobsService.retry(id)` | `POST /dev/jobs/{id}/retry` | Re-queue a failed job |
 
 ### Opening an email
 
