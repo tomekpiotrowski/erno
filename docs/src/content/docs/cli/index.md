@@ -38,15 +38,30 @@ cargo install erno-cli
 Every command shares one output style.
 
 ```text
+🩺 Section header
+  ✅    a passing row
+  ⚠️    something to look at
+  ❌    something broken
+        an explanation or fix
+❌ error: the command failed
+🎉 the command finished
+```
+
+The same output without emoji, which is what you get whenever colour is off:
+
+```text
 ==> Section header
   ok    a passing row
   warn  something to look at
   fail  something broken
         an explanation or fix
 error: the command failed
+done: the command finished
 ```
 
-Status markers are plain words — `ok`, `warn`, `fail`, `error:` — coloured green, yellow, and red. They are never emoji, so columns line up on every terminal and nothing is lost when colour is off.
+Both put row text in the same column, because an icon is padded to the width of the widest word. The icons are a fixed set, each one two terminal columns wide, so nothing goes ragged — and the word markers are always there underneath, which is what makes the piped and `--no-color` output identical to what it has always been.
+
+Emoji follow the colour decision: they are on in an interactive colour terminal and off everywhere else — pipes, redirects, CI, `NO_COLOR`, `--no-color`. `--no-emoji` (or `ERNO_EMOJI=0`) turns them off on their own, for a colour terminal whose font cannot draw them.
 
 **stdout carries the output of the tools the CLI runs; stderr carries everything the CLI says about itself.** Headers, rows, banners, prompts, warnings, and errors all go to stderr. So `erno doctor > report.txt` writes an empty file (the report is on stderr), while `erno build 2>/dev/null` shows only what cargo and npm printed to stdout. The pinned `erno dev` banner is a stderr-only affair too, so redirecting either stream behaves exactly as it always has.
 
@@ -56,7 +71,8 @@ These work on either side of the subcommand — `erno -q build` and `erno build 
 
 | Flag | Effect |
 |------|--------|
-| `--no-color` | Disable ANSI colour. `NO_COLOR` and `CLICOLOR_FORCE` are also honoured. |
+| `--no-color` | Disable ANSI colour, and with it emoji. `NO_COLOR` and `CLICOLOR_FORCE` are also honoured. |
+| `--no-emoji` | Fall back to `ok`/`warn`/`fail` word markers, keeping colour. `ERNO_EMOJI=0` does the same. |
 | `--quiet`, `-q` | Print only warnings, errors, and results. Never hides a failure. |
 | `--verbose`, `-v` | Print more detail. In `dev`, stream every child log line; in `deploy init`, list every generated file. |
 
@@ -116,9 +132,23 @@ erno dev --android --target emulator-5554
 | Product app | HTTP | `app_url` or `angular.json` serve port (4200) |
 | Marketing | HTTP | `--port` in `www/package.json` `dev` script (4321) |
 | Prometheus | `GET /-/ready` | `http://localhost:9090` |
+| Admin SPA | HTTP | `http://localhost:4300` (password `admin`) |
 | Extra `[[package.dev]]` | HTTP on the declared `url` | From `erno.toml` |
 
-A second `erno dev` in the same project is rejected via `.erno/dev.lock` (stale locks from a crashed session are replaced). When the API is running the banner also lists Prometheus (`http://localhost:9090`), the admin SPA (`http://localhost:4300`, password `admin`), `/dev/emails`, and `/dev/jobs`. Newly captured mock emails are printed as `[mail] subject → to`. In an interactive terminal the banner is pinned to the bottom of the screen and updated in place as services come up, with log output scrolling above it; on Ctrl+C the last copy is left in the scrollback. When output is piped, under `--no-color`, `--quiet`, or `--verbose`, on a terminal too small to hold the banner, or with `ERNO_STICKY=0`, it is printed once instead and each later state change (`starting` → `ready`) is reported as a single row naming the service. If one process exits, it is restarted (with backoff) without taking the others down. The API is rebuilt automatically when `api/` source files change (no `cargo-watch` needed). Ctrl+C sends SIGTERM, then SIGKILL after two seconds. Prometheus is required when the API is started (`prometheus` must be on `PATH`). Pass `--no-prometheus` to skip — the banner then omits `prom`. A missing binary is an error, not a silent skip.
+A second `erno dev` in the same project is rejected via `.erno/dev.lock` (stale locks from a crashed session are replaced). Every row is a service that was started, with its own readiness state:
+
+```text
+  🚀 erno — Ctrl+C to stop
+  🌐 www    http://localhost:4321  ✅ ready
+  📱 app    http://localhost:4200  ⏳ starting
+  🦀 api    http://localhost:3000  🔄 migrating
+  📊 prom   http://localhost:9090  ✅ ready
+  🧰 admin  http://localhost:4300  ✅ ready      password: admin
+```
+
+Child output is filtered down to what the banner cannot tell you: errors and anything waiting on an answer. Startup and progress chatter goes to `.erno/dev.log`, and `--verbose` streams the raw multiplex.
+
+The API's own developer surfaces are not listed — they are always at `/dev/emails` and `/dev/jobs` on the API's origin. Newly captured mock emails are printed as `[mail] subject → to`. In an interactive terminal the banner is pinned to the bottom of the screen and updated in place as services come up, with log output scrolling above it; on Ctrl+C the last copy is left in the scrollback. When output is piped, under `--no-color`, `--quiet`, or `--verbose`, on a terminal too small to hold the banner, or with `ERNO_STICKY=0`, it is printed once instead and each later state change (`starting` → `ready`) is reported as a single row naming the service. If one process exits, it is restarted (with backoff) without taking the others down. The API is rebuilt automatically when `api/` source files change (no `cargo-watch` needed). Ctrl+C sends SIGTERM, then SIGKILL after two seconds. Prometheus is required when the API is started (`prometheus` must be on `PATH`). Pass `--no-prometheus` to skip — the banner then omits `prom`. A missing binary is an error, not a silent skip.
 
 Before spawning anything, `erno dev` checks that PostgreSQL is running (when the API is selected), that `prometheus` is on `PATH` (unless `--no-prometheus`), and that each selected service’s port is free. If a port is held by a leftover `cargo`/`node`/`erno` process, it offers to kill it.
 
@@ -256,17 +286,20 @@ With no flags, every package with `default = true` runs, and within them every s
 Each command prints a per-package `ok` / `fail` summary and exits non-zero if any package failed:
 
 ```text
-==> api
+🔨 api
 [api]    Compiling erno v0.1.0
+  ✅    cargo build --release  48.2s
 
-==> app
+🔨 app
 [app] > app@0.0.1 build
+  ✅    npm run build          12.4s
 
-  api  ok
-  app  ok
+  ✅    api  48.3s
+  ✅    app  12.4s
+🎉 build finished in 1m 00s
 ```
 
-The summary is a result, not narration, so `--quiet` keeps it.
+Every step is timed, and so is every package. The summary and the closing line are results, not narration, so `--quiet` keeps them.
 
 ## setup
 
@@ -311,16 +344,16 @@ Checks everything needed to build and run Erno projects:
 Exit code is `0` if all required checks pass, `1` otherwise. A warning never fails the run.
 
 ```text
-==> Environment
+🩺 Environment
 
-  ok    Rust                 1.90.0
-  ok    Node.js              v22.11.0
-  fail  PostgreSQL server    not running
+  ✅    Rust                 1.90.0
+  ✅    Node.js              v22.11.0
+  ❌    PostgreSQL server    not running
         Start it — e.g.: sudo service postgresql start
-  warn  sea-orm-cli          not found
+  ⚠️    sea-orm-cli          not found
         Install with: cargo install sea-orm-cli
 
-error: 1 required check failed
+❌ error: 1 required check failed
   Fix the issues above and run `erno doctor` again.
 ```
 
