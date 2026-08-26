@@ -62,9 +62,23 @@ pub fn setup_tracing_for_command(command: &Option<Commands>, tracing: &TracingCo
         .flatten()
         .map(|layer| layer.with_filter(otel_filter));
 
+    let log_filter = tracing.otel.log_level.trim();
+    let log_layer = is_server
+        .then(|| crate::tracing_otel::log_layer(&tracing.otel))
+        .flatten()
+        .map(|layer| {
+            let filter = if log_filter.is_empty() {
+                tracing_subscriber::EnvFilter::new("off")
+            } else {
+                tracing_subscriber::EnvFilter::new(log_filter)
+            };
+            layer.with_filter(filter)
+        });
+
     tracing_subscriber::registry()
         .with(fmt_layer)
         .with(capture_layer)
         .with(otel_layer)
+        .with(log_layer)
         .init();
 }

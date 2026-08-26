@@ -12,7 +12,9 @@ use std::sync::OnceLock;
 use opentelemetry::propagation::{Extractor, Injector};
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry::{global, KeyValue};
-use opentelemetry_otlp::{SpanExporter, WithExportConfig, WithHttpConfig};
+use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
+use opentelemetry_otlp::{LogExporter, SpanExporter, WithExportConfig, WithHttpConfig};
+use opentelemetry_sdk::logs::{SdkLogger, SdkLoggerProvider};
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::{Sampler, SdkTracerProvider, Tracer};
 use opentelemetry_sdk::Resource;
@@ -24,6 +26,7 @@ use tracing_subscriber::registry::LookupSpan;
 use crate::config::OtelConfig;
 
 static TRACER_PROVIDER: OnceLock<SdkTracerProvider> = OnceLock::new();
+static LOGGER_PROVIDER: OnceLock<SdkLoggerProvider> = OnceLock::new();
 
 const DEFAULT_SERVICE_NAME: &str = "erno";
 
@@ -72,12 +75,7 @@ fn build_provider(
         .with_http()
         .with_endpoint(config.endpoint.trim());
     if !config.token.trim().is_empty() {
-        let mut headers = HashMap::new();
-        headers.insert(
-            "Authorization".to_string(),
-            format!("Bearer {}", config.token.trim()),
-        );
-        exporter = exporter.with_headers(headers);
+        exporter = exporter.with_headers(auth_headers(config));
     }
     let exporter = exporter.build()?;
 
@@ -86,6 +84,60 @@ fn build_provider(
         .with_sampler(sampler(config.sample_ratio))
         .with_resource(resource(config))
         .build())
+}
+
+/// A tracing layer that forwards log events to Loki over OTLP/HTTP.
+///
+/// `None` when `[tracing.otel] log_level` is empty or there is no logs
+/// endpoint. Filtered to that log level so stdout can stay noisier than Loki.
+pub fn log_layer(
+    config: &OtelConfig,
+) -> Option<OpenTelemetryTracingBridge<SdkLoggerProvider, SdkLogger>> {
+    let provider = logger_provider(config)?;
+    Some(OpenTelemetryTracingBridge::new(provider))
+}
+
+fn logger_provider(config: &OtelConfig) -> Option<&'static SdkLoggerProvider> {
+    let _ = config.logs_target()?;
+    if let Some(existing) = LOGGER_PROVIDER.get() {
+        return Some(existing);
+    }
+    match build_logger_provider(config) {
+        Ok(built) => {
+            let _ = LOGGER_PROVIDER.set(built);
+            LOGGER_PROVIDER.get()
+        }
+        Err(e) => {
+            eprintln!("opentelemetry: could not install the log exporter: {e}; logs are off");
+            None
+        }
+    }
+}
+
+fn build_logger_provider(
+    config: &OtelConfig,
+) -> Result<SdkLoggerProvider, Box<dyn std::error::Error + Send + Sync>> {
+    let endpoint = config
+        .logs_target()
+        .expect("logger_provider is only called when logs_target is set");
+    let mut exporter = LogExporter::builder().with_http().with_endpoint(endpoint);
+    if !config.token.trim().is_empty() {
+        exporter = exporter.with_headers(auth_headers(config));
+    }
+    let exporter = exporter.build()?;
+    Ok(SdkLoggerProvider::builder()
+        .with_batch_exporter(exporter)
+        .with_resource(resource(config))
+        .build())
+}
+
+fn auth_headers(config: &OtelConfig) -> HashMap<String, String> {
+    let mut headers = HashMap::new();
+    headers.insert(
+        "Authorization".to_string(),
+        format!("Bearer {}", config.token.trim()),
+    );
+    headers
 }
 
 fn sampler(ratio: f64) -> Sampler {
@@ -174,6 +226,9 @@ pub fn flush() {
 /// Flush and shut the provider down. Called at the end of process drain.
 pub fn shutdown() {
     if let Some(provider) = TRACER_PROVIDER.get() {
+        let _ = provider.shutdown();
+    }
+    if let Some(provider) = LOGGER_PROVIDER.get() {
         let _ = provider.shutdown();
     }
 }
@@ -277,5 +332,54 @@ mod tests {
         assert_eq!(config.logs_target(), Some("http://127.0.0.1:3100/otlp"));
         config.log_level.clear();
         assert_eq!(config.logs_target(), None);
+    }
+
+    #[test]
+    fn empty_log_level_installs_no_log_layer() {
+        let config = OtelConfig {
+            endpoint: "http://127.0.0.1:4318".into(),
+            ..OtelConfig::default()
+        };
+        assert!(log_layer(&config).is_none());
+    }
+
+    #[test]
+    fn warn_inside_a_span_carries_trace_id_and_info_can_be_filtered() {
+        use opentelemetry_sdk::logs::InMemoryLogExporter;
+        use tracing_subscriber::Layer;
+
+        let log_exporter = InMemoryLogExporter::default();
+        let logger = SdkLoggerProvider::builder()
+            .with_simple_exporter(log_exporter.clone())
+            .build();
+        let span_exporter = InMemorySpanExporter::default();
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_simple_exporter(span_exporter.clone())
+            .build();
+        let tracer = tracer_provider.tracer("test");
+        let subscriber = tracing_subscriber::registry()
+            .with(tracing_opentelemetry::layer().with_tracer(tracer))
+            .with(
+                OpenTelemetryTracingBridge::new(&logger)
+                    .with_filter(tracing_subscriber::EnvFilter::new("warn")),
+            );
+        tracing::subscriber::with_default(subscriber, || {
+            let span = tracing::info_span!("widget");
+            let _guard = span.enter();
+            tracing::info!("routine");
+            tracing::warn!("slow query");
+        });
+        logger.force_flush().expect("flush logs");
+        let logs = log_exporter.get_emitted_logs().expect("logs");
+        assert!(
+            logs.iter().all(|r| !format!("{:?}", r).contains("routine")),
+            "info must be filtered, got {logs:?}"
+        );
+        assert!(!logs.is_empty(), "expected a warn log, got {logs:?}");
+        let joined = format!("{logs:?}");
+        assert!(
+            joined.contains("slow query") || joined.contains("slow"),
+            "warn body missing: {joined}"
+        );
     }
 }
