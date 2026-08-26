@@ -19,7 +19,7 @@ cargo install --path .                   # install globally as `erno`
 | `erno new <name>` | Scaffolds a full-stack Erno project (Rust API + Ionic Angular standalone app + Astro www) |
 | `erno upgrade` | Inventories Erno-managed packages and runs official migrators (`ng update`, `@ionic/migrate`) toward this CLI generation |
 | `erno dev` | Starts api + app + www dev servers, readiness banner, `--ios`/`--android` live reload (`--target <id>` picks the device) |
-| `erno dev` | Also starts Prometheus (if installed), `admin/` on :4300, and — when `monitoring/` is present — the collector on :3001 and its console on :4400 (`--no-monitoring` to skip); `--package` / `--all` add `[[package.dev]]` extras; every banner row is probed |
+| `erno dev` | Also starts Prometheus, Tempo and Loki (if installed), `admin/` on :4300, and — when `monitoring/` is present — the collector on :3001 and its console on :4400 (`--no-monitoring` to skip); `--no-prometheus` / `--no-tempo` / `--no-loki` skip those binaries; `--package` / `--all` add `[[package.dev]]` extras; every banner row is probed |
 | `erno deploy init` | Scaffolds Docker/deploy files; generates admin password hash for production |
 | `erno deploy setup` | Once per cluster: applies cert-manager and ingress-nginx from their static YAML (no Helm) |
 | `erno deploy install` | Renders the topology and server-side-applies a version (`kubectl apply --server-side --prune`) |

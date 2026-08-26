@@ -1,22 +1,27 @@
 use time::format_description::parse_borrowed;
-use tracing_subscriber::{fmt::time::OffsetTime, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::filter::filter_fn;
+use tracing_subscriber::{
+    fmt::time::OffsetTime, layer::SubscriberExt, util::SubscriberInitExt, Layer,
+};
 
 use crate::cli::Commands;
+use crate::config::TracingConfig;
 
-pub fn setup_tracing_for_command(command: &Option<Commands>, server_log_level: &str) {
+pub fn setup_tracing_for_command(command: &Option<Commands>, tracing: &TracingConfig) {
     // Set appropriate default tracing level based on command type:
     // - CLI commands (db, version) use 'warn'/'error' to reduce noise
     // - Server mode uses 'info' for operational visibility
     // - Users can override with RUST_LOG environment variable (e.g., RUST_LOG=debug)
+    let is_server = matches!(command, Some(Commands::Serve) | None);
     let default_level = match command {
         // CLI commands should have minimal log output for clean UX
         Some(Commands::Db { .. }) => "warn",
         Some(Commands::Version | Commands::GenerateJwtSecret | Commands::Routes) => "error", // Version, GenerateJwtSecret, and Routes should be very quiet
         // Server mode needs operational visibility
-        Some(Commands::Serve) | None => server_log_level,
+        Some(Commands::Serve) | None => tracing.log_level.as_str(),
     };
 
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+    let stdout_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_level))
         // Filter out noisy third-party logs
         .add_directive("sqlx::postgres::notice=warn".parse().unwrap())
@@ -36,13 +41,44 @@ pub fn setup_tracing_for_command(command: &Option<Commands>, server_log_level: &
             time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC),
             parse_borrowed::<2>("[hour]:[minute]:[second].[subsecond digits:2]").unwrap(),
         ))
-        .compact(); // Use compact format
+        .compact()
+        .with_filter(stdout_filter);
+
+    // The capture layer only reports ERROR events, but it must still see them
+    // when the fmt layer is filtered to `warn` on CLI subcommands — so it has
+    // its own filter rather than sitting behind the stdout EnvFilter.
+    let capture_layer = crate::error_reporting::reporter::capture::ErrorCaptureLayer
+        .with_filter(filter_fn(|meta| *meta.level() == tracing::Level::ERROR));
+
+    // sqlx query events (with elapsed time) attach to the current span without
+    // flooding stdout, which keeps its own quieter filter.
+    let otel_filter = tracing_subscriber::EnvFilter::new(default_level)
+        .add_directive("sqlx::query=debug".parse().unwrap())
+        .add_directive("sqlx::postgres::notice=warn".parse().unwrap())
+        .add_directive("sea_orm_migration::migrator=warn".parse().unwrap());
+
+    let otel_layer = is_server
+        .then(|| crate::tracing_otel::trace_layer(&tracing.otel))
+        .flatten()
+        .map(|layer| layer.with_filter(otel_filter));
+
+    let log_filter = tracing.otel.log_level.trim();
+    let log_layer = is_server
+        .then(|| crate::tracing_otel::log_layer(&tracing.otel))
+        .flatten()
+        .map(|layer| {
+            let filter = if log_filter.is_empty() {
+                tracing_subscriber::EnvFilter::new("off")
+            } else {
+                tracing_subscriber::EnvFilter::new(log_filter)
+            };
+            layer.with_filter(filter)
+        });
 
     tracing_subscriber::registry()
-        .with(env_filter)
         .with(fmt_layer)
-        // Inert until the application installs a reporter; see
-        // `error_reporting::reporter::capture`.
-        .with(crate::error_reporting::reporter::capture::ErrorCaptureLayer)
+        .with(capture_layer)
+        .with(otel_layer)
+        .with(log_layer)
         .init();
 }

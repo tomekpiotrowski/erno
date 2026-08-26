@@ -98,7 +98,8 @@ dimension obvious at each call site.
 
 **Performance** and **Statistics** moved from the admin console to the
 monitoring console, since that is where Prometheus now lives. The admin console
-links across to them.
+links across to them. Per-request diagnosis is [tracing](/monitoring/tracing/);
+log search is [logs](/monitoring/logs/).
 
 The admin **Database** page still reads table-count gauges and stays where it
 is: it is about the application's own data rather than about its performance.

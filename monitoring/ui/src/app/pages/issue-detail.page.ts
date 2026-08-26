@@ -72,6 +72,13 @@ import { Sparkline } from '../sparkline';
             <dd class="mono">{{ d.issue.last_seen }} · {{ d.issue.last_release ?? '—' }}</dd>
             <dt>Environment</dt>
             <dd>{{ d.issue.environment ?? '—' }}</dd>
+            @if (traceId(d); as tid) {
+              <dt>Trace</dt>
+              <dd class="mono">
+                <a [routerLink]="['/performance/traces', tid]">{{ tid }}</a>
+                · <a [routerLink]="['/logs']" [queryParams]="{ trace: tid }">logs</a>
+              </dd>
+            }
           </dl>
         </section>
 
@@ -172,6 +179,12 @@ export class IssueDetailPage {
 
   private id(): string {
     return this.route.snapshot.paramMap.get('id') ?? '';
+  }
+
+  traceId(d: IssueDetail): string | null {
+    const ctx = this.selected()?.context ?? d.latest_event?.context;
+    const value = ctx?.['trace_id'];
+    return typeof value === 'string' && value.length > 0 ? value : null;
   }
 
   reload() {

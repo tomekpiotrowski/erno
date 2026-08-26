@@ -9,5 +9,19 @@
     "pathRewrite": {
       "^/prometheus": ""
     }
+  },
+  "/tempo": {
+    "target": "http://localhost:3200",
+    "secure": false,
+    "pathRewrite": {
+      "^/tempo": ""
+    }
+  },
+  "/loki": {
+    "target": "http://localhost:3100",
+    "secure": false,
+    "pathRewrite": {
+      "^/loki": ""
+    }
   }
 }

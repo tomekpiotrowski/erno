@@ -245,6 +245,85 @@ pub struct CorsConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TracingConfig {
     pub log_level: String,
+    /// OpenTelemetry export. Inert until `otel.endpoint` is set, so a fresh
+    /// app never tries to push traces or logs.
+    #[serde(default)]
+    pub otel: OtelConfig,
+}
+
+/// Where to send traces and logs, and how much of each.
+///
+/// Empty `endpoint` disables trace export. Empty `logs_endpoint` falls back to
+/// `endpoint` (Tempo and Loki share a public `/otlp` base in production; they
+/// listen on different ports in development).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OtelConfig {
+    /// OTLP/HTTP traces base URL, e.g. `http://127.0.0.1:4318`. The exporter
+    /// appends `/v1/traces`. Empty disables trace export.
+    #[serde(default)]
+    pub endpoint: String,
+    /// OTLP/HTTP logs base URL, e.g. `http://127.0.0.1:3100/otlp`. Empty
+    /// inherits `endpoint`. The exporter appends `/v1/logs`.
+    #[serde(default)]
+    pub logs_endpoint: String,
+    /// Bearer token sent as `Authorization`. Production uses the trusted
+    /// server ingest token; development leaves this empty.
+    #[serde(default)]
+    pub token: String,
+    /// Head-sampling ratio for traces. `1.0` keeps everything, `0.0` drops
+    /// everything. Parent-based: a sampled parent stays sampled.
+    #[serde(default = "default_otel_sample_ratio")]
+    pub sample_ratio: f64,
+    /// `service.name` resource attribute. Empty becomes `erno`.
+    #[serde(default)]
+    pub service_name: String,
+    /// Minimum severity exported as OTEL logs (stdout is `[tracing] log_level`).
+    /// Empty disables log export.
+    #[serde(default)]
+    pub log_level: String,
+}
+
+impl OtelConfig {
+    /// Whether traces should be exported.
+    #[must_use]
+    pub fn traces_enabled(&self) -> bool {
+        !self.endpoint.trim().is_empty()
+    }
+
+    /// OTLP/HTTP logs base URL, if log export is on.
+    #[must_use]
+    pub fn logs_target(&self) -> Option<&str> {
+        if self.log_level.trim().is_empty() {
+            return None;
+        }
+        let target = if self.logs_endpoint.trim().is_empty() {
+            self.endpoint.trim()
+        } else {
+            self.logs_endpoint.trim()
+        };
+        if target.is_empty() {
+            None
+        } else {
+            Some(target)
+        }
+    }
+}
+
+const fn default_otel_sample_ratio() -> f64 {
+    0.1
+}
+
+impl Default for OtelConfig {
+    fn default() -> Self {
+        Self {
+            endpoint: String::new(),
+            logs_endpoint: String::new(),
+            token: String::new(),
+            sample_ratio: default_otel_sample_ratio(),
+            service_name: String::new(),
+            log_level: String::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

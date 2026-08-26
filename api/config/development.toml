@@ -4,6 +4,12 @@ app_url = "http://localhost:4200"
 [tracing]
 log_level = "info"
 
+[tracing.otel]
+endpoint = "http://127.0.0.1:4318"
+logs_endpoint = "http://127.0.0.1:3100/otlp"
+sample_ratio = 1.0
+log_level = "info"
+
 [database]
 url = "postgres://localhost/erno_dev"
 pool_size = 5

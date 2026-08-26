@@ -115,10 +115,12 @@ impl ErrorReporter {
     /// Never blocks, never awaits, never fails. A full queue sheds the newest
     /// report and counts it: under a runaway loop the queue is already full of
     /// the same fingerprint, so the newest one carries nothing new.
-    pub fn capture(&self, error: CapturedError) {
+    pub fn capture(&self, mut error: CapturedError) {
         let Self::Remote(tx) = self else {
             return;
         };
+
+        attach_trace_id(&mut error);
 
         match tx.try_send(error) {
             Ok(()) => {}
@@ -131,6 +133,18 @@ impl ErrorReporter {
                     .increment(1);
             }
         }
+    }
+}
+
+fn attach_trace_id(error: &mut CapturedError) {
+    if error.context.get("trace_id").is_some() {
+        return;
+    }
+    let Some(id) = crate::tracing_otel::current_trace_id() else {
+        return;
+    };
+    if let serde_json::Value::Object(map) = &mut error.context {
+        map.insert("trace_id".into(), serde_json::Value::String(id));
     }
 }
 
@@ -185,5 +199,43 @@ mod tests {
         let (tx, rx) = mpsc::channel(4);
         drop(rx);
         ErrorReporter::Remote(tx).capture(report());
+    }
+
+    #[test]
+    fn capture_omits_trace_id_without_a_span() {
+        let (tx, mut rx) = mpsc::channel(1);
+        ErrorReporter::Remote(tx).capture(report());
+        let got = rx.try_recv().unwrap();
+        assert!(got.context.get("trace_id").is_none());
+    }
+
+    #[tokio::test]
+    async fn capture_attaches_the_active_trace_id() {
+        use opentelemetry::trace::TracerProvider as _;
+        use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider};
+        use tracing_subscriber::layer::SubscriberExt;
+
+        let exporter = InMemorySpanExporter::default();
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(exporter.clone())
+            .build();
+        let tracer = provider.tracer("test");
+        let subscriber =
+            tracing_subscriber::registry().with(tracing_opentelemetry::layer().with_tracer(tracer));
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        let (tx, mut rx) = mpsc::channel(4);
+        let reporter = ErrorReporter::Remote(tx);
+        let span = tracing::info_span!("widget");
+        let _entered = span.enter();
+        let expected = crate::tracing_otel::current_trace_id();
+        reporter.capture(report());
+        drop(_entered);
+        let got = rx.recv().await.expect("report");
+        assert!(expected.is_some());
+        assert_eq!(
+            got.context.get("trace_id").and_then(|v| v.as_str()),
+            expected.as_deref()
+        );
     }
 }

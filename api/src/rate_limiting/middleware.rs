@@ -80,6 +80,10 @@ pub async fn rate_limit_middleware(
 
     tracing::Span::current().record("action", action.as_str());
 
+    if action.is_exempt() {
+        return next.run(req).await;
+    }
+
     // Check rate limit
     match state.check_rate_limit(ip, &action).await {
         Ok(()) => {
@@ -110,4 +114,64 @@ pub async fn rate_limit_middleware(
 /// for rate limiting purposes.
 pub fn with_rate_limit_action(action: impl Into<RateLimitAction>) -> RateLimitActionExt {
     RateLimitActionExt(action.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rate_limiting::rate_limit_state::{RateLimitConfig, RateLimitState};
+    use axum::extract::ConnectInfo;
+    use axum::routing::get;
+    use axum::Router;
+    use std::collections::HashMap;
+    use tower::ServiceExt;
+
+    fn state(max: u32) -> RateLimitState {
+        RateLimitState::new(RateLimitConfig {
+            enabled: true,
+            trust_proxy: false,
+            default_window_secs: 60,
+            default_max_requests: max,
+            backoff_multiplier: 2.0,
+            actions: HashMap::new(),
+        })
+    }
+
+    fn req(path: &str, action: &str) -> Request {
+        let mut req = Request::builder().uri(path).body(Body::empty()).unwrap();
+        req.extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 1))));
+        req.extensions_mut()
+            .insert(RateLimitActionExt(RateLimitAction::new(action)));
+        req
+    }
+
+    #[tokio::test]
+    async fn default_action_is_limited() {
+        let app = Router::new().route("/x", get(|| async { "ok" })).layer(
+            axum::middleware::from_fn_with_state(state(1), rate_limit_middleware),
+        );
+        let first = app.clone().oneshot(req("/x", "default")).await.unwrap();
+        assert_eq!(first.status(), StatusCode::OK);
+        let second = app.oneshot(req("/x", "default")).await.unwrap();
+        assert_eq!(second.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[tokio::test]
+    async fn otlp_auth_is_never_limited() {
+        let app = Router::new()
+            .route("/api/otlp/auth", get(|| async { "ok" }))
+            .layer(axum::middleware::from_fn_with_state(
+                state(1),
+                rate_limit_middleware,
+            ));
+        for _ in 0..5 {
+            let response = app
+                .clone()
+                .oneshot(req("/api/otlp/auth", RateLimitAction::OTLP_AUTH))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+        }
+    }
 }

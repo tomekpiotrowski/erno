@@ -16,7 +16,7 @@ use serde_json::json;
 use crate::{error_reporting::CapturedError, rate_limiting::action::RateLimitAction};
 
 use super::{
-    auth::{authenticate, resolve_client_ip},
+    auth::{authenticate, authenticate_server_bearer, resolve_client_ip},
     dto::{sanitize, IngestEnvelope, IngestResponse},
     state::CollectorState,
 };
@@ -140,4 +140,22 @@ where
         }),
     )
         .into_response()
+}
+
+/// `GET /api/otlp/auth` — nginx `auth_request` for Tempo/Loki ingest.
+///
+/// 200 only for the trusted server token. The public browser token is rejected
+/// so a leaked JS bundle cannot write traces or logs.
+pub async fn otlp_auth<ExtraConfig>(
+    State(state): State<CollectorState<ExtraConfig>>,
+    headers: HeaderMap,
+) -> StatusCode
+where
+    ExtraConfig: Clone + Send + Sync + 'static,
+{
+    if authenticate_server_bearer(&state.config, &headers) {
+        StatusCode::OK
+    } else {
+        StatusCode::UNAUTHORIZED
+    }
 }

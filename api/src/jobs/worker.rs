@@ -6,7 +6,7 @@ use sea_orm::{
 use sqlx::postgres::PgListener;
 use std::time::{Duration, Instant};
 use tokio::time::timeout;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, warn, Instrument};
 
 use crate::app::App;
 use crate::{
@@ -164,6 +164,16 @@ where
     )
     .record(queue_wait);
 
+    let otel_name = format!("job.{}", job_model.r#type);
+    let span = tracing::info_span!(
+        "job.execute",
+        otel.name = otel_name.as_str(),
+        job_type = job_model.r#type.as_str(),
+        job.id = %job_model.id,
+        queue_wait,
+        otel.status_code = tracing::field::Empty,
+    );
+
     // Execute the job and measure execution time
     let start_time = Instant::now();
     let timeout_duration = Duration::from_secs(u64::from(resolved.job_timeout));
@@ -173,6 +183,7 @@ where
             .execute(app, &job_model.r#type, &job_model.arguments)
             .await
     })
+    .instrument(span.clone())
     .await)
         .unwrap_or(JobResult::TimedOut);
 
@@ -184,6 +195,14 @@ where
         JobResult::Failed(_) => "failed",
         JobResult::TimedOut => "timed_out",
     };
+    span.record(
+        "otel.status_code",
+        if matches!(result, JobResult::Completed) {
+            "OK"
+        } else {
+            "ERROR"
+        },
+    );
     metrics::counter!("jobs_executed_total",
         "job_type" => job_model.r#type.clone(),
         "result" => result_label,

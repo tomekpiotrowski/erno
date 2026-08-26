@@ -224,6 +224,28 @@ async fn ingest_requires_a_known_token() {
     assert_eq!(issue_count(&t).await, 0);
 }
 
+#[tokio::test]
+async fn otlp_auth_accepts_only_the_server_bearer() {
+    let t = setup().await;
+
+    let missing = t.server.get("/api/otlp/auth").await;
+    assert_eq!(missing.status_code(), 401);
+
+    let browser = t
+        .server
+        .get("/api/otlp/auth")
+        .add_header("authorization", format!("Bearer {BROWSER_TOKEN}"))
+        .await;
+    assert_eq!(browser.status_code(), 401);
+
+    let server = t
+        .server
+        .get("/api/otlp/auth")
+        .add_header("authorization", format!("Bearer {SERVER_TOKEN}"))
+        .await;
+    assert_eq!(server.status_code(), 200);
+}
+
 /// The security boundary: the browser token is public, so anything it claims
 /// about identity has to be discarded.
 #[tokio::test]

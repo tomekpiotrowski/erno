@@ -40,7 +40,7 @@ overstatement.
       "stack": "TypeError: …\n    at Foo (…)",
       "frames": [{ "function": "Foo", "file": "…", "line": 12, "column": 5 }],
       "fingerprint": ["custom", "key"], // optional grouping override
-      "context": { "url": "…", "route": "/decks/:id", "user_agent": "…" },
+      "context": { "url": "…", "route": "/decks/:id", "user_agent": "…", "trace_id": "…" },
       "user": { "id": "…", "email": "…" }  // trusted callers only
     }
   ],
@@ -51,7 +51,9 @@ overstatement.
 ```
 
 `source` is **never** taken from the wire — the collector assigns it from the
-credential presented.
+credential presented. When a request span is active, the reporter also sets
+`context.trace_id` so the Issues page can open the
+[Tempo waterfall](/monitoring/tracing/).
 
 ### Oversized input is truncated, not rejected
 
@@ -105,6 +107,7 @@ and so can only ever limit by IP.
 | `error_ingest` | Per IP, identity-blind ceiling | 60/10s · 300/60s · 3000/h |
 | `error_ingest_server` | The trusted sender | 100/10s · 600/60s · 10000/h |
 | `error_ingest_browser` | Per IP | 10/10s · 30/60s · 200/h |
+| `otlp_auth` | nginx `auth_request` for Tempo/Loki ingest | **exempt** — all pushes share the console pod's IP |
 
 The browser tier is loose on purpose. A corporate NAT or a university campus
 puts hundreds of real users behind one IPv4, so a tight limit would blackhole a

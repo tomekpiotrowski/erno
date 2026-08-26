@@ -22,7 +22,10 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
   const token = getBasicAuth();
   if (
     token &&
-    (req.url.startsWith('/api/collector') || req.url.startsWith('/prometheus'))
+    (req.url.startsWith('/api/collector') ||
+      req.url.startsWith('/prometheus') ||
+      req.url.startsWith('/tempo') ||
+      req.url.startsWith('/loki'))
   ) {
     req = req.clone({ setHeaders: { Authorization: `Basic ${token}` } });
   }

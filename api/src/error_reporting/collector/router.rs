@@ -99,6 +99,7 @@ where
     // Ingest: token-authenticated, high volume, generous body limit.
     let ingest = Router::new()
         .route("/errors", post(handlers::ingest::<ExtraConfig>))
+        .route("/otlp/auth", get(handlers::otlp_auth::<ExtraConfig>))
         // Applied to the ingest route only, not globally: other routes on this
         // deployment have no reason to accept 64 KiB bodies.
         .layer(DefaultBodyLimit::max(max_body_bytes))

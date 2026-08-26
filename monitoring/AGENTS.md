@@ -72,7 +72,11 @@ it too.
   checks, and operator Basic auth all come from the library.
 - **Two ingest credentials**: a trusted server token and a *public* browser
   token. The browser token ships in JS bundles and is a speed bump, not a
-  security control.
+  security control. OTLP traces/logs accept only the server token
+  (`GET /api/otlp/auth` for nginx `auth_request`; that path is exempt from
+  IP rate limits because every replica shares the console pod's address).
+- **Tempo and Loki live in this deployment**, queried from the console
+  (`/tempo/`, `/loki/`) the same way Prometheus is. Grafana is not shipped.
 - **Collector migrations are not in `erno_migrations()`** — they belong to this
   database, and adding them to the framework list would give every application
   deployment tables it never writes to.
@@ -102,7 +106,10 @@ it too.
 | Uptime checks | `docs/src/content/docs/monitoring/uptime.md` |
 | Alerts | `docs/src/content/docs/monitoring/alerts.md` |
 | Status page | `docs/src/content/docs/monitoring/status-page.md` |
+| Metrics | `docs/src/content/docs/monitoring/metrics.md` |
+| Tracing | `docs/src/content/docs/monitoring/tracing.md` |
+| Logs | `docs/src/content/docs/monitoring/logs.md` |
 | Angular SDK | `docs/src/content/docs/app/error-reporting.md` |
 
-**If you change the ingest contract, the config keys, or the grouping rules,
-update the corresponding doc page.**
+**If you change the ingest contract, the config keys, the grouping rules,
+or the OTLP paths / Tempo / Loki ports, update the corresponding doc page.**

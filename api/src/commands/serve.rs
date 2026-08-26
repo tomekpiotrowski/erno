@@ -270,6 +270,10 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
         }
     }
 
+    // Outstanding spans last: anything still in the batch exporter after the
+    // listener and workers have stopped.
+    crate::tracing_otel::shutdown();
+
     info!("👋 Shutdown complete");
 }
 

@@ -1,18 +1,20 @@
 import { Component, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { PrometheusService, PromSeries } from '../core/prometheus';
+import { TempoService, TraceHit } from '../core/tempo';
 import { PERFORMANCE, SUBSYSTEMS, WINDOWS } from '../metrics/catalog';
 import { Sparkline } from '../sparkline';
 
 @Component({
   selector: 'app-performance',
-  imports: [Sparkline],
+  imports: [Sparkline, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="stack">
       <header class="head">
         <div>
           <h1>Performance</h1>
-          <p class="sub">Request latency and queue depth from Prometheus.</p>
+          <p class="sub">Request latency from Prometheus, plus slow traces from Tempo.</p>
         </div>
         <div class="toolbar">
           @for (w of windows; track w.id) {
@@ -26,6 +28,32 @@ import { Sparkline } from '../sparkline';
       @if (error()) {
         <p class="error">{{ error() }}</p>
       }
+
+      <section class="panel flush">
+        <header class="phead"><span class="eyebrow">Slow traces</span></header>
+        @if (traceError()) {
+          <p class="error">{{ traceError() }}</p>
+        } @else if (traces().length === 0) {
+          <p class="muted">No traces slower than 500ms in this window.</p>
+        } @else {
+          <table>
+            <thead>
+              <tr><th>Trace</th><th>Name</th><th class="num">Duration</th></tr>
+            </thead>
+            <tbody>
+              @for (t of traces(); track t.traceId) {
+                <tr>
+                  <td class="mono">
+                    <a [routerLink]="['/performance/traces', t.traceId]">{{ t.traceId }}</a>
+                  </td>
+                  <td class="mono">{{ t.rootTraceName || t.rootServiceName || '—' }}</td>
+                  <td class="num">{{ t.durationMs }} ms</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        }
+      </section>
 
       @for (block of blocks(); track block.title) {
         <section class="panel flush">
@@ -51,9 +79,12 @@ import { Sparkline } from '../sparkline';
 })
 export class PerformancePage {
   private readonly prom = inject(PrometheusService);
+  private readonly tempo = inject(TempoService);
   windows = WINDOWS;
   windowId = signal<(typeof WINDOWS)[number]['id']>('1h');
   error = signal('');
+  traceError = signal('');
+  traces = signal<TraceHit[]>([]);
   blocks = signal<{ title: string; series: PromSeries[] }[]>([]);
 
   constructor() {
@@ -78,6 +109,14 @@ export class PerformancePage {
   private load() {
     const w = WINDOWS.find((x) => x.id === this.windowId())!;
     this.error.set('');
+    this.traceError.set('');
+    this.tempo.search('{ duration > 500ms }', w.seconds).subscribe({
+      next: (hits) => this.traces.set(hits),
+      error: () =>
+        this.traceError.set(
+          'Tempo is unreachable. It runs in this deployment — check that it is up.',
+        ),
+    });
     const queries = [
       ['Request rate', PERFORMANCE.requestRate],
       ['5xx rate', PERFORMANCE.errorRate],

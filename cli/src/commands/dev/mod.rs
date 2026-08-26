@@ -2,6 +2,7 @@ mod banner;
 mod device;
 mod lock;
 mod log;
+mod loki;
 mod mail;
 mod open;
 mod ports;
@@ -11,6 +12,7 @@ mod project;
 mod prometheus;
 mod seed;
 mod selection;
+mod tempo;
 mod watch;
 
 use std::sync::Arc;
@@ -57,6 +59,12 @@ pub struct DevArgs {
     /// Skip Prometheus (otherwise required when starting the API)
     #[arg(long)]
     pub no_prometheus: bool,
+    /// Skip Tempo (otherwise required when starting the API)
+    #[arg(long)]
+    pub no_tempo: bool,
+    /// Skip Loki (otherwise required when starting the API)
+    #[arg(long)]
+    pub no_loki: bool,
     /// Do not start the operator admin SPA
     #[arg(long)]
     pub no_admin: bool,
@@ -116,6 +124,12 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) -> ui::
     let mut urls = ports::discover_urls(&root, &sel);
     if sel.api && !args.no_prometheus {
         urls.prometheus = Some(prometheus::LISTEN_URL.to_string());
+    }
+    if sel.api && !args.no_tempo {
+        urls.tempo = Some(tempo::LISTEN_URL.to_string());
+    }
+    if sel.api && !args.no_loki {
+        urls.loki = Some(loki::LISTEN_URL.to_string());
     }
     urls.extra = extras
         .iter()
@@ -204,6 +218,8 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) -> ui::
     preflight::run_preflight(
         sel.api,
         sel.api && !args.no_prometheus,
+        sel.api && !args.no_tempo,
+        sel.api && !args.no_loki,
         &ports::ports_to_check(&urls),
     )?;
 
@@ -317,6 +333,28 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) -> ui::
         None
     };
 
+    let tempo = if sel.api && !args.no_tempo {
+        let dir = tempo::prepare_dir(&root)
+            .map_err(|e| format!("could not prepare the Tempo data dir: {e}"))?;
+        let sink = sink.clone();
+        Some(Supervisor::start("tempo", shutdown_rx.clone(), move || {
+            tempo::spawn(&dir, sink.clone())
+        }))
+    } else {
+        None
+    };
+
+    let loki = if sel.api && !args.no_loki {
+        let dir = loki::prepare_dir(&root)
+            .map_err(|e| format!("could not prepare the Loki data dir: {e}"))?;
+        let sink = sink.clone();
+        Some(Supervisor::start("loki", shutdown_rx.clone(), move || {
+            loki::spawn(&dir, sink.clone())
+        }))
+    } else {
+        None
+    };
+
     let admin = match admin_dir {
         Some(admin_dir) => {
             ensure_npm_deps(&admin_dir, "admin")?;
@@ -403,6 +441,12 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) -> ui::
     }
     if let Some(prometheus) = prometheus {
         prometheus.shutdown().await;
+    }
+    if let Some(tempo) = tempo {
+        tempo.shutdown().await;
+    }
+    if let Some(loki) = loki {
+        loki.shutdown().await;
     }
     if let Some(admin) = admin {
         admin.shutdown().await;

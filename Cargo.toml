@@ -42,3 +42,13 @@ toml              = "0.8"
 serde_yaml        = "0.9"
 tracing           = "0.1.41"
 uuid              = { version = "1.12", features = ["v4", "serde"] }
+
+# OpenTelemetry — one set of versions so api/cli/monitoring cannot drift.
+# tracing-opentelemetry 0.32 tracks opentelemetry 0.31 (the versions are not
+# aligned). HTTP/protobuf only: no tonic, and reqwest 0.12 matches the workspace.
+opentelemetry                      = "0.31"
+opentelemetry_sdk                  = { version = "0.31", default-features = false, features = ["trace", "logs"] }
+opentelemetry-otlp                 = { version = "0.31", default-features = false, features = ["http-proto", "reqwest-client", "reqwest-rustls", "trace", "logs"] }
+opentelemetry-semantic-conventions = "0.31"
+tracing-opentelemetry              = "0.32"
+opentelemetry-appender-tracing     = "0.31"
