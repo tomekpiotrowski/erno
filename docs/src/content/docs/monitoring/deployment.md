@@ -52,9 +52,16 @@ deliberate: `monitoring_url` in the application's `deploy/config.toml`, the
 browser SDK's URL and the console's own origin become one string, with one
 certificate and one CORS origin to keep straight.
 
-Prometheus is never exposed. It is reached in-cluster, or through the console's
-`/prometheus/` location, which gates it behind the collector's operator
-credentials — Prometheus has no authentication of its own.
+Prometheus, Tempo and Loki are never exposed. They are reached in-cluster, or
+through the console's `/prometheus/`, `/tempo/` and `/loki/` locations, which
+gate them behind the collector's operator credentials — those stores have no
+authentication of their own.
+
+Applications **push** traces and logs to `/otlp/v1/traces` and `/otlp/v1/logs`
+on the same host, authenticated with the trusted **server** ingest token
+(`Authorization: Bearer`). The public browser token is rejected. nginx
+`auth_request`s `/api/otlp/auth` on the collector, then proxies to Tempo :4318
+or Loki :3100.
 
 ## Values that must match across the two deployments
 
@@ -66,6 +73,7 @@ mismatched token means reports are rejected with a 401 and nothing says so.
 | Trusted ingest token | `api.ingest_token` | `collector.server_token` |
 | Collector URL | `monitoring_url` in `deploy/config.toml` | `hosts.monitoring` |
 | Scrape token | `api.metrics_auth_token` | `api.metrics_auth_token` |
+| OTLP token | `api.ingest_token` (same as errors) | `collector.server_token` |
 
 `erno deploy init --target monitoring` generates the ingest token and writes it
 into **both** `secrets.example.yaml` files, filling the application's only if it

@@ -40,7 +40,7 @@ overstatement.
       "stack": "TypeError: …\n    at Foo (…)",
       "frames": [{ "function": "Foo", "file": "…", "line": 12, "column": 5 }],
       "fingerprint": ["custom", "key"], // optional grouping override
-      "context": { "url": "…", "route": "/decks/:id", "user_agent": "…" },
+      "context": { "url": "…", "route": "/decks/:id", "user_agent": "…", "trace_id": "…" },
       "user": { "id": "…", "email": "…" }  // trusted callers only
     }
   ],
@@ -51,7 +51,9 @@ overstatement.
 ```
 
 `source` is **never** taken from the wire — the collector assigns it from the
-credential presented.
+credential presented. When a request span is active, the reporter also sets
+`context.trace_id` so the Issues page can open the
+[Tempo waterfall](/monitoring/tracing/).
 
 ### Oversized input is truncated, not rejected
 

@@ -1,6 +1,6 @@
 ---
 title: Monitoring
-description: A first-party monitoring deployment — error reporting today, with room for alerts, uptime checks and a status page.
+description: A first-party monitoring deployment — errors, metrics, traces and logs, on infrastructure separate from the app.
 sidebar:
   order: 0
 ---
@@ -27,10 +27,13 @@ the application's own chart.
 | [Alerts](/monitoring/alerts/) | Rule engine over errors, uptime and health |
 | [Status page](/monitoring/status-page/) | Published document plus a standalone page |
 | [Metrics](/monitoring/metrics/) | Prometheus, plus Erno subsystem timings |
-| APM | Server-side timings via Prometheus. RUM and tracing are future work |
+| [Tracing](/monitoring/tracing/) | Sampled request trees in Tempo |
+| [Logs](/monitoring/logs/) | Loki. Grep, not issue grouping |
+| APM | Prometheus aggregates + Tempo traces + Loki logs in this console. RUM is future work |
 
-Prometheus now runs **here** rather than in the application's chart, so it does
-not share a failure domain with what it observes.
+Prometheus, Tempo and Loki run **here** rather than in the application's
+chart, so they do not share a failure domain with what they observe. Grafana
+is not in the stack.
 
 ## Architecture
 
@@ -63,9 +66,13 @@ every application deployment two large tables it never writes to.
 | Application SPA | 4200 |
 | Admin console | 4300 |
 | Monitoring console | 4400 |
+| Prometheus | 9090 |
+| Loki | 3100 |
+| Tempo (query) | 3200 |
+| Tempo (OTLP/HTTP) | 4318 |
 
 The console has a page per service: Issues, Releases, System, Uptime,
-Performance, Statistics, Alerts and Status page.
+Performance, Logs, Statistics, Alerts and Status page.
 
 Running monitoring locally is optional. When it is not up, applications buffer
 a bounded number of reports and then drop them; nothing blocks and nothing

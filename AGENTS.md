@@ -10,7 +10,7 @@ Rust/Axum SaaS infrastructure library — batteries-included auth, jobs, billing
 | `app/`    | Angular library (`erno-angular`) for Ionic web + mobile — see `app/AGENTS.md` |
 | `cli/`    | `erno` CLI binary — scaffolding, environment checks — see `cli/AGENTS.md` |
 | `docs/`   | Astro documentation site |
-| `monitoring/` | Monitoring collector — error reporting, deployed separately from the app it watches. See `monitoring/AGENTS.md` |
+| `monitoring/` | Monitoring collector — errors, metrics, traces and logs, deployed separately from the app it watches. See `monitoring/AGENTS.md` |
 
 ## Building everything
 

@@ -33,7 +33,8 @@ Rate limiting and email sending are disabled in the test environment.
 | `storage` | S3 / local file storage abstraction |
 | `rate_limiting` | Multi-tier adaptive rate limiting |
 | `policy` | Pundit-style authorization (`Policy` trait) |
-| `metrics` | Prometheus scrape target + `db_stats` gauges |
+| `metrics` | Prometheus scrape target + `db_stats` gauges. HTTP middleware also opens the server span |
+| `tracing_otel` | Optional OTLP/HTTP export to Tempo/Loki. Empty `[tracing.otel] endpoint` = off |
 | `admin` | HTTP admin API (`/admin/api/*`) for the Angular operator app |
 | `admin_events` | Operator event log + matching counters |
 | `error_reporting` | Error capture and reporting; the collector half runs in the separate `monitoring/` deployment |
@@ -63,6 +64,7 @@ Narrative docs for each module live in `docs/src/content/docs/api/`:
 | `rate_limiting` | `rate-limiting.md` |
 | `policy` | `authorization.md` |
 | `metrics` | `telemetry.md` |
+| `tracing_otel` | `telemetry.md`, `../monitoring/tracing.md`, `../monitoring/logs.md` |
 | `admin` | `console.md` |
 | `admin_events` / gauges | `business-stats.md` |
 | `error_reporting` | `../monitoring/error-reporting.md` |

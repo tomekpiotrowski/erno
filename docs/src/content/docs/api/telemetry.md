@@ -1,6 +1,6 @@
 ---
 title: Telemetry
-description: Distributed tracing with tracing-subscriber and Prometheus metrics
+description: Structured logs, Prometheus metrics, and optional OpenTelemetry export
 sidebar:
   order: 8
 ---
@@ -14,9 +14,15 @@ neither keeps the *content* of a failure. That is
 [monitoring deployment](/monitoring/).
 :::
 
-Erno configures both structured logging/tracing and Prometheus metrics automatically on startup. No manual setup is required.
+Erno configures structured logging and Prometheus metrics automatically on
+startup. OpenTelemetry export is opt-in: empty `[tracing.otel] endpoint`
+means nothing is pushed.
 
-## Tracing
+The `tracing` crate here is **structured logging**, not distributed traces.
+Distributed traces are OpenTelemetry spans exported to
+[Tempo](/monitoring/tracing/).
+
+## Logs (stdout)
 
 Erno uses [`tracing`](https://crates.io/crates/tracing) and [`tracing-subscriber`](https://crates.io/crates/tracing-subscriber) for structured, leveled logging.
 
@@ -38,6 +44,24 @@ CLI subcommands (`db`, `routes`, etc.) automatically reduce log level to `warn` 
 ### Log format
 
 Logs are emitted in compact, human-readable format with timestamps, level, and message. Module paths and thread info are suppressed for readability.
+
+## OpenTelemetry export
+
+When `[tracing.otel] endpoint` is set, server mode installs an OTLP/HTTP
+exporter (protobuf, no gRPC) and a tracing layer. HTTP requests, jobs and
+`OperationTimer` operations become spans. A separate log appender can push
+to Loki; its level is `[tracing.otel] log_level`, independent of stdout.
+
+```toml
+[tracing.otel]
+endpoint = "http://127.0.0.1:4318"
+logs_endpoint = "http://127.0.0.1:3100/otlp"
+sample_ratio = 1.0
+log_level = "info"
+```
+
+See [tracing](/monitoring/tracing/) and [logs](/monitoring/logs/) for the
+stores and the console.
 
 ## Prometheus metrics
 
