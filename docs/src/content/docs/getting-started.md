@@ -99,7 +99,7 @@ Built-in app commands (`cargo run --` from `api/`):
 | `db migrate reset` | Roll back all, then migrate up |
 | `db migrate reapply` | Roll back and reapply recent migrations |
 | `db console` | Open a `psql` session |
-| `db reset` | Drop and recreate the database |
+| `db reset` | Drop all tables and types, then migrate up |
 | `routes` | List all registered routes |
 | `generate-jwt-secret` | Print a random secret for `[auth].secret` |
 | `version` | Show version and build info |

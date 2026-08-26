@@ -29,7 +29,7 @@ pub enum Commands {
 pub enum DbAction {
     /// Open a database connection with psql
     Console,
-    /// Drop and recreate the database, then run all migrations
+    /// Drop all tables and types, then run all migrations
     Reset,
     /// Database migration commands
     Migrate {
