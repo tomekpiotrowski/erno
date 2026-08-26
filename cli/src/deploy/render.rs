@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 
 use super::config::{
     origin, AppSecrets, EnvConfig, MonitoringSecrets, API_PORT, COLLECTOR_PORT, HTTP_PORT,
-    PROMETHEUS_PORT,
+    LOKI_PORT, PROMETHEUS_PORT, TEMPO_OTLP_PORT, TEMPO_PORT,
 };
 
 #[derive(Debug, Clone)]
@@ -194,6 +194,12 @@ pub fn render_monitoring(plan: &MonitoringPlan<'_>) -> Vec<Manifest> {
     if plan.env.prometheus.enabled {
         out.extend(prometheus(plan, &ctx, ns));
     }
+    if plan.env.tempo.enabled {
+        out.extend(tempo(plan, &ctx, ns));
+    }
+    if plan.env.loki.enabled {
+        out.extend(loki(plan, &ctx, ns));
+    }
     out.push(monitoring_ingress(plan, &ctx, ns));
     if plan.env.tls.enabled {
         out.push(cluster_issuer(&plan.env.tls.email));
@@ -264,6 +270,15 @@ fn api_deployment(plan: &AppPlan<'_>, ctx: &LabelCtx, ns: &str) -> Manifest {
             "APP__ERROR_REPORTING__INGEST_TOKEN",
             &plan.secrets.api.ingest_token,
         ));
+        let otlp = format!("{}/otlp", plan.env.monitoring_url.trim_end_matches('/'));
+        env_vars.push(env("APP__TRACING__OTEL__ENDPOINT", &otlp));
+        env_vars.push(env("APP__TRACING__OTEL__LOGS_ENDPOINT", &otlp));
+        env_vars.push(env(
+            "APP__TRACING__OTEL__TOKEN",
+            &plan.secrets.api.ingest_token,
+        ));
+        env_vars.push(env("APP__TRACING__OTEL__SAMPLE_RATIO", "0.1"));
+        env_vars.push(env("APP__TRACING__OTEL__LOG_LEVEL", "warn"));
     }
     env_vars.extend([
         env("APP__EMAIL__TYPE", "smtp"),
@@ -416,6 +431,20 @@ fn collector_deployment(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> 
             format!("http://{}-prometheus:{PROMETHEUS_PORT}", plan.release),
         ));
     }
+    if plan.env.tempo.enabled {
+        env_vars.push(env(
+            "APP__TRACING__OTEL__ENDPOINT",
+            format!("http://{}-tempo:{TEMPO_OTLP_PORT}", plan.release),
+        ));
+        env_vars.push(env("APP__TRACING__OTEL__SAMPLE_RATIO", "0.1"));
+    }
+    if plan.env.loki.enabled {
+        env_vars.push(env(
+            "APP__TRACING__OTEL__LOGS_ENDPOINT",
+            format!("http://{}-loki:{LOKI_PORT}/otlp", plan.release),
+        ));
+        env_vars.push(env("APP__TRACING__OTEL__LOG_LEVEL", "warn"));
+    }
     env_vars.extend([
         env("APP__EMAIL__TYPE", "smtp"),
         env("APP__EMAIL__HOST", &c.smtp_host),
@@ -478,6 +507,8 @@ fn console_deployment(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> Ma
                 env("COLLECTOR_HOST", format!("{}-collector", plan.release)),
                 env("COLLECTOR_PORT", COLLECTOR_PORT),
                 env("PROM_HOST", format!("{}-prometheus", plan.release)),
+                env("TEMPO_HOST", format!("{}-tempo", plan.release)),
+                env("LOKI_HOST", format!("{}-loki", plan.release)),
             ],
             WorkloadOpts {
                 grace: false,
@@ -577,6 +608,206 @@ fn prometheus(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> Vec<Manife
         Manifest::namespaced("Deployment", dep_name.clone(), ns, "prometheus", ctx, dep);
     let svc = service(ctx, ns, "prometheus", PROMETHEUS_PORT, PROMETHEUS_PORT);
     vec![cm, pvc, deployment, svc]
+}
+
+fn tempo(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> Vec<Manifest> {
+    let cm_name = format!("{}-tempo", plan.release);
+    let yml = tempo_yml(plan);
+    let cm = Manifest::namespaced(
+        "ConfigMap",
+        cm_name.clone(),
+        ns,
+        "tempo",
+        ctx,
+        json!({
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": { "name": cm_name },
+            "data": { "tempo.yaml": yml },
+        }),
+    );
+    let pvc_name = format!("{}-tempo", plan.release);
+    let pvc = Manifest::namespaced(
+        "PersistentVolumeClaim",
+        pvc_name.clone(),
+        ns,
+        "tempo",
+        ctx,
+        json!({
+            "apiVersion": "v1",
+            "kind": "PersistentVolumeClaim",
+            "metadata": { "name": pvc_name },
+            "spec": {
+                "accessModes": ["ReadWriteOnce"],
+                "resources": { "requests": { "storage": plan.env.tempo.storage } },
+            },
+        }),
+    );
+    let dep_name = format!("{}-tempo", plan.release);
+    let mut dep = workload(
+        &dep_name,
+        "tempo",
+        plan.release,
+        plan.version,
+        1,
+        &plan.env.tempo.image,
+        TEMPO_PORT,
+        &[],
+        WorkloadOpts {
+            grace: false,
+            pre_stop: false,
+            readiness: None,
+            liveness: None,
+            volumes: vec![
+                Volume {
+                    name: "config",
+                    empty_dir: false,
+                    config_map: Some(cm_name.as_str()),
+                    pvc: None,
+                    mount: "/etc/tempo",
+                },
+                Volume {
+                    name: "data",
+                    empty_dir: false,
+                    config_map: None,
+                    pvc: Some(pvc_name.as_str()),
+                    mount: "/var/tempo",
+                },
+            ],
+            args: Some(vec!["-config.file=/etc/tempo/tempo.yaml".into()]),
+        },
+    );
+    dep["spec"]["strategy"] = json!({ "type": "Recreate" });
+    dep["spec"]["template"]["spec"]["containers"][0]["ports"] = json!([
+        { "containerPort": TEMPO_PORT, "name": "http" },
+        { "containerPort": TEMPO_OTLP_PORT, "name": "otlp-http" },
+    ]);
+    dep["spec"]["template"]["spec"]
+        .as_object_mut()
+        .unwrap()
+        .remove("imagePullSecrets");
+    let deployment = Manifest::namespaced("Deployment", dep_name.clone(), ns, "tempo", ctx, dep);
+    let svc_name = format!("{}-tempo", ctx.release);
+    let svc = Manifest::namespaced(
+        "Service",
+        svc_name.clone(),
+        ns,
+        "tempo",
+        ctx,
+        json!({
+            "apiVersion": "v1",
+            "kind": "Service",
+            "metadata": { "name": svc_name },
+            "spec": {
+                "selector": selector(ctx.release, "tempo"),
+                "ports": [
+                    { "name": "http", "port": TEMPO_PORT, "targetPort": TEMPO_PORT },
+                    { "name": "otlp-http", "port": TEMPO_OTLP_PORT, "targetPort": TEMPO_OTLP_PORT },
+                ],
+            },
+        }),
+    );
+    vec![cm, pvc, deployment, svc]
+}
+
+fn tempo_yml(plan: &MonitoringPlan<'_>) -> String {
+    format!(
+        "server:\n  http_listen_port: {TEMPO_PORT}\n  log_level: error\n\
+distributor:\n  receivers:\n    otlp:\n      protocols:\n        http:\n          endpoint: 0.0.0.0:{TEMPO_OTLP_PORT}\n\
+ingester:\n  max_block_duration: 5m\n\
+compactor:\n  compaction:\n    block_retention: {}\n\
+storage:\n  trace:\n    backend: local\n    wal:\n      path: /var/tempo/wal\n    local:\n      path: /var/tempo/blocks\n",
+        plan.env.tempo.retention
+    )
+}
+
+fn loki(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> Vec<Manifest> {
+    let cm_name = format!("{}-loki", plan.release);
+    let yml = loki_yml(plan);
+    let cm = Manifest::namespaced(
+        "ConfigMap",
+        cm_name.clone(),
+        ns,
+        "loki",
+        ctx,
+        json!({
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": { "name": cm_name },
+            "data": { "loki.yaml": yml },
+        }),
+    );
+    let pvc_name = format!("{}-loki", plan.release);
+    let pvc = Manifest::namespaced(
+        "PersistentVolumeClaim",
+        pvc_name.clone(),
+        ns,
+        "loki",
+        ctx,
+        json!({
+            "apiVersion": "v1",
+            "kind": "PersistentVolumeClaim",
+            "metadata": { "name": pvc_name },
+            "spec": {
+                "accessModes": ["ReadWriteOnce"],
+                "resources": { "requests": { "storage": plan.env.loki.storage } },
+            },
+        }),
+    );
+    let dep_name = format!("{}-loki", plan.release);
+    let mut dep = workload(
+        &dep_name,
+        "loki",
+        plan.release,
+        plan.version,
+        1,
+        &plan.env.loki.image,
+        LOKI_PORT,
+        &[],
+        WorkloadOpts {
+            grace: false,
+            pre_stop: false,
+            readiness: None,
+            liveness: None,
+            volumes: vec![
+                Volume {
+                    name: "config",
+                    empty_dir: false,
+                    config_map: Some(cm_name.as_str()),
+                    pvc: None,
+                    mount: "/etc/loki",
+                },
+                Volume {
+                    name: "data",
+                    empty_dir: false,
+                    config_map: None,
+                    pvc: Some(pvc_name.as_str()),
+                    mount: "/var/loki",
+                },
+            ],
+            args: Some(vec!["-config.file=/etc/loki/loki.yaml".into()]),
+        },
+    );
+    dep["spec"]["strategy"] = json!({ "type": "Recreate" });
+    dep["spec"]["template"]["spec"]
+        .as_object_mut()
+        .unwrap()
+        .remove("imagePullSecrets");
+    let deployment = Manifest::namespaced("Deployment", dep_name.clone(), ns, "loki", ctx, dep);
+    let svc = service(ctx, ns, "loki", LOKI_PORT, LOKI_PORT);
+    vec![cm, pvc, deployment, svc]
+}
+
+fn loki_yml(plan: &MonitoringPlan<'_>) -> String {
+    format!(
+        "auth_enabled: false\n\
+server:\n  http_listen_port: {LOKI_PORT}\n  log_level: error\n\
+common:\n  path_prefix: /var/loki\n  storage:\n    filesystem:\n      chunks_directory: /var/loki/chunks\n      rules_directory: /var/loki/rules\n  replication_factor: 1\n  ring:\n    kvstore:\n      store: inmemory\n\
+schema_config:\n  configs:\n    - from: 2020-10-24\n      store: tsdb\n      object_store: filesystem\n      schema: v13\n      index:\n        prefix: index_\n        period: 24h\n\
+limits_config:\n  allow_structured_metadata: true\n  retention_period: {}\n\
+compactor:\n  working_directory: /var/loki/compactor\n  retention_enabled: true\n  delete_request_store: filesystem\n",
+        plan.env.loki.retention
+    )
 }
 
 fn prometheus_yml(plan: &MonitoringPlan<'_>) -> String {
@@ -1135,6 +1366,9 @@ api:
         assert!(yaml.contains("APP__ERROR_REPORTING__COLLECTOR_URL"));
         assert!(yaml.contains("https://monitoring.example.com"));
         assert!(yaml.contains("APP__ERROR_REPORTING__INGEST_TOKEN"));
+        assert!(yaml.contains("APP__TRACING__OTEL__ENDPOINT"));
+        assert!(yaml.contains("https://monitoring.example.com/otlp"));
+        assert!(yaml.contains("APP__TRACING__OTEL__TOKEN"));
         assert!(yaml.contains("app.kubernetes.io/managed-by: erno"));
         // Selectors stay on the Helm label so a migrate does not recreate pods.
         assert!(yaml.contains("app: acme-api"));
@@ -1205,6 +1439,7 @@ api:
         };
         let yaml = encode_yaml(&render_app(&plan)).unwrap();
         assert!(!yaml.contains("ERROR_REPORTING"));
+        assert!(!yaml.contains("TRACING__OTEL"));
     }
 
     #[test]
@@ -1230,6 +1465,14 @@ api:
                 ("PersistentVolumeClaim", "acme-monitoring-prometheus"),
                 ("Deployment", "acme-monitoring-prometheus"),
                 ("Service", "acme-monitoring-prometheus"),
+                ("ConfigMap", "acme-monitoring-tempo"),
+                ("PersistentVolumeClaim", "acme-monitoring-tempo"),
+                ("Deployment", "acme-monitoring-tempo"),
+                ("Service", "acme-monitoring-tempo"),
+                ("ConfigMap", "acme-monitoring-loki"),
+                ("PersistentVolumeClaim", "acme-monitoring-loki"),
+                ("Deployment", "acme-monitoring-loki"),
+                ("Service", "acme-monitoring-loki"),
                 ("Ingress", "acme-monitoring"),
                 ("ClusterIssuer", "letsencrypt"),
             ]
@@ -1244,6 +1487,13 @@ api:
         assert!(yaml.contains("emptyDir"));
         assert!(yaml.contains("APP__COLLECTOR__SERVER_TOKEN"));
         assert!(yaml.contains("bearer_token: \"ametrics\""));
+        assert!(yaml.contains("TEMPO_HOST"));
+        assert!(yaml.contains("LOKI_HOST"));
+        assert!(yaml.contains("grafana/tempo"));
+        assert!(yaml.contains("grafana/loki"));
+        assert!(yaml.contains("otlp-http"));
+        assert!(yaml.contains("APP__TRACING__OTEL__ENDPOINT"));
+        assert!(yaml.contains("APP__TRACING__OTEL__LOGS_ENDPOINT"));
         assert!(yaml.contains("acme-monitoring-collector:3001"));
         assert!(yaml.contains("limit-rps"));
         assert!(yaml.contains("proxy-body-size"));
@@ -1273,6 +1523,38 @@ api:
         assert!(ms.iter().all(|m| !m.name.contains("prometheus")));
         let yaml = encode_yaml(&ms).unwrap();
         assert!(!yaml.contains("APP__COLLECTOR__PROMETHEUS__URL"));
+    }
+
+    #[test]
+    fn tempo_and_loki_can_be_disabled_independently() {
+        let (repo, mut env, secrets) = mon_env();
+        env.tempo.enabled = false;
+        let plan = MonitoringPlan {
+            release: "acme-monitoring",
+            github_repo: &repo,
+            version: "v0.1.0",
+            env: &env,
+            secrets: &secrets,
+        };
+        let ms = render_monitoring(&plan);
+        assert!(ms.iter().all(|m| !m.name.ends_with("-tempo")));
+        assert!(ms.iter().any(|m| m.name.ends_with("-loki")));
+        let yaml = encode_yaml(&ms).unwrap();
+        assert!(!yaml.contains("APP__TRACING__OTEL__ENDPOINT"));
+        assert!(yaml.contains("APP__TRACING__OTEL__LOGS_ENDPOINT"));
+
+        env.tempo.enabled = true;
+        env.loki.enabled = false;
+        let plan = MonitoringPlan {
+            release: "acme-monitoring",
+            github_repo: &repo,
+            version: "v0.1.0",
+            env: &env,
+            secrets: &secrets,
+        };
+        let ms = render_monitoring(&plan);
+        assert!(ms.iter().any(|m| m.name.ends_with("-tempo")));
+        assert!(ms.iter().all(|m| !m.name.ends_with("-loki")));
     }
 
     #[test]

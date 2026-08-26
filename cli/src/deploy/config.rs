@@ -16,7 +16,12 @@ pub const API_PORT: i32 = 3000;
 pub const COLLECTOR_PORT: i32 = 3001;
 pub const HTTP_PORT: i32 = 80;
 pub const PROMETHEUS_PORT: i32 = 9090;
+pub const TEMPO_PORT: i32 = 3200;
+pub const TEMPO_OTLP_PORT: i32 = 4318;
+pub const LOKI_PORT: i32 = 3100;
 pub const DEFAULT_PROMETHEUS_IMAGE: &str = "prom/prometheus:v2.55.1";
+pub const DEFAULT_TEMPO_IMAGE: &str = "grafana/tempo:2.7.2";
+pub const DEFAULT_LOKI_IMAGE: &str = "grafana/loki:3.4.2";
 
 /// Where the user-owned deploy files live for a target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,6 +99,10 @@ pub struct EnvConfig {
     pub scrape: Scrape,
     #[serde(default)]
     pub prometheus: Prometheus,
+    #[serde(default)]
+    pub tempo: Tempo,
+    #[serde(default)]
+    pub loki: Loki,
     #[serde(default)]
     pub ingress: Ingress,
     /// How `erno deploy setup` installs ingress-nginx: `cloud` (LoadBalancer,
@@ -325,6 +334,76 @@ fn default_prom_retention() -> String {
     "90d".into()
 }
 fn default_prom_storage() -> String {
+    "10Gi".into()
+}
+
+/// Trace store. Same knobs as Prometheus; default retention is shorter because
+/// traces are fatter than samples.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Tempo {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_tempo_image")]
+    pub image: String,
+    #[serde(default = "default_tempo_retention")]
+    pub retention: String,
+    #[serde(default = "default_tempo_storage")]
+    pub storage: String,
+}
+
+impl Default for Tempo {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            image: default_tempo_image(),
+            retention: default_tempo_retention(),
+            storage: default_tempo_storage(),
+        }
+    }
+}
+
+/// Log store. Same knobs as Prometheus.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Loki {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_loki_image")]
+    pub image: String,
+    #[serde(default = "default_loki_retention")]
+    pub retention: String,
+    #[serde(default = "default_loki_storage")]
+    pub storage: String,
+}
+
+impl Default for Loki {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            image: default_loki_image(),
+            retention: default_loki_retention(),
+            storage: default_loki_storage(),
+        }
+    }
+}
+
+fn default_tempo_image() -> String {
+    DEFAULT_TEMPO_IMAGE.into()
+}
+fn default_tempo_retention() -> String {
+    "72h".into()
+}
+fn default_tempo_storage() -> String {
+    "10Gi".into()
+}
+fn default_loki_image() -> String {
+    DEFAULT_LOKI_IMAGE.into()
+}
+fn default_loki_retention() -> String {
+    "7d".into()
+}
+fn default_loki_storage() -> String {
     "10Gi".into()
 }
 

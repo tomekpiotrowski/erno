@@ -82,6 +82,21 @@ pub fn authenticate(
     None
 }
 
+/// Whether `Authorization: Bearer` matches the trusted **server** ingest token.
+///
+/// Used by nginx `auth_request` in front of Tempo/Loki OTLP ingest. The public
+/// browser token is never accepted: traces and logs are server-side only.
+#[must_use]
+pub fn authenticate_server_bearer(config: &CollectorConfig, headers: &HeaderMap) -> bool {
+    let presented = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(str::trim)
+        .unwrap_or("");
+    !config.server_token.is_empty() && constant_time_eq(presented, &config.server_token)
+}
+
 fn declared_source(headers: &HeaderMap) -> Option<Source> {
     Source::from_str_opt(headers.get(SOURCE_HEADER)?.to_str().ok()?.trim())
 }
@@ -247,6 +262,18 @@ mod tests {
             Some("198.51.100.1".parse::<IpAddr>().unwrap()),
             "leftmost X-Forwarded-For is the real client"
         );
+    }
+
+    #[test]
+    fn server_bearer_is_accepted_and_the_browser_token_is_not() {
+        let ok = headers(&[("authorization", "Bearer server-secret")]);
+        assert!(authenticate_server_bearer(&config(), &ok));
+
+        let browser = headers(&[("authorization", "Bearer browser-public")]);
+        assert!(!authenticate_server_bearer(&config(), &browser));
+
+        let missing = headers(&[]);
+        assert!(!authenticate_server_bearer(&config(), &missing));
     }
 
     #[test]
