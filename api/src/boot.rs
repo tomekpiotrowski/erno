@@ -129,8 +129,9 @@ impl<ExtraConfig> BootConfig<ExtraConfig> {
     }
 }
 
-pub async fn boot<AppMigrator: MigratorTrait + 'static, ExtraConfig>(config: BootConfig<ExtraConfig>)
-where
+pub async fn boot<AppMigrator: MigratorTrait + 'static, ExtraConfig>(
+    config: BootConfig<ExtraConfig>,
+) where
     ExtraConfig: Clone + Default + DeserializeOwned + Send + Sync + 'static,
 {
     let cli = Cli::parse();

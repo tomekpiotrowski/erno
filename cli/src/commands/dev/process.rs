@@ -23,8 +23,16 @@ pub fn spawn_labeled(
 
     // This runs inside the `FnMut() -> Child` closure the supervisor owns, so
     // there is no `Result` to return here — a failure to spawn is terminal.
+    //
+    // stdin is a held pipe, not the TTY and not `/dev/null`. The child is in
+    // its own process group, so an inherited terminal would get SIGTTIN the
+    // moment Vite/Astro/ng serve bind their "press q to quit" reader — the
+    // process stops, keeps its listen socket, and the probe flips back to
+    // starting. Closing stdin is also wrong: Vite treats EOF as a shutdown
+    // request. Leave the write end on `Child` for as long as the process lives.
     let mut child = cmd
         .current_dir(dir)
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -214,8 +222,8 @@ impl Supervisor {
 }
 
 async fn wait_slot(slot: &Arc<Mutex<Option<Child>>>) {
-    // Release the lock while waiting by taking the wait future after a short
-    // lock to read try_wait in a loop — Child::wait needs &mut, so we poll.
+    // `Child::wait` drops stdin before polling, which Vite treats as shutdown.
+    // Poll `try_wait` so the held pipe stays open for the child's lifetime.
     loop {
         {
             let mut guard = slot.lock().await;
@@ -273,5 +281,48 @@ mod tests {
         assert_eq!(s1, std::time::Duration::from_secs(2));
         assert_eq!(next_backoff(s1), std::time::Duration::from_secs(4));
         assert_eq!(next_backoff(std::time::Duration::from_secs(8)), MAX_BACKOFF);
+    }
+
+    /// Vite (Astro `www`, Angular `app`) binds stdin after listen. A TTY
+    /// inherited into a background process group is SIGTTIN; `/dev/null` is
+    /// EOF and Vite exits. A held pipe is neither.
+    #[tokio::test(flavor = "current_thread")]
+    async fn spawned_stdin_is_a_held_pipe_not_a_tty() {
+        let root = std::env::temp_dir().join("erno-dev-stdin-test");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let sink = Arc::new(LogSink::new(&root));
+
+        let mut cmd = Command::new("python3");
+        cmd.args([
+            "-c",
+            "import sys, select\n\
+             print('TTY' if sys.stdin.isatty() else 'NOTTY', flush=True)\n\
+             r, _, _ = select.select([sys.stdin], [], [], 0.4)\n\
+             print('EOF' if r else 'OPEN', flush=True)\n",
+        ]);
+        let mut child = spawn_labeled(cmd, &root, "stdin", sink);
+        // Do not `wait()`: tokio drops stdin first, which is the Vite-killing
+        // EOF this test exists to prevent. Poll the log instead.
+        let log = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            loop {
+                let log = std::fs::read_to_string(root.join(".erno/dev.log")).unwrap_or_default();
+                if log.contains("[stdin] OPEN") || log.contains("[stdin] EOF") {
+                    return log;
+                }
+                if child.try_wait().ok().flatten().is_some() {
+                    return std::fs::read_to_string(root.join(".erno/dev.log")).unwrap_or_default();
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("stdin probe hung");
+        let _ = child.kill().await;
+        assert!(log.contains("[stdin] NOTTY"), "{log}");
+        assert!(log.contains("[stdin] OPEN"), "{log}");
+        assert!(!log.contains("[stdin] TTY"), "{log}");
+        assert!(!log.contains("[stdin] EOF"), "{log}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

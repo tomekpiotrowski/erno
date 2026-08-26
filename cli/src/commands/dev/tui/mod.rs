@@ -152,8 +152,8 @@ pub async fn run(
 
     let _guard = TuiGuard::enter()?;
     let backend = CrosstermBackend::new(io::stdout());
-    let mut terminal = Terminal::new(backend)
-        .map_err(|e| format!("could not start the dashboard: {e}"))?;
+    let mut terminal =
+        Terminal::new(backend).map_err(|e| format!("could not start the dashboard: {e}"))?;
     loop {
         while event::poll(Duration::ZERO).map_err(|e| e.to_string())? {
             if let Event::Key(key) = event::read().map_err(|e| e.to_string())? {
@@ -455,10 +455,7 @@ async fn handle_action(
                     return;
                 }
             }
-            if let Some(msg) = state.loki_lines.first().map(|l| l.line.clone()) {
-                let _ = copy_text(&msg);
-                state.say("copied");
-            }
+            copy_visible_log(state);
         }
         Action::Migrate => {
             if let Some(api) = &opts.api {
@@ -484,23 +481,47 @@ fn editor_target(state: &TuiState) -> Option<(String, u32)> {
     loki::panic_frames(&state.loki_lines).into_iter().next()
 }
 
+fn copy_visible_log(state: &mut TuiState) {
+    let n = state.visible_logs().len();
+    if n == 0 {
+        state.say("nothing to copy");
+        return;
+    }
+    match copy_text(&state.visible_log_text()) {
+        Ok(()) => state.say(copied_toast(n)),
+        Err(()) => state.say("no clipboard (wl-copy/xclip)"),
+    }
+}
+
+fn copied_toast(n: usize) -> String {
+    if n == 1 {
+        "copied 1 line".into()
+    } else {
+        format!("copied {n} lines")
+    }
+}
+
 fn copy_text(text: &str) -> Result<(), ()> {
-    for bin in ["wl-copy", "xclip"] {
+    const TOOLS: &[(&str, &[&str])] = &[
+        ("wl-copy", &[]),
+        ("xclip", &["-selection", "clipboard"]),
+        ("xsel", &["--clipboard", "--input"]),
+        ("pbcopy", &[]),
+    ];
+    for (bin, args) in TOOLS {
         let mut cmd = std::process::Command::new(bin);
-        if bin == "xclip" {
-            cmd.args(["-selection", "clipboard"]);
-        }
-        if let Ok(mut child) = cmd
+        cmd.args(*args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-        {
-            if let Some(mut stdin) = child.stdin.take() {
-                use std::io::Write;
-                let _ = stdin.write_all(text.as_bytes());
-            }
-            let _ = child.wait();
+            .stderr(std::process::Stdio::null());
+        let Ok(mut child) = cmd.spawn() else {
+            continue;
+        };
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            let _ = stdin.write_all(text.as_bytes());
+        }
+        if child.wait().map(|s| s.success()).unwrap_or(false) {
             return Ok(());
         }
     }
@@ -569,5 +590,11 @@ mod tests {
         ] {
             assert!(!tweak.should_start(), "{tweak:?}");
         }
+    }
+
+    #[test]
+    fn copied_toast_counts_lines() {
+        assert_eq!(copied_toast(1), "copied 1 line");
+        assert_eq!(copied_toast(12), "copied 12 lines");
     }
 }

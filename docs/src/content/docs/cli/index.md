@@ -103,6 +103,7 @@ On an interactive colour TTY, `erno dev` opens a dashboard instead of the pinned
 |-----|--------|
 | `1–9` / `0` | Focus a service / all |
 | `↑↓` | Scroll the log (pauses follow) |
+| `c` | Copy the visible log to the clipboard |
 | `⏎` | Open the selected Tempo trace in the lens |
 | `r` / `o` | Restart / open the focused service URL |
 | `s` / `f` | Slowest traces / failures only |

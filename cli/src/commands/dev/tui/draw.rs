@@ -513,7 +513,7 @@ fn wire_lane(svc: &ServiceRow, state: &TuiState, width: usize) -> String {
 
 fn render_footer(frame: &mut Frame, area: Rect, state: &TuiState, wide: bool) {
     let keys = if wide {
-        "1-9 focus  0 all  ↑↓ log  ⏎ trace  r restart  o open  m/M migrate  e edit  p pause  w wire  q quit"
+        "1-9 focus  0 all  ↑↓ log  c copy  ⏎ trace  r restart  o open  m/M migrate  e edit  p pause  w wire  q quit"
     } else {
         "1-9  r  o  m  q"
     };
@@ -591,6 +591,7 @@ mod tests {
         );
         assert!(text.contains("WIRE"), "{text}");
         assert!(text.contains("MIGRATIONS"), "{text}");
+        assert!(text.contains("c copy"), "{text}");
     }
 
     fn hit(service: &str, name: &str) -> TraceHit {

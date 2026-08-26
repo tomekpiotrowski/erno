@@ -214,4 +214,9 @@ mod tests {
         apply(&mut state, interpret(key(KeyCode::Char('o'))));
         assert!(state.toast.contains("http://"), "{}", state.toast);
     }
+
+    #[test]
+    fn c_is_copy() {
+        assert_eq!(interpret(key(KeyCode::Char('c'))), Action::Copy);
+    }
 }

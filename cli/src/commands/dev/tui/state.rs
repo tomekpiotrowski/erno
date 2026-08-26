@@ -141,6 +141,21 @@ impl TuiState {
             .collect()
     }
 
+    /// Clipboard text for the LOG pane: the current service / failures filter,
+    /// untruncated and with ANSI stripped, matching `.erno/dev.log`.
+    pub fn visible_log_text(&self) -> String {
+        let mut out = String::new();
+        for line in self.visible_logs() {
+            let body = crate::ui::strip_ansi(&line.line);
+            out.push('[');
+            out.push_str(&line.label);
+            out.push_str("] ");
+            out.push_str(&body);
+            out.push('\n');
+        }
+        out
+    }
+
     pub fn visible_traces(&self) -> Vec<&TraceHit> {
         self.traces
             .iter()
@@ -271,5 +286,40 @@ mod tests {
             .collect();
         assert_eq!(logs, ["app-only"]);
         assert_eq!(traces, ["HMR"]);
+    }
+
+    #[test]
+    fn visible_log_text_matches_the_file_log_and_strips_ansi() {
+        let urls = DevUrls::defaults(true, true, true);
+        let mut state = TuiState::new("teryon", &urls);
+        let app = state
+            .services
+            .iter()
+            .position(|s| s.name == "app")
+            .expect("app");
+        state.focus = Some(app);
+        state.logs = vec![
+            LogLine {
+                label: "api".into(),
+                line: "api-only".into(),
+            },
+            LogLine {
+                label: "app".into(),
+                line: "\u{1b}[31merror boom\u{1b}[0m".into(),
+            },
+            LogLine {
+                label: "app".into(),
+                line: "still going".into(),
+            },
+        ];
+        assert_eq!(
+            state.visible_log_text(),
+            "[app] error boom\n[app] still going\n"
+        );
+        state.failures_only = true;
+        assert_eq!(state.visible_log_text(), "[app] error boom\n");
+        state.focus = None;
+        state.logs.clear();
+        assert!(state.visible_log_text().is_empty());
     }
 }
