@@ -19,6 +19,7 @@ import { ErnoShareService } from './share/erno-share.service';
 import { ErnoSharedViewService } from './share/erno-shared-view.service';
 import { ErnoDevMailService } from './devtools/erno-dev-mail.service';
 import { ErnoDevJobsService } from './devtools/erno-dev-jobs.service';
+import { ErnoDevtoolsRegistry } from './devtools/erno-devtools.registry';
 import { ErnoAlertsService } from './alerts/erno-alerts.service';
 import { ErnoHttpService } from './http/erno-http.service';
 import { ErnoAppStateService } from './app-state/erno-app-state.service';
@@ -44,6 +45,7 @@ export function provideErno(config: ErnoConfig): EnvironmentProviders {
     ErnoSharedViewService,
     ErnoDevMailService,
     ErnoDevJobsService,
+    ErnoDevtoolsRegistry,
     ErnoAlertsService,
     ErnoErrorReporterService,
     // Overriding ErrorHandler is intrusive, so it is a no-op pass-through
@@ -55,6 +57,9 @@ export function provideErno(config: ErnoConfig): EnvironmentProviders {
     // which might be never.
     provideAppInitializer(() => {
       inject(ErnoErrorReporterService).install();
+    }),
+    provideAppInitializer(() => {
+      inject(ErnoDevtoolsRegistry).register(inject(ErnoDatabaseService));
     }),
   ]);
 }

@@ -237,4 +237,67 @@ describe('ErnoSyncService', () => {
 
     http.expectNone((r) => r.url === DELTA_URL);
   });
+
+  it('lists registered entities with their lastSyncSeq', async () => {
+    dbStub.getLastSyncSeq.mockResolvedValue(7);
+    registerTodo();
+
+    expect(await service.entities()).toEqual([
+      { entity: 'todos', deltaPath: DELTA_PATH, lastSyncSeq: 7, lastPullAt: null, lastError: null },
+    ]);
+  });
+
+  it('records the last pull error instead of swallowing it', async () => {
+    registerTodo();
+    const pull = service.pullDelta();
+    await flush();
+    http
+      .expectOne((r) => r.url === DELTA_URL)
+      .flush({ message: 'nope' }, { status: 500, statusText: 'Server Error' });
+    await pull;
+
+    let status = '';
+    service.status$.subscribe((s) => (status = s));
+    expect(status).toBe('error');
+    expect(service.lastError).toMatch(/todos/);
+    const [info] = await service.entities();
+    expect(info.lastError).toMatch(/500/);
+  });
+
+  it('resetCursor writes seq 0 and pulls', async () => {
+    registerTodo();
+    const reset = service.resetCursor('todos');
+    await flush();
+
+    expect(dbStub.setLastSyncSeq).toHaveBeenCalledWith('todos', 0);
+    http.expectOne((r) => r.url === DELTA_URL).flush(emptyDelta());
+    await reset;
+  });
+
+  it('resetCursor waits for an in-flight pull before zeroing the cursor', async () => {
+    registerTodo();
+    dbStub.getLastSyncSeq.mockResolvedValue(3);
+    dbStub.setLastSyncSeq.mockImplementation(async (_entity: string, seq: number) => {
+      dbStub.getLastSyncSeq.mockResolvedValue(seq);
+    });
+
+    const pull = service.pullDelta();
+    await flush();
+    const inFlight = http.expectOne((r) => r.url === DELTA_URL);
+
+    const reset = service.resetCursor('todos');
+    await flush();
+    expect(dbStub.setLastSyncSeq).not.toHaveBeenCalledWith('todos', 0);
+
+    inFlight.flush({ items: [], next_since: 9 });
+    await pull;
+    await flush();
+
+    expect(dbStub.setLastSyncSeq).toHaveBeenCalledWith('todos', 9);
+    expect(dbStub.setLastSyncSeq).toHaveBeenCalledWith('todos', 0);
+    const second = http.expectOne((r) => r.url === DELTA_URL);
+    expect(second.request.params.get('since')).toBe('0');
+    second.flush(emptyDelta());
+    await reset;
+  });
 });

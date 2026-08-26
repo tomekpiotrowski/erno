@@ -13,41 +13,52 @@ import { HttpClient } from '@angular/common/http';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { catchError, of } from 'rxjs';
 import { ERNO_CONFIG, ErnoConfig } from '../erno.config';
+import { AuthUser, ErnoAuthService } from '../auth/erno-auth.service';
+import { ErnoNetworkService } from '../network/erno-network.service';
 import { ErnoRealtimeService } from '../realtime/erno-realtime.service';
 import { ErnoSyncService, SyncStatus } from '../sync/erno-sync.service';
 import { ErnoDevMailService, MockEmail } from './erno-dev-mail.service';
 import { DevJob, ErnoDevJobsService } from './erno-dev-jobs.service';
+import { ERNO_DEVTOOLS_STYLES } from './erno-devtools.styles';
+import { ErnoDevtoolsAuthTab } from './tabs/auth-tab';
+import { ErnoDevtoolsDataTab } from './tabs/data-tab';
+import { ErnoDevtoolsEmailsTab } from './tabs/emails-tab';
+import { ErnoDevtoolsJobsTab } from './tabs/jobs-tab';
+import { ErnoDevtoolsStatusTab } from './tabs/status-tab';
+import { ErnoDevtoolsSyncTab } from './tabs/sync-tab';
 import {
-  JobGroup,
+  DevtoolsTab,
+  DT_ERR,
+  DT_OK,
+  DT_WARN,
   JobKindFilter,
-  Tone,
+  LoggedPushEvent,
   apiHost,
   filterJobGroups,
   formatClock,
-  formatMs,
   formatUptime,
   groupJobs,
-  groupRuns,
-  statusLabel,
-  statusTone,
+  prependPushEvent,
   syncLabel,
   syncTone,
 } from './erno-devtools.util';
 
-type Tab = 'status' | 'emails' | 'jobs';
-
-const OK = 'oklch(0.755 0.085 168)';
-const WARN = 'oklch(0.80 0.095 82)';
-const ERR = 'oklch(0.695 0.125 22)';
-const TONE_COLOR: Record<Tone, string> = { ok: OK, warn: WARN, err: ERR, muted: 'var(--dt-n600)' };
 const VERSION = '0.0.1';
 const POLL_MS = 4000;
 const NOTE_MS = 3000;
 
 @Component({
   selector: 'erno-devtools',
-  imports: [],
+  imports: [
+    ErnoDevtoolsStatusTab,
+    ErnoDevtoolsAuthTab,
+    ErnoDevtoolsSyncTab,
+    ErnoDevtoolsDataTab,
+    ErnoDevtoolsEmailsTab,
+    ErnoDevtoolsJobsTab,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  styles: [ERNO_DEVTOOLS_STYLES],
   template: `
     @if (visible) {
       @if (open()) {
@@ -95,147 +106,51 @@ const NOTE_MS = 3000;
 
           <div class="body">
             @if (tab() === 'status') {
-              @for (row of statusRows(); track row.key) {
-                <div class="srow">
-                  <span class="skey">{{ row.key }}</span>
-                  <span class="sval">
-                    <span class="smain" [style.color]="toneColor(row.tone)">{{ row.val }}</span>
-                    @if (row.detail) {
-                      <span class="sdetail">{{ row.detail }}</span>
-                    }
-                  </span>
-                  <span class="smeta">{{ row.meta }}</span>
-                </div>
-              }
-              <div class="sync-row">
-                <button
-                  type="button"
-                  class="primary"
-                  (click)="forceSync()"
-                  [disabled]="syncBusy()"
-                >
-                  @if (syncBusy()) {
-                    <span class="spin" aria-hidden="true"></span>
-                  }
-                  {{ syncBusy() ? 'Re-syncing' : (syncStatus() === 'error' ? 'Force re-sync' : 'Re-sync') }}
-                </button>
-                <span class="sync-note">{{ syncHint() }}</span>
-              </div>
+              <erno-devtools-status-tab
+                [rows]="statusRows()"
+                [syncBusy]="syncBusy()"
+                [syncStatus]="syncStatus()"
+                [syncHint]="syncHint()"
+                [online]="online()"
+                (resync)="forceSync()"
+                (toggleNetwork)="toggleNetwork()"
+              />
             }
-
+            @if (tab() === 'auth') {
+              <erno-devtools-auth-tab (note)="say($event)" />
+            }
+            @if (tab() === 'sync') {
+              <erno-devtools-sync-tab
+                [events]="pushLog()"
+                (note)="say($event)"
+                (clearLog)="pushLog.set([])"
+              />
+            }
+            @if (tab() === 'data') {
+              <erno-devtools-data-tab (note)="say($event)" />
+            }
             @if (tab() === 'emails') {
-              @if (emails().length === 0) {
-                <div class="empty">
-                  <span class="empty-title">Outbox empty</span>
-                  <span class="empty-sub">Mail the app sends in dev lands here instead of going out.</span>
-                </div>
-              }
-              @for (email of emails(); track email.id) {
-                <div
-                  class="erow"
-                  (click)="openEmail(email)"
-                  (keydown.enter)="openEmail(email)"
-                  tabindex="0"
-                  role="button"
-                >
-                  <span class="eline">
-                    <span class="esubj" [class.read]="!isUnread(email.id)">{{ email.subject }}</span>
-                    @if (isUnread(email.id)) {
-                      <span class="udot" aria-label="unread"></span>
-                    }
-                    <span class="etime">{{ clock(email.created_at) }}</span>
-                  </span>
-                  <span class="eline">
-                    <span class="eto">{{ email.to }}</span>
-                    <span class="eact">
-                      <button type="button" class="ghost sm" (click)="openEmail(email); $event.stopPropagation()">
-                        open ↗
-                      </button>
-                      <button
-                        type="button"
-                        class="ghost sm mute"
-                        (click)="deleteEmail(email.id); $event.stopPropagation()"
-                      >
-                        ✕
-                      </button>
-                    </span>
-                  </span>
-                </div>
-              }
+              <erno-devtools-emails-tab
+                [emails]="emails()"
+                [unread]="unread()"
+                (openEmail)="openEmail($event)"
+                (deleteEmail)="deleteEmail($event)"
+                (verify)="verifyEmail($event)"
+                (openReset)="openReset($event)"
+              />
             }
-
             @if (tab() === 'jobs') {
-              <div class="jbar">
-                <input
-                  class="filter"
-                  placeholder="filter jobs"
-                  [value]="jobQuery()"
-                  (input)="jobQuery.set($any($event.target).value)"
-                />
-                @for (f of jobFilterDefs; track f.key) {
-                  <button
-                    type="button"
-                    class="chip"
-                    [class.on]="jobFilter() === f.key"
-                    (click)="jobFilter.set(f.key)"
-                  >
-                    {{ f.label }}
-                  </button>
-                }
-              </div>
-              @if (visibleGroups().length === 0) {
-                <div class="empty">
-                  <span class="empty-title">
-                    @if (jobQuery().trim()) {
-                      Nothing matches “{{ jobQuery().trim() }}”
-                    } @else {
-                      No jobs.
-                    }
-                  </span>
-                  <span class="empty-sub">{{ jobsEmptyHint() }}</span>
-                </div>
-              }
-              @for (g of visibleGroups(); track g.type) {
-                <div class="jkind">
-                  <div class="jrow" (click)="toggleGroup(g.type)" role="button" tabindex="0"
-                    (keydown.enter)="toggleGroup(g.type)">
-                    <span class="caret" [class.open]="expanded().has(g.type)">▸</span>
-                    <span class="jname">
-                      <span>{{ g.type }}</span>
-                      @if (g.runCount > 1) {
-                        <span class="xcount">×{{ g.runCount }}</span>
-                      }
-                    </span>
-                    <span class="jstat" [class.pulse]="g.status === 'running'" [style.color]="toneColor(statusTone(g.status))">
-                      {{ statusLabel(g.status) }}
-                    </span>
-                    <span class="jtime">{{ groupTiming(g) }}</span>
-                  </div>
-                  @if (expanded().has(g.type)) {
-                    <div class="jexp">
-                      @for (run of groupRuns(g); track run.id) {
-                        <div class="run">
-                          <span class="run-id">{{ run.id }}</span>
-                          <span class="run-ms" [class.warn]="run.ms != null && run.ms > 500">{{ formatMs(run.ms) }}</span>
-                          <span class="run-st" [style.color]="toneColor(statusTone(run.state))">{{ run.state }}</span>
-                        </div>
-                      }
-                      @if (g.error) {
-                        <div class="errbox">
-                          <span class="err-msg">{{ g.error }}</span>
-                          @if (g.failedJobId; as failedId) {
-                            <span class="err-acts">
-                              <button type="button" class="ghost sm" (click)="retryJob(failedId); $event.stopPropagation()">
-                                retry
-                              </button>
-                            </span>
-                          }
-                        </div>
-                      }
-                    </div>
-                  }
-                </div>
-              }
+              <erno-devtools-jobs-tab
+                [groups]="visibleGroups()"
+                [query]="jobQuery()"
+                [filter]="jobFilter()"
+                [expanded]="expanded()"
+                [emptyHint]="jobsEmptyHint()"
+                (queryChange)="jobQuery.set($event)"
+                (filterChange)="jobFilter.set($event)"
+                (toggleGroup)="toggleGroup($event)"
+                (retryJob)="retryJob($event)"
+              />
             }
           </div>
 
@@ -253,422 +168,31 @@ const NOTE_MS = 3000;
       }
     }
   `,
-  styles: `
-    :host {
-      --dt-bg: #161826;
-      --dt-surface: #232532;
-      --dt-text: #e9e9ed;
-      --dt-accent: #9184d9;
-      --dt-accent-200: #e7e5fe;
-      --dt-accent-800: #423a6a;
-      --dt-accent-100: #f5f4ff;
-      --dt-n400: #b2b6ca;
-      --dt-n500: #9397ab;
-      --dt-n600: #75798c;
-      --dt-n700: #595d6c;
-      --dt-n800: #3f424d;
-      --dt-n900: #292b31;
-      --dt-div: color-mix(in srgb, #e9e9ed 16%, transparent);
-      --dt-font: Inter, system-ui, sans-serif;
-      --dt-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-      --dt-ok: oklch(0.755 0.085 168);
-      --dt-warn: oklch(0.80 0.095 82);
-      --dt-err: oklch(0.695 0.125 22);
-      --dt-radius: 14px;
-    }
-
-    .panel, .pill {
-      position: fixed;
-      right: 28px;
-      bottom: 28px;
-      z-index: 9999;
-      color: var(--dt-text);
-      font-family: var(--dt-font);
-      animation: dt-rise 0.22s ease-out;
-    }
-
-    .panel {
-      width: min(400px, calc(100vw - 32px));
-      display: flex;
-      flex-direction: column;
-      border-radius: var(--dt-radius);
-      background: var(--dt-bg);
-      box-shadow: 0 0 0 1px var(--dt-n800), 0 16px 40px rgba(0, 0, 0, 0.65);
-      overflow: hidden;
-    }
-
-    .head, .foot {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 11px 12px 11px 14px;
-      background: var(--dt-surface);
-    }
-    .head { border-bottom: 1px solid var(--dt-div); }
-    .foot { border-top: 1px solid var(--dt-div); padding: 8px 12px 8px 14px; }
-
-    .health {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      flex: none;
-      background: var(--health, var(--dt-ok));
-      box-shadow: 0 0 0 3px color-mix(in srgb, var(--health, var(--dt-ok)) 20%, transparent);
-    }
-
-    .title {
-      font-size: 13px;
-      font-weight: 500;
-      letter-spacing: 0.01em;
-    }
-    .ver {
-      font-family: var(--dt-mono);
-      font-size: 10px;
-      color: var(--dt-n600);
-    }
-    .head-acts { margin-left: auto; display: flex; align-items: center; gap: 2px; }
-
-    .tabs {
-      display: flex;
-      gap: 2px;
-      padding: 9px 12px 0;
-    }
-    .tab {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 11px;
-      cursor: pointer;
-      font: 12px/1.2 var(--dt-font);
-      border: none;
-      border-radius: 4px;
-      background: transparent;
-      color: var(--dt-n500);
-    }
-    .tab.on {
-      background: color-mix(in srgb, var(--dt-accent) 16%, transparent);
-      color: var(--dt-accent-200);
-      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--dt-accent) 50%, transparent);
-    }
-    .count {
-      font-family: var(--dt-mono);
-      font-size: 10px;
-      padding: 1px 5px;
-      border-radius: 999px;
-      background: var(--dt-n900);
-      color: var(--dt-n500);
-    }
-    .count.accent { background: var(--dt-accent-800); color: var(--dt-accent-100); }
-    .count.err { background: color-mix(in srgb, var(--dt-err) 22%, transparent); color: var(--dt-err); }
-
-    .rule { height: 1px; background: var(--dt-div); margin-top: 9px; }
-
-    .body {
-      max-height: 300px;
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-      scrollbar-width: thin;
-      scrollbar-color: var(--dt-n800) transparent;
-    }
-    .panel.tall .body { max-height: 460px; }
-
-    .srow {
-      display: grid;
-      grid-template-columns: 76px minmax(0, 1fr) auto;
-      gap: 0 10px;
-      align-items: baseline;
-      padding: 8px 14px;
-      border-bottom: 1px solid color-mix(in srgb, var(--dt-div) 55%, transparent);
-    }
-    .srow:hover { background: color-mix(in srgb, var(--dt-text) 5%, transparent); }
-    .skey { font-family: var(--dt-mono); font-size: 11px; color: var(--dt-n600); }
-    .sval { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-    .smain { font-size: 13px; font-family: var(--dt-mono); }
-    .sdetail { font-size: 11px; color: var(--dt-n600); text-wrap: pretty; }
-    .smeta { font-family: var(--dt-mono); font-size: 11px; color: var(--dt-n700); white-space: nowrap; }
-
-    .sync-row {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 12px 14px 10px;
-    }
-    .sync-note { font-size: 11px; color: var(--dt-n600); }
-
-    .erow {
-      display: flex;
-      flex-direction: column;
-      gap: 3px;
-      padding: 10px 14px;
-      border-bottom: 1px solid color-mix(in srgb, var(--dt-div) 55%, transparent);
-      cursor: pointer;
-    }
-    .erow:hover { background: color-mix(in srgb, var(--dt-text) 5%, transparent); }
-    .erow:hover .eact { opacity: 1; }
-    .eline { display: flex; align-items: baseline; gap: 8px; }
-    .esubj {
-      font-size: 13px;
-      font-weight: 500;
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .esubj.read { color: var(--dt-n400); }
-    .udot { width: 5px; height: 5px; border-radius: 50%; background: var(--dt-accent); flex: none; }
-    .etime { margin-left: auto; font-family: var(--dt-mono); font-size: 11px; color: var(--dt-n700); flex: none; }
-    .eto {
-      font-family: var(--dt-mono);
-      font-size: 11px;
-      color: var(--dt-n500);
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .eact {
-      margin-left: auto;
-      display: flex;
-      gap: 8px;
-      opacity: 0.35;
-      transition: opacity 0.15s;
-      flex: none;
-    }
-
-    .jbar {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 9px 14px;
-      border-bottom: 1px solid var(--dt-div);
-    }
-    .filter {
-      flex: 1;
-      min-width: 0;
-      height: 28px;
-      padding: 0 8px;
-      font: 12px var(--dt-mono);
-      color: var(--dt-text);
-      background: var(--dt-bg);
-      border: 1px solid var(--dt-div);
-      border-radius: 8px;
-    }
-    .filter:focus-visible { outline: 2px solid var(--dt-accent); outline-offset: 0; border-color: var(--dt-accent); }
-    .chip {
-      padding: 4px 8px;
-      font: 11px var(--dt-mono);
-      cursor: pointer;
-      border-radius: 4px;
-      border: 1px solid var(--dt-div);
-      background: transparent;
-      color: var(--dt-n600);
-      white-space: nowrap;
-      flex: none;
-    }
-    .chip.on { border-color: var(--dt-accent); color: var(--dt-accent); }
-
-    .jkind { border-bottom: 1px solid color-mix(in srgb, var(--dt-div) 55%, transparent); }
-    .jrow {
-      display: grid;
-      grid-template-columns: 12px minmax(0, 1fr) auto auto;
-      gap: 0 9px;
-      align-items: center;
-      padding: 7px 14px;
-      cursor: pointer;
-    }
-    .jrow:hover { background: color-mix(in srgb, var(--dt-text) 5%, transparent); }
-    .caret {
-      font-size: 9px;
-      color: var(--dt-n600);
-      transition: transform 0.15s;
-    }
-    .caret.open { transform: rotate(90deg); }
-    .jname {
-      display: flex;
-      align-items: baseline;
-      gap: 7px;
-      min-width: 0;
-      font-family: var(--dt-mono);
-      font-size: 12px;
-      font-weight: 500;
-    }
-    .jname > span:first-child {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .xcount {
-      font-family: var(--dt-mono);
-      font-size: 10px;
-      padding: 1px 5px;
-      border-radius: 4px;
-      background: var(--dt-n900);
-      color: var(--dt-n500);
-      flex: none;
-    }
-    .jstat { font-size: 11px; white-space: nowrap; }
-    .jstat.pulse { animation: dt-pulse 1.4s infinite; }
-    .jtime { font-family: var(--dt-mono); font-size: 11px; color: var(--dt-n700); white-space: nowrap; }
-
-    .jexp {
-      display: flex;
-      flex-direction: column;
-      padding: 2px 14px 9px 35px;
-      animation: dt-rise 0.18s ease-out;
-    }
-    .run {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) 54px 62px;
-      gap: 0 8px;
-      align-items: baseline;
-      padding: 3px 0;
-      font-family: var(--dt-mono);
-      font-size: 11px;
-    }
-    .run-id { color: var(--dt-n600); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .run-ms { color: var(--dt-n600); text-align: right; }
-    .run-ms.warn { color: var(--dt-warn); }
-    .run-st { text-align: right; }
-
-    .errbox {
-      margin-top: 7px;
-      padding: 8px 10px;
-      border-radius: 8px;
-      border: 1px solid color-mix(in srgb, var(--dt-err) 45%, transparent);
-      background: color-mix(in srgb, var(--dt-err) 9%, transparent);
-      display: flex;
-      flex-direction: column;
-      gap: 3px;
-    }
-    .err-msg { font-family: var(--dt-mono); font-size: 11px; color: #d2cefd; text-wrap: pretty; }
-    .err-acts { display: flex; gap: 6px; padding-top: 2px; }
-
-    .empty {
-      padding: 28px 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-      align-items: center;
-      text-align: center;
-    }
-    .empty-title { font-size: 13px; color: var(--dt-n500); }
-    .empty-sub { font-size: 11px; color: var(--dt-n700); }
-
-    .fnote {
-      font-family: var(--dt-mono);
-      font-size: 11px;
-      color: var(--dt-n600);
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .pill {
-      display: flex;
-      align-items: center;
-      gap: 9px;
-      padding: 8px 13px;
-      border-radius: 999px;
-      border: 1px solid var(--dt-n800);
-      background: var(--dt-surface);
-      box-shadow: 0 0 0 1px #595d6c, 0 6px 18px rgba(0, 0, 0, 0.55);
-      color: var(--dt-text);
-      font: 12px var(--dt-font);
-      cursor: pointer;
-    }
-    .pill:hover { border-color: var(--dt-accent); }
-    .pcnt { font-family: var(--dt-mono); font-size: 11px; color: var(--dt-n500); }
-
-    button { font-family: inherit; }
-    .ghost, .primary, .secondary {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      background: transparent;
-      border: 1px solid transparent;
-      border-radius: 8px;
-    }
-    .ghost {
-      height: 26px;
-      padding: 0 8px;
-      font-size: 11px;
-      color: var(--dt-n500);
-    }
-    .ghost.icon { width: 26px; padding: 0; font-size: 14px; }
-    .ghost.sm { height: 22px; padding: 0 6px; font-size: 11px; }
-    .ghost.mute { color: var(--dt-n500); }
-    .ghost:hover { background: color-mix(in srgb, var(--dt-accent) 10%, transparent); }
-    .primary {
-      height: 32px;
-      padding: 0 12px;
-      font-size: 12px;
-      color: var(--dt-accent);
-      border-color: var(--dt-accent);
-    }
-    .primary:hover { background: color-mix(in srgb, var(--dt-accent) 12%, transparent); }
-    .primary:disabled { opacity: 0.45; cursor: not-allowed; }
-    .secondary {
-      margin-left: auto;
-      height: 26px;
-      padding: 0 10px;
-      font-size: 11px;
-      flex: none;
-      border-color: var(--dt-div);
-      color: var(--dt-text);
-    }
-    .secondary:hover { background: color-mix(in srgb, var(--dt-text) 7%, transparent); }
-
-    .spin {
-      display: inline-block;
-      width: 10px;
-      height: 10px;
-      margin-right: 7px;
-      border: 1.5px solid var(--dt-accent);
-      border-top-color: transparent;
-      border-radius: 50%;
-      animation: dt-spin 0.7s linear infinite;
-    }
-
-    :host :focus-visible { outline: 2px solid var(--dt-accent); outline-offset: 2px; }
-
-    @keyframes dt-rise {
-      from { opacity: 0; transform: translateY(6px); }
-      to { opacity: 1; transform: none; }
-    }
-    @keyframes dt-pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.35; }
-    }
-    @keyframes dt-spin { to { transform: rotate(360deg); } }
-  `,
 })
 export class ErnoDevtoolsComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly visible = isDevMode();
   readonly version = VERSION;
-  readonly jobFilterDefs: { key: JobKindFilter; label: string }[] = [
-    { key: 'all', label: 'all' },
-    { key: 'attention', label: 'attention' },
-    { key: 'failed', label: 'failed' },
-  ];
 
   readonly open = signal(true);
   readonly tall = signal(false);
-  readonly tab = signal<Tab>('status');
+  readonly tab = signal<DevtoolsTab>('status');
   readonly emails = signal<MockEmail[]>([]);
   readonly jobs = signal<DevJob[]>([]);
   readonly expanded = signal<Set<string>>(new Set());
   readonly jobQuery = signal('');
   readonly jobFilter = signal<JobKindFilter>('all');
   readonly unread = signal<Set<string>>(new Set());
+  readonly user = signal<AuthUser | null>(null);
   readonly wsConnected = signal(false);
   readonly syncStatus = signal<SyncStatus>('idle');
+  readonly lastSyncError = signal<string | null>(null);
   readonly syncBusy = signal(false);
   readonly apiReady = signal<boolean | null>(null);
+  readonly online = signal(true);
+  readonly simulatingOffline = signal(false);
+  readonly pushLog = signal<LoggedPushEvent[]>([]);
   readonly note = signal('');
   readonly connectedSince = signal<number | null>(null);
   readonly syncAt = signal<number | null>(null);
@@ -689,9 +213,9 @@ export class ErnoDevtoolsComponent implements OnInit {
   readonly unreadCount = computed(() => this.unread().size);
 
   readonly healthColor = computed(() => {
-    if (this.syncStatus() === 'error' || this.failing() > 0) return ERR;
-    if (this.running() > 0 || this.syncStatus() === 'syncing') return WARN;
-    return OK;
+    if (this.syncStatus() === 'error' || this.failing() > 0) return DT_ERR;
+    if (this.running() > 0 || this.syncStatus() === 'syncing') return DT_WARN;
+    return DT_OK;
   });
 
   readonly tabDefs = computed(() => {
@@ -703,6 +227,24 @@ export class ErnoDevtoolsComponent implements OnInit {
         label: 'Status',
         count: this.syncStatus() === 'error' ? '!' : null,
         tone: 'err' as const,
+      },
+      {
+        key: 'auth' as const,
+        label: 'Auth',
+        count: this.user() ? 'in' : null,
+        tone: 'muted' as const,
+      },
+      {
+        key: 'sync' as const,
+        label: 'Sync',
+        count: this.syncStatus() === 'error' ? '!' : null,
+        tone: 'err' as const,
+      },
+      {
+        key: 'data' as const,
+        label: 'Data',
+        count: null,
+        tone: 'muted' as const,
       },
       {
         key: 'emails' as const,
@@ -728,6 +270,13 @@ export class ErnoDevtoolsComponent implements OnInit {
     const api = this.apiReady();
     return [
       {
+        key: 'network',
+        val: this.online() ? 'online' : 'offline',
+        tone: this.online() ? ('ok' as const) : ('err' as const),
+        meta: this.simulatingOffline() ? 'simulated' : '',
+        detail: this.online() ? '' : 'sync and the socket stay down until a path returns',
+      },
+      {
         key: 'websocket',
         val: this.wsConnected() ? 'connected' : 'disconnected',
         tone: this.wsConnected() ? ('ok' as const) : ('err' as const),
@@ -741,7 +290,7 @@ export class ErnoDevtoolsComponent implements OnInit {
         meta: this.syncAt() ? formatClock(this.syncAt()!) : '',
         detail:
           sync === 'error'
-            ? 'last pull failed — force a re-sync once the API is reachable'
+            ? this.lastSyncError() ?? 'last pull failed — force a re-sync once the API is reachable'
             : sync === 'offline'
               ? 'waiting for a network path'
               : '',
@@ -768,6 +317,14 @@ export class ErnoDevtoolsComponent implements OnInit {
     const up = this.connectedSince();
     const upLabel = up != null ? formatUptime(up, Date.now()) : 'down';
     switch (this.tab()) {
+      case 'auth':
+        return this.user() ? `${this.user()!.email} · session live` : 'signed out';
+      case 'sync':
+        return this.lastSyncError()
+          ? this.lastSyncError()!
+          : `${this.syncStatus()} · ${this.syncAt() ? formatClock(this.syncAt()!) : 'never pulled'}`;
+      case 'data':
+        return 'local IndexedDB · wipe is local only';
       case 'emails':
         return this.emails().length
           ? `${this.emails().length} held · ${this.unreadCount()} unread · nothing left the machine`
@@ -805,19 +362,34 @@ export class ErnoDevtoolsComponent implements OnInit {
     private realtime: ErnoRealtimeService,
     private mailService: ErnoDevMailService,
     private jobsService: ErnoDevJobsService,
+    private auth: ErnoAuthService,
+    private network: ErnoNetworkService,
     private http: HttpClient,
     @Inject(ERNO_CONFIG) private config: ErnoConfig,
   ) {}
 
   ngOnInit(): void {
     if (!this.visible) return;
+    this.auth.currentUser$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(user => {
+      this.user.set(user);
+    });
+    this.network.connected$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(connected => {
+      this.online.set(connected);
+      if (connected) this.simulatingOffline.set(false);
+    });
     this.realtime.connected$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(connected => {
       this.wsConnected.set(connected);
       if (connected) this.connectedSince.set(Date.now());
     });
+    this.realtime.events$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(event => {
+      this.pushLog.update(list => prependPushEvent(list, event));
+    });
     this.sync.status$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(status => {
       this.syncStatus.set(status);
       this.syncAt.set(Date.now());
+    });
+    this.sync.lastError$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(err => {
+      this.lastSyncError.set(err);
     });
     this.refresh();
     this.pollTimer = setInterval(() => this.refresh(), POLL_MS);
@@ -827,7 +399,7 @@ export class ErnoDevtoolsComponent implements OnInit {
     });
   }
 
-  selectTab(tab: Tab): void {
+  selectTab(tab: DevtoolsTab): void {
     this.tab.set(tab);
   }
 
@@ -835,16 +407,16 @@ export class ErnoDevtoolsComponent implements OnInit {
     this.tall.update(v => !v);
   }
 
-  toneColor(tone: Tone): string {
-    return TONE_COLOR[tone];
-  }
-
-  clock(value: string): string {
-    return formatClock(value);
-  }
-
-  isUnread(id: string): boolean {
-    return this.unread().has(id);
+  toggleNetwork(): void {
+    if (this.online()) {
+      this.simulatingOffline.set(true);
+      this.network.notifyStatusChange(false);
+      this.say('simulating offline');
+    } else {
+      this.simulatingOffline.set(false);
+      this.network.notifyStatusChange(true);
+      this.say('network restored');
+    }
   }
 
   forceSync(): void {
@@ -854,6 +426,17 @@ export class ErnoDevtoolsComponent implements OnInit {
       this.syncBusy.set(false);
       this.say(this.syncStatus() === 'error' ? 're-sync failed' : 'caught up');
     });
+  }
+
+  verifyEmail(token: string): void {
+    this.auth.verifyEmail(token).subscribe({
+      next: () => this.say('email verified'),
+      error: () => this.say('verify failed'),
+    });
+  }
+
+  openReset(url: string): void {
+    window.open(url, '_blank', 'noopener');
   }
 
   openEmail(email: MockEmail): void {
@@ -912,20 +495,6 @@ export class ErnoDevtoolsComponent implements OnInit {
     }
   }
 
-  groupTiming(group: JobGroup): string {
-    if (group.status === 'running') {
-      const t = group.jobs[0]?.updated_at ?? group.jobs[0]?.created_at;
-      return t ? formatClock(t) : '';
-    }
-    if (group.avgMs == null) return '';
-    return group.runCount > 1 ? `avg ${group.avgMs}ms` : `${group.avgMs}ms`;
-  }
-
-  readonly groupRuns = groupRuns;
-  readonly statusLabel = statusLabel;
-  readonly statusTone = statusTone;
-  readonly formatMs = formatMs;
-
   private refresh(): void {
     this.loadEmails();
     this.loadJobs();
@@ -968,7 +537,7 @@ export class ErnoDevtoolsComponent implements OnInit {
       .subscribe(body => this.apiReady.set(body !== null));
   }
 
-  private say(msg: string): void {
+  say(msg: string): void {
     if (this.noteTimer) clearTimeout(this.noteTimer);
     this.note.set(msg);
     this.noteTimer = setTimeout(() => this.note.set(''), NOTE_MS);

@@ -68,7 +68,8 @@ Either form registers all services and the HTTP interceptor that attaches JWT to
 | `ErnoBillingService` | [Billing](./billing) | Stripe checkout and customer portal redirects |
 | `ErnoShareService` | [Sharing](./share) | Create/list/revoke shares and grants |
 | `ErnoSharedViewService` | [Sharing](./share#consumer-online-shared-view) | Online-only in-memory view of shared data |
-| `ErnoDevtoolsComponent` | [Devtools](./devtools) | Dev overlay (`<erno-devtools>`) |
+| `ErnoDevtoolsComponent` | [Devtools](./devtools) | Dev overlay (`<erno-devtools>`) — session, sync, Dexie, mail, jobs |
+| `ErnoDevtoolsRegistry` | [Devtools](./devtools) | Register app Dexie instances for the Data tab |
 | `ErnoDevMailService` | [Devtools](./devtools) | Preview outbound emails without SMTP in development |
 | `ErnoDevJobsService` | [Devtools](./devtools) | List, clear, and retry background jobs in development |
 | `ErnoAlertsService` | [Devtools](./devtools#alerts-ernoalertsservice) | Queued Ionic toast notifications |

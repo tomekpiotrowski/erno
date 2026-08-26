@@ -1,15 +1,20 @@
 import { DevJob } from './erno-dev-jobs.service';
 import {
   apiHost,
+  decodeJwtClaims,
+  downloadJson,
   filterJobGroups,
   formatClock,
   formatMs,
   formatUptime,
   groupJobs,
   groupRuns,
+  parseEmailAuthLink,
+  prependPushEvent,
   statusLabel,
   statusTone,
   syncLabel,
+  tokenFingerprint,
 } from './erno-devtools.util';
 
 function job(partial: Partial<DevJob> & Pick<DevJob, 'id' | 'type'>): DevJob {
@@ -117,5 +122,107 @@ describe('erno-devtools formatting', () => {
     expect(statusLabel('pending_retry')).toBe('Retrying');
     expect(statusTone('failed')).toBe('err');
     expect(syncLabel('synced')).toBe('in step');
+  });
+});
+
+function jwt(payload: object): string {
+  const json = btoa(JSON.stringify(payload))
+    .replace(/=+$/, '')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_');
+  return `eyJhbGciOiJub25lIn0.${json}.sig`;
+}
+
+describe('erno-devtools JWT claims', () => {
+  it('decodes sub, ver, exp, and iat from an access token', () => {
+    const claims = decodeJwtClaims(jwt({ sub: 'user-1', ver: 3, exp: 1700000000, iat: 1699999900 }));
+    expect(claims).toEqual({ sub: 'user-1', ver: 3, exp: 1700000000, iat: 1699999900 });
+  });
+
+  it('returns null for missing or malformed tokens', () => {
+    expect(decodeJwtClaims(null)).toBeNull();
+    expect(decodeJwtClaims('not-a-jwt')).toBeNull();
+    expect(decodeJwtClaims('a.!!!')).toBeNull();
+  });
+});
+
+describe('erno-devtools email auth links', () => {
+  it('extracts a verify-email token from HTML', () => {
+    const html = '<p>Click <a href="http://localhost:4200/verify-email?token=abc%2B12">here</a></p>';
+    expect(parseEmailAuthLink(html)).toEqual({
+      kind: 'verify',
+      token: 'abc+12',
+      url: 'http://localhost:4200/verify-email?token=abc%2B12',
+    });
+  });
+
+  it('extracts a reset-password token from plain text', () => {
+    const text = 'Paste: https://app.example.com/reset-password?token=rst_99';
+    expect(parseEmailAuthLink(text)).toEqual({
+      kind: 'reset',
+      token: 'rst_99',
+      url: 'https://app.example.com/reset-password?token=rst_99',
+    });
+  });
+
+  it('returns null when the body has no auth link', () => {
+    expect(parseEmailAuthLink('<p>Weekly digest</p>')).toBeNull();
+    expect(parseEmailAuthLink(null)).toBeNull();
+  });
+});
+
+describe('erno-devtools token fingerprint', () => {
+  it('is a checksum, not a prefix of the token', () => {
+    const token = 'refresh-secret-value-abcdefghijklmnopqrstuvwxyz';
+    const fp = tokenFingerprint(token);
+    expect(fp).toMatch(/^[0-9a-f]{8}$/);
+    expect(token.replace(/-/g, '').startsWith(fp)).toBe(false);
+    expect(tokenFingerprint(token)).toBe(fp);
+    expect(tokenFingerprint('other-secret-value-abcdefghijklmnopqrstuvwxyz')).not.toBe(fp);
+  });
+
+  it('returns missing for an empty token', () => {
+    expect(tokenFingerprint(null)).toBe('missing');
+  });
+});
+
+describe('erno-devtools push log', () => {
+  it('prepends events with a receive clock and caps at 30', () => {
+    const event = { entity: 'todos', id: 'a', sync_seq: 1, deleted: false };
+    const one = prependPushEvent([], event, 1_700_000_000_000);
+    expect(one[0]).toEqual({ ...event, at: 1_700_000_000_000 });
+    let list = one;
+    for (let i = 0; i < 40; i++) {
+      list = prependPushEvent(list, { ...event, sync_seq: i + 2 }, i);
+    }
+    expect(list).toHaveLength(30);
+    expect(list[0].sync_seq).toBe(41);
+  });
+});
+
+describe('erno-devtools downloadJson', () => {
+  it('triggers a file download with the JSON payload', () => {
+    const click = vi.fn();
+    const a = document.createElement('a');
+    a.click = click;
+    const createSpy = vi.spyOn(document, 'createElement').mockReturnValue(a);
+    const createObjectURL = vi.fn().mockReturnValue('blob:test');
+    const revokeObjectURL = vi.fn();
+    const origCreate = URL.createObjectURL;
+    const origRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = revokeObjectURL;
+
+    try {
+      downloadJson('erno-syncMeta.json', [{ entity: 'todos', lastSyncSeq: 4 }]);
+      expect(createObjectURL).toHaveBeenCalled();
+      expect(a.download).toBe('erno-syncMeta.json');
+      expect(click).toHaveBeenCalled();
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:test');
+    } finally {
+      createSpy.mockRestore();
+      URL.createObjectURL = origCreate;
+      URL.revokeObjectURL = origRevoke;
+    }
   });
 });

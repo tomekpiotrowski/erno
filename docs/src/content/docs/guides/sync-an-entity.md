@@ -110,10 +110,10 @@ async ngOnInit() {
 ## 6. Verify the loop
 
 1. Create a todo via your API while the app is open → push updates the list.
-2. Kill the network, create more todos server-side (or from another device), reconnect → `pullDelta` catches up.
+2. Kill the network (or **simulate offline** on the overlay Status tab), create more todos server-side (or from another device), reconnect → `pullDelta` catches up.
 3. Soft-delete a row → clients remove it after push or next delta.
 
-Use `<erno-devtools>` to watch sync status and force a re-sync ([Devtools](/app/devtools/)).
+Use `<erno-devtools>` ([Devtools](/app/devtools/)): the **Sync** tab shows per-entity `lastSyncSeq`, the last pull error, and a live push log; **reset cursor** forces a full pull. Register your todos Dexie with `registerDevtoolsDatabase` so the **Data** tab can browse and wipe local rows.
 
 ## Sharing (optional)
 

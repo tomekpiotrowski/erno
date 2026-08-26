@@ -25,7 +25,8 @@ ng serve                 # dev server on :4200 (demo app)
 | `ErnoShareService` | `share/erno-share.service` | Create/list/revoke shares and grants; fragment-based share URLs |
 | `ErnoSharedViewService` | `share/erno-shared-view.service` | Online-only in-memory view of shared data (delta + live push) |
 | `ErnoErrorReporterService` | `errors/erno-error-reporter.service` | Reports uncaught errors to a monitoring collector; installs a global `ErrorHandler` |
-| `ErnoDevtoolsComponent` | `devtools/erno-devtools.component` | Dev overlay for local development |
+| `ErnoDevtoolsComponent` | `devtools/erno-devtools.component` | Dev overlay: Status, Auth, Sync, Data, Emails, Jobs |
+| `ErnoDevtoolsRegistry` | `devtools/erno-devtools.registry` | Register app Dexie instances for the Data tab |
 | `ErnoDevMailService` | `devtools/erno-dev-mail.service` | Preview outbound emails in dev without SMTP |
 | `ErnoDevJobsService` | `devtools/erno-dev-jobs.service` | List, clear, and retry background jobs in dev |
 
@@ -50,7 +51,7 @@ Narrative docs for each service live in `docs/src/content/docs/app/`:
 | `ErnoBillingService` | `billing.md` |
 | `ErnoShareService` / `ErnoSharedViewService` | `share.md` |
 | `ErnoErrorReporterService` / `ErnoErrorHandler` | `error-reporting.md` |
-| `ErnoDevtoolsComponent` / `ErnoDevMailService` / `ErnoAlertsService` | `devtools.md` |
+| `ErnoDevtoolsComponent` / `ErnoDevtoolsRegistry` / `ErnoDevMailService` / `ErnoAlertsService` | `devtools.md` |
 
 Cross-cutting guides: `docs/src/content/docs/guides/` (e.g. sync end-to-end, billing gates).
 

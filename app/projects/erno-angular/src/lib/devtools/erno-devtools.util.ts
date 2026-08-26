@@ -2,6 +2,29 @@ import { DevJob, DevJobExecution, DevJobStatus } from './erno-dev-jobs.service';
 
 export type JobKindFilter = 'all' | 'attention' | 'failed';
 export type Tone = 'ok' | 'warn' | 'err' | 'muted';
+export type DevtoolsTab = 'status' | 'auth' | 'sync' | 'data' | 'emails' | 'jobs';
+
+export const DT_OK = 'oklch(0.755 0.085 168)';
+export const DT_WARN = 'oklch(0.80 0.095 82)';
+export const DT_ERR = 'oklch(0.695 0.125 22)';
+export const TONE_COLOR: Record<Tone, string> = {
+  ok: DT_OK,
+  warn: DT_WARN,
+  err: DT_ERR,
+  muted: 'var(--dt-n600)',
+};
+
+export interface StatusRow {
+  key: string;
+  val: string;
+  tone: Tone;
+  meta: string;
+  detail: string;
+}
+
+export function toneColor(tone: Tone): string {
+  return TONE_COLOR[tone];
+}
 
 export interface JobGroup {
   type: string;
@@ -153,6 +176,15 @@ export function formatMs(ms: number | null): string {
   return `${ms}ms`;
 }
 
+export function groupTiming(group: JobGroup): string {
+  if (group.status === 'running') {
+    const t = group.jobs[0]?.updated_at ?? group.jobs[0]?.created_at;
+    return t ? formatClock(t) : '';
+  }
+  if (group.avgMs == null) return '';
+  return group.runCount > 1 ? `avg ${group.avgMs}ms` : `${group.avgMs}ms`;
+}
+
 export function apiHost(baseUrl: string): string {
   try {
     const u = new URL(baseUrl);
@@ -181,4 +213,109 @@ export function syncTone(status: string): Tone {
   if (status === 'error' || status === 'offline') return 'err';
   if (status === 'syncing') return 'warn';
   return 'ok';
+}
+
+export interface JwtClaims {
+  sub?: string;
+  ver?: number;
+  exp?: number;
+  iat?: number;
+}
+
+export function decodeJwtClaims(token: string | null | undefined): JwtClaims | null {
+  if (!token) return null;
+  const part = token.split('.')[1];
+  if (!part) return null;
+  const padded = part.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (part.length % 4)) % 4);
+  try {
+    const payload = JSON.parse(atob(padded)) as JwtClaims;
+    return payload && typeof payload === 'object' ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
+/** FNV-1a 32-bit checksum — not a prefix of the secret. */
+export function tokenFingerprint(token: string | null | undefined): string {
+  if (!token) return 'missing';
+  let h = 0x811c9dc5;
+  for (let i = 0; i < token.length; i++) {
+    h ^= token.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, '0');
+}
+
+export interface LoggedPushEvent {
+  entity: string;
+  id: string;
+  sync_seq: number;
+  deleted: boolean;
+  at: number;
+}
+
+const PUSH_LOG_CAP = 30;
+
+export function prependPushEvent(
+  list: LoggedPushEvent[],
+  event: { entity: string; id: string; sync_seq: number; deleted: boolean },
+  at = Date.now(),
+): LoggedPushEvent[] {
+  return [{ ...event, at }, ...list].slice(0, PUSH_LOG_CAP);
+}
+
+export function downloadJson(filename: string, data: unknown): void {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export function formatExpiry(exp: number | undefined, nowMs = Date.now()): string {
+  if (exp == null) return '—';
+  const seconds = exp - Math.floor(nowMs / 1000);
+  if (seconds <= 0) return 'expired';
+  const min = Math.floor(seconds / 60);
+  const sec = seconds % 60;
+  return `${min}m${String(sec).padStart(2, '0')}s`;
+}
+
+export type EmailAuthLinkKind = 'verify' | 'reset';
+
+export interface EmailAuthLink {
+  kind: EmailAuthLinkKind;
+  token: string;
+  url: string;
+}
+
+const VERIFY_RE = /(https?:\/\/[^\s"'<>]+\/verify-email\?token=[^&\s"'<>]+)/i;
+const RESET_RE = /(https?:\/\/[^\s"'<>]+\/reset-password\?token=[^&\s"'<>]+)/i;
+
+export function parseEmailAuthLink(
+  htmlOrText: string | null | undefined,
+): EmailAuthLink | null {
+  if (!htmlOrText) return null;
+  const verify = htmlOrText.match(VERIFY_RE);
+  if (verify) return toAuthLink('verify', verify[1]);
+  const reset = htmlOrText.match(RESET_RE);
+  if (reset) return toAuthLink('reset', reset[1]);
+  return null;
+}
+
+function toAuthLink(kind: EmailAuthLinkKind, url: string): EmailAuthLink {
+  let token = '';
+  try {
+    token = new URL(url).searchParams.get('token') ?? '';
+  } catch {
+    const raw = url.split('token=')[1] ?? '';
+    try {
+      token = decodeURIComponent(raw);
+    } catch {
+      token = raw;
+    }
+  }
+  return { kind, token, url };
 }

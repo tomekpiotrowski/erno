@@ -34,6 +34,10 @@ async ngOnInit() {
 | `start()` | Connects realtime, subscribes to push events, and runs the initial pull. Idempotent — calling it more than once is a no-op. |
 | `pullDelta()` | Fetches and applies the delta for every registered entity (`GET {deltaPath}?since=N` → `{ items, next_since }`). Concurrent calls share a single in-flight request. |
 | `status$` | Observable of sync status: `idle` \| `syncing` \| `synced` \| `offline` \| `error`. |
+| `lastError` / `lastError$` | Message from the most recent failed pull (`null` after a successful one). |
+| `entities()` | Snapshot of each registration: `{ entity, deltaPath, lastSyncSeq, lastPullAt, lastError }`. |
+| `resetCursor(entity)` | Waits for any in-flight pull, writes `lastSyncSeq = 0` for that entity, then calls `pullDelta()`. |
+| `isStarted` | Whether `start()` has run. |
 
 ## Background and foreground
 

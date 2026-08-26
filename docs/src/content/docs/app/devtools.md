@@ -1,11 +1,11 @@
 ---
 title: Devtools
-description: Dev overlay, mock email preview, job inspector, and toast alerts
+description: Dev overlay for session, sync, Dexie, mock email, jobs, and toast alerts
 sidebar:
   order: 8
 ---
 
-Local development helpers ship with `erno-angular`: a floating overlay for sync/mail/jobs, services that hit the API’s `/dev/*` routes, and an optional toast queue.
+Local development helpers ship with `erno-angular`: a floating overlay for the running app (session, Dexie, sync, mail, jobs), services that hit the API’s `/dev/*` routes, and an optional toast queue.
 
 ## Devtools overlay
 
@@ -15,17 +15,34 @@ Add the component once in a root template (development builds only):
 <erno-devtools></erno-devtools>
 ```
 
-The overlay is a Nocturne panel docked to the bottom-right. A health dot in the header (and on the collapsed pill) turns red when sync is in error or a job has failed, amber while work is in flight, and green otherwise. Collapse it with **—**; **tall** / **short** grows the body.
+The overlay is a Nocturne panel docked to the bottom-right. A health dot in the header (and on the collapsed pill) turns red when sync is in error or a job has failed, amber while work is in flight, and green otherwise. Collapse it with **—**; **tall** / **short** grows the body. The tab strip scrolls when it does not fit.
 
 | Tab | What it shows |
 |-----|----------------|
-| **Status** | WebSocket, sync, API liveness, and queue counts; button to force a re-sync |
-| **Emails** | Mock emails captured when the API uses `email.type = "mock"`; newest first, unread until opened, click one to open it in a new tab |
+| **Status** | Network, WebSocket, sync (with the last pull error), API liveness, and queue counts. **Re-sync** pulls every entity. **simulate offline** drives `ErnoNetworkService` so sync and the socket take the offline path without Chrome’s network panel. |
+| **Auth** | Current user, access-token expiry / `ver` claim, refresh-token presence (never the raw secret). Sign in as the `erno dev` seed user (`dev@example.com` / `password` — editable because projects override `[seed]`), logout, force refresh, **drop access** (deletes `erno_access_token` so the interceptor’s 401 path can be exercised), copy user id. |
+| **Sync** | One row per registered entity (`lastSyncSeq`, last pull, last error). **reset cursor** writes seq 0 and pulls. Live log of the last 30 push events. |
+| **Data** | Local Dexie databases. `provideErno` registers the `erno` DB (`syncMeta`, `pendingMutations`). Apps attach their own stores with `registerDevtoolsDatabase(db)`. Browse tables, filter JSON rows, copy a row, export a table as a JSON file, wipe a table or the whole database (local only). |
+| **Emails** | Mock emails captured when the API uses `email.type = "mock"`; newest first, unread until opened. Verification mails get a **verify** button that calls `ErnoAuthService.verifyEmail`; password-reset mails open the reset URL. |
 | **Jobs** | Recent jobs grouped by type, with run counts, filters (`all` / `attention` / `failed`), expand for individual runs, and **retry** on a failed job |
 
-Tab badges show the inbox size, the number of job rows, and `!` on Status when sync is in error. **Clear all** empties the inbox or the job history depending on the open tab. The panel polls every few seconds so counts stay current while it is mounted.
+Tab badges show the inbox size, the number of job rows, `in` on Auth when signed in, and `!` on Status/Sync when sync is in error. **Clear all** empties the inbox or the job history depending on the open tab. The panel polls every few seconds so counts stay current while it is mounted.
 
 Visibility is gated by Angular’s `isDevMode()` so production builds do not show the panel even if the tag remains in a template.
+
+### Registering an app Dexie
+
+`ErnoDatabaseService` only holds sync cursors and the (currently unused) pending-mutation queue. Domain rows live in the app’s own Dexie. Register that instance so it appears on the Data tab:
+
+```typescript
+import { registerDevtoolsDatabase } from 'erno-angular';
+
+constructor(private todosDb: TodosDatabase) {
+  registerDevtoolsDatabase(todosDb);
+}
+```
+
+Do not open arbitrary names from `indexedDB.databases()` — opening a Dexie DB at the wrong version runs upgrades. Registration is explicit.
 
 ### Related services
 

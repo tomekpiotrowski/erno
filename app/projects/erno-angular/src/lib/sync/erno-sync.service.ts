@@ -11,6 +11,15 @@ import { ErnoNetworkService } from '../network/erno-network.service';
 
 export type SyncStatus = 'idle' | 'syncing' | 'synced' | 'offline' | 'error';
 
+/** Snapshot of one registered entity, for the devtools overlay. */
+export interface SyncEntityInfo {
+  entity: string;
+  deltaPath: string;
+  lastSyncSeq: number;
+  lastPullAt: number | null;
+  lastError: string | null;
+}
+
 /**
  * Normalized change applied to the local store.
  *
@@ -55,10 +64,22 @@ export class ErnoSyncService implements OnDestroy {
   private _status = new BehaviorSubject<SyncStatus>('idle');
   readonly status$ = this._status.asObservable();
 
+  private _lastError = new BehaviorSubject<string | null>(null);
+  readonly lastError$ = this._lastError.asObservable();
+  get lastError(): string | null {
+    return this._lastError.value;
+  }
+
   private entityHandlers = new Map<string, EntityRegistration>();
+  private entityErrors = new Map<string, string>();
+  private entityPullAt = new Map<string, number>();
   private started = false;
   private pullInFlight: Promise<void> | null = null;
   private subscriptions = new Subscription();
+
+  get isStarted(): boolean {
+    return this.started;
+  }
 
   constructor(
     @Inject(ERNO_CONFIG) private config: ErnoConfig,
@@ -135,6 +156,31 @@ export class ErnoSyncService implements OnDestroy {
     return this.pullInFlight;
   }
 
+  /** Registered entities with cursor, last pull, and last error. */
+  async entities(): Promise<SyncEntityInfo[]> {
+    const rows: SyncEntityInfo[] = [];
+    for (const [entity, reg] of this.entityHandlers) {
+      rows.push({
+        entity,
+        deltaPath: reg.deltaPath,
+        lastSyncSeq: await this.db.getLastSyncSeq(entity),
+        lastPullAt: this.entityPullAt.get(entity) ?? null,
+        lastError: this.entityErrors.get(entity) ?? null,
+      });
+    }
+    return rows;
+  }
+
+  /** Wipe the local cursor for one entity and pull from the beginning. */
+  async resetCursor(entity: string): Promise<void> {
+    // An in-flight pull already captured `since` and will write `next_since`
+    // when it finishes — wait it out, then zero, then pull from 0.
+    if (this.pullInFlight) await this.pullInFlight;
+    await this.db.setLastSyncSeq(entity, 0);
+    this.entityErrors.delete(entity);
+    await this.pullDelta();
+  }
+
   private async doPullDelta(): Promise<void> {
     if (!this.network.connected) {
       this._status.next('offline');
@@ -150,27 +196,40 @@ export class ErnoSyncService implements OnDestroy {
     this._status.next('syncing');
     try {
       for (const [entity, reg] of this.entityHandlers) {
-        const since = await this.db.getLastSyncSeq(entity);
-        const response = await firstValueFrom(
-          this.http.get<SyncDeltaResponse>(`${this.config.baseUrl}${reg.deltaPath}`, {
-            params: { since },
-          }),
-        );
+        try {
+          const since = await this.db.getLastSyncSeq(entity);
+          const response = await firstValueFrom(
+            this.http.get<SyncDeltaResponse>(`${this.config.baseUrl}${reg.deltaPath}`, {
+              params: { since },
+            }),
+          );
 
-        for (const row of response.items) {
-          await reg.handler({
-            entity,
-            id: row.id,
-            sync_seq: row.sync_seq,
-            deleted: row.deleted_at != null && row.deleted_at !== undefined,
-            data: row,
-          });
+          for (const row of response.items) {
+            await reg.handler({
+              entity,
+              id: row.id,
+              sync_seq: row.sync_seq,
+              deleted: row.deleted_at != null && row.deleted_at !== undefined,
+              data: row,
+            });
+          }
+          await this.db.setLastSyncSeq(entity, response.next_since);
+          this.entityErrors.delete(entity);
+          this.entityPullAt.set(entity, Date.now());
+        } catch (err) {
+          const msg = pullErrorMessage(err);
+          this.entityErrors.set(entity, msg);
+          this._lastError.next(`${entity}: ${msg}`);
+          throw err;
         }
-        await this.db.setLastSyncSeq(entity, response.next_since);
       }
+      this._lastError.next(null);
       this._status.next('synced');
-    } catch {
+    } catch (err) {
       this._status.next(this.network.connected ? 'error' : 'offline');
+      if (!this._lastError.value) {
+        this._lastError.next(pullErrorMessage(err));
+      }
     }
   }
 
@@ -186,4 +245,11 @@ export class ErnoSyncService implements OnDestroy {
     });
     await this.db.setLastSyncSeq(event.entity, event.sync_seq);
   }
+}
+
+function pullErrorMessage(err: unknown): string {
+  if (err && typeof err === 'object' && 'message' in err && typeof (err as { message: unknown }).message === 'string') {
+    return (err as { message: string }).message;
+  }
+  return String(err);
 }
