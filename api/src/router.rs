@@ -22,8 +22,14 @@ use crate::{
 /// outermost layer (before rate limiting) so the extension is available when
 /// `rate_limit_middleware` inspects it.
 async fn tag_rate_limit_action(mut req: Request, next: Next) -> Response {
-    let path = req.uri().path();
-    let action = if path.starts_with("/admin/api") {
+    let action = rate_limit_action_for(req.uri().path());
+    req.extensions_mut()
+        .insert(RateLimitActionExt(RateLimitAction::new(action)));
+    next.run(req).await
+}
+
+fn rate_limit_action_for(path: &str) -> &'static str {
+    if path.starts_with("/admin/api") {
         "admin"
     } else {
         match path {
@@ -38,12 +44,12 @@ async fn tag_rate_limit_action(mut req: Request, next: Next) -> Response {
             // identity-blind ceiling; the tier matched to the caller's
             // credential is applied inside the handler, which can see it.
             "/api/errors" => "error_ingest",
+            // nginx auth_request for OTLP. Exempt from IP quotas — see
+            // RateLimitAction::OTLP_AUTH.
+            "/api/otlp/auth" => RateLimitAction::OTLP_AUTH,
             _ => "default",
         }
-    };
-    req.extensions_mut()
-        .insert(RateLimitActionExt(RateLimitAction::new(action)));
-    next.run(req).await
+    }
 }
 
 pub fn router<ExtraConfig>(
@@ -175,6 +181,22 @@ mod extra_cors_tests {
             ]
         );
         assert!(parse_extra_cors_origins("").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod rate_limit_action_tests {
+    use super::rate_limit_action_for;
+    use crate::rate_limiting::RateLimitAction;
+
+    #[test]
+    fn otlp_auth_is_not_the_default_bucket() {
+        assert_eq!(
+            rate_limit_action_for("/api/otlp/auth"),
+            RateLimitAction::OTLP_AUTH
+        );
+        assert_eq!(rate_limit_action_for("/api/errors"), "error_ingest");
+        assert_eq!(rate_limit_action_for("/api/widgets"), "default");
     }
 }
 

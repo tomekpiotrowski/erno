@@ -101,6 +101,7 @@ impl RateLimitConfig {
     ///
     /// These match the action names emitted by the route-tagging middleware in
     /// `router.rs`. Any action not listed here falls back to the default tier.
+    /// `otlp_auth` is tagged but exempt in the middleware (single console-pod IP).
     fn default_actions() -> HashMap<String, ActionRateLimit> {
         let mut actions = HashMap::new();
 

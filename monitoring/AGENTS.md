@@ -73,7 +73,8 @@ it too.
 - **Two ingest credentials**: a trusted server token and a *public* browser
   token. The browser token ships in JS bundles and is a speed bump, not a
   security control. OTLP traces/logs accept only the server token
-  (`GET /api/otlp/auth` for nginx `auth_request`).
+  (`GET /api/otlp/auth` for nginx `auth_request`; that path is exempt from
+  IP rate limits because every replica shares the console pod's address).
 - **Tempo and Loki live in this deployment**, queried from the console
   (`/tempo/`, `/loki/`) the same way Prometheus is. Grafana is not shipped.
 - **Collector migrations are not in `erno_migrations()`** — they belong to this

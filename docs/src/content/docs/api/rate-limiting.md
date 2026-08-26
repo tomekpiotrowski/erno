@@ -45,6 +45,8 @@ Erno pre-configures conservative limits for sensitive auth endpoints:
 
 Any action not explicitly configured falls back to the global `default_window_secs` / `default_max_requests`.
 
+`otlp_auth` (`GET /api/otlp/auth`) is tagged but **exempt**. nginx `auth_request`s every OTLP push from the console pod, so a per-IP quota would cap ingest for the whole fleet. The Bearer server token is the control.
+
 ## Tagging routes with an action
 
 Use `RateLimitActionExt` to attach an action name to a request. The middleware reads it from request extensions:

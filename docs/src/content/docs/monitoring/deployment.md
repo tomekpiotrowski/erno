@@ -61,7 +61,8 @@ Applications **push** traces and logs to `/otlp/v1/traces` and `/otlp/v1/logs`
 on the same host, authenticated with the trusted **server** ingest token
 (`Authorization: Bearer`). The public browser token is rejected. nginx
 `auth_request`s `/api/otlp/auth` on the collector, then proxies to Tempo :4318
-or Loki :3100.
+or Loki :3100. That GET is not rate-limited: every replica shares the console
+pod's IP, so a per-IP quota would be a global ingest ceiling.
 
 ## Values that must match across the two deployments
 

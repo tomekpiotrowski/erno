@@ -107,6 +107,7 @@ and so can only ever limit by IP.
 | `error_ingest` | Per IP, identity-blind ceiling | 60/10s · 300/60s · 3000/h |
 | `error_ingest_server` | The trusted sender | 100/10s · 600/60s · 10000/h |
 | `error_ingest_browser` | Per IP | 10/10s · 30/60s · 200/h |
+| `otlp_auth` | nginx `auth_request` for Tempo/Loki ingest | **exempt** — all pushes share the console pod's IP |
 
 The browser tier is loose on purpose. A corporate NAT or a university campus
 puts hundreds of real users behind one IPv4, so a tight limit would blackhole a
