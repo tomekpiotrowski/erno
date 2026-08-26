@@ -58,7 +58,7 @@ pub fn apply(state: &mut TuiState, action: Action) {
     match action {
         Action::Up => {
             state.paused = true;
-            let max = state.visible_logs().len().saturating_sub(1);
+            let max = state.max_log_offset();
             state.log_offset = (state.log_offset + 1).min(max);
         }
         Action::Down => {
@@ -218,5 +218,46 @@ mod tests {
     #[test]
     fn c_is_copy() {
         assert_eq!(interpret(key(KeyCode::Char('c'))), Action::Copy);
+    }
+
+    fn log(i: usize) -> crate::commands::dev::log::LogLine {
+        crate::commands::dev::log::LogLine {
+            label: "api".into(),
+            line: format!("line-{i}"),
+        }
+    }
+
+    #[test]
+    fn up_does_not_eat_lines_that_fit() {
+        let mut state = TuiState::new("x", &DevUrls::defaults(true, false, false));
+        state.log_view_height = 20;
+        state.logs = (0..5).map(log).collect();
+        apply(&mut state, interpret(key(KeyCode::Up)));
+        assert!(state.paused);
+        assert_eq!(state.log_offset, 0);
+        apply(&mut state, interpret(key(KeyCode::Up)));
+        assert_eq!(state.log_offset, 0);
+    }
+
+    #[test]
+    fn up_scrolls_only_through_overflow_and_down_returns_to_follow() {
+        let mut state = TuiState::new("x", &DevUrls::defaults(true, false, false));
+        state.log_view_height = 4;
+        state.logs = (0..10).map(log).collect();
+        apply(&mut state, interpret(key(KeyCode::Up)));
+        assert!(state.paused);
+        assert_eq!(state.log_offset, 1);
+        for _ in 0..20 {
+            apply(&mut state, interpret(key(KeyCode::Up)));
+        }
+        assert_eq!(state.log_offset, 6);
+        apply(&mut state, interpret(key(KeyCode::Down)));
+        assert_eq!(state.log_offset, 5);
+        while state.log_offset > 0 {
+            apply(&mut state, interpret(key(KeyCode::Down)));
+        }
+        apply(&mut state, interpret(key(KeyCode::Down)));
+        assert_eq!(state.log_offset, 0);
+        assert!(!state.paused);
     }
 }

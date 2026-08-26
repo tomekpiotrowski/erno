@@ -26,8 +26,11 @@ pub struct TuiState {
     pub logs: Vec<LogLine>,
     /// `None` means every service (`0`). Otherwise an index into `services`.
     pub focus: Option<usize>,
-    /// How many lines above the newest to keep the cursor. `0` is follow.
+    /// Newest log rows sitting below the pane. `0` is follow (pinned to the end).
     pub log_offset: usize,
+    /// Inner height of the LOG pane, set from the terminal size each tick.
+    /// Caps `log_offset` so ↑ cannot hide lines that still fit.
+    pub log_view_height: usize,
     pub paused: bool,
     pub failures_only: bool,
     pub quit: bool,
@@ -81,6 +84,7 @@ impl TuiState {
             logs: Vec::new(),
             focus: None,
             log_offset: 0,
+            log_view_height: 0,
             paused: false,
             failures_only: false,
             quit: false,
@@ -121,6 +125,21 @@ impl TuiState {
     pub fn ingest_logs(&mut self, lines: Vec<LogLine>) {
         if !self.paused {
             self.logs = lines;
+        }
+    }
+
+    pub fn log_row_count(&self) -> usize {
+        self.visible_traces().len() + self.visible_logs().len()
+    }
+
+    pub fn max_log_offset(&self) -> usize {
+        self.log_row_count().saturating_sub(self.log_view_height)
+    }
+
+    pub fn clamp_log_offset(&mut self) {
+        let max = self.max_log_offset();
+        if self.log_offset > max {
+            self.log_offset = max;
         }
     }
 
@@ -192,6 +211,18 @@ pub fn service_meta(name: &str) -> (&'static str, &'static str) {
         "mon" => ("cargo run", "monitoring/"),
         _ => ("", ""),
     }
+}
+
+/// Visible `[start, end)` of a follow-the-bottom log.
+///
+/// `offset` is how many newest rows sit below the window (`0` = follow).
+/// The window never shrinks below `min(row_count, view_h)`: when the lines
+/// fit, offset is ignored; when they overflow, the pane stays full.
+pub fn log_window(row_count: usize, view_h: usize, offset: usize) -> (usize, usize) {
+    let offset = offset.min(row_count.saturating_sub(view_h));
+    let end = row_count.saturating_sub(offset);
+    let start = end.saturating_sub(view_h);
+    (start, end)
 }
 
 pub fn fmt_elapsed(secs: u64) -> String {
@@ -321,5 +352,42 @@ mod tests {
         state.focus = None;
         state.logs.clear();
         assert!(state.visible_log_text().is_empty());
+    }
+
+    #[test]
+    fn log_window_keeps_every_line_when_they_fit() {
+        assert_eq!(log_window(5, 20, 0), (0, 5));
+        assert_eq!(log_window(5, 20, 1), (0, 5));
+        assert_eq!(log_window(5, 20, 99), (0, 5));
+        assert_eq!(log_window(0, 20, 3), (0, 0));
+    }
+
+    #[test]
+    fn log_window_scrolls_the_newest_out_only_when_the_pane_is_full() {
+        assert_eq!(log_window(10, 4, 0), (6, 10));
+        assert_eq!(log_window(10, 4, 1), (5, 9));
+        assert_eq!(log_window(10, 4, 6), (0, 4));
+        assert_eq!(log_window(10, 4, 99), (0, 4));
+    }
+
+    fn log(label: &str, line: &str) -> LogLine {
+        LogLine {
+            label: label.into(),
+            line: line.into(),
+        }
+    }
+
+    #[test]
+    fn max_log_offset_is_the_overflow_not_the_line_count() {
+        let urls = DevUrls::defaults(true, true, true);
+        let mut state = TuiState::new("teryon", &urls);
+        state.log_view_height = 8;
+        state.logs = (0..5).map(|i| log("api", &format!("l{i}"))).collect();
+        assert_eq!(state.max_log_offset(), 0);
+        state.logs = (0..20).map(|i| log("api", &format!("l{i}"))).collect();
+        assert_eq!(state.max_log_offset(), 12);
+        state.log_offset = 99;
+        state.clamp_log_offset();
+        assert_eq!(state.log_offset, 12);
     }
 }

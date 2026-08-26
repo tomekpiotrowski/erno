@@ -155,6 +155,10 @@ pub async fn run(
     let mut terminal =
         Terminal::new(backend).map_err(|e| format!("could not start the dashboard: {e}"))?;
     loop {
+        if let Ok(size) = terminal.size() {
+            state.log_view_height = draw::log_inner_height(size.width, size.height);
+            state.clamp_log_offset();
+        }
         while event::poll(Duration::ZERO).map_err(|e| e.to_string())? {
             if let Event::Key(key) = event::read().map_err(|e| e.to_string())? {
                 if key.kind != KeyEventKind::Press {

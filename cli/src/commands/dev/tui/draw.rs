@@ -5,7 +5,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
 use super::prom::spark;
-use super::state::{trace_belongs_to, LensMode, ServiceRow, TuiState};
+use super::state::{log_window, trace_belongs_to, LensMode, ServiceRow, TuiState};
 use super::tempo::{flatten, n1_insight};
 
 const ACCENT: Color = Color::Rgb(145, 132, 217);
@@ -14,12 +14,14 @@ const OK: Color = Color::Rgb(94, 184, 158);
 const WARN: Color = Color::Rgb(201, 168, 92);
 const ERR: Color = Color::Rgb(196, 92, 78);
 
-pub fn render(frame: &mut Frame, state: &TuiState) {
-    frame.render_widget(Clear, frame.area());
-    let area = frame.area();
-    let show_wire = area.width >= 152 && area.height >= 24;
+fn show_wire(area: Rect) -> bool {
+    area.width >= 152 && area.height >= 24
+}
+
+fn split_layout(area: Rect) -> (Rect, Rect, Option<Rect>, Rect) {
+    let wire = show_wire(area);
     let mut vert = vec![Constraint::Length(3), Constraint::Min(8)];
-    if show_wire {
+    if wire {
         vert.push(Constraint::Length(8));
     }
     vert.push(Constraint::Length(2));
@@ -27,12 +29,30 @@ pub fn render(frame: &mut Frame, state: &TuiState) {
         .direction(Direction::Vertical)
         .constraints(vert)
         .split(area);
+    let wire_rect = if wire { Some(chunks[2]) } else { None };
+    let footer = chunks[chunks.len() - 1];
+    (chunks[0], chunks[1], wire_rect, footer)
+}
 
-    render_header(frame, chunks[0], state);
+/// Inner rows of the LOG pane for `area`. Kept in lockstep with `render`.
+pub fn log_inner_height(width: u16, height: u16) -> usize {
+    let area = Rect {
+        x: 0,
+        y: 0,
+        width,
+        height,
+    };
+    split_layout(area).1.height.saturating_sub(2) as usize
+}
+
+pub fn render(frame: &mut Frame, state: &TuiState) {
+    frame.render_widget(Clear, frame.area());
+    let area = frame.area();
+    let (header, body, wire, footer) = split_layout(area);
+    render_header(frame, header, state);
 
     let wide = area.width >= 152;
     let mid = area.width >= 100;
-    let body = chunks[1];
     if wide {
         let cols = Layout::default()
             .direction(Direction::Horizontal)
@@ -56,12 +76,10 @@ pub fn render(frame: &mut Frame, state: &TuiState) {
         render_log(frame, body, state);
     }
 
-    let mut idx = 2;
-    if show_wire {
-        render_wire(frame, chunks[idx], state);
-        idx += 1;
+    if let Some(wire) = wire {
+        render_wire(frame, wire, state);
     }
-    render_footer(frame, chunks[idx], state, wide);
+    render_footer(frame, footer, state, wide);
 }
 
 fn render_header(frame: &mut Frame, area: Rect, state: &TuiState) {
@@ -192,8 +210,7 @@ fn render_log(frame: &mut Frame, area: Rect, state: &TuiState) {
     for l in state.visible_logs() {
         rows.push(log_row(&l.label, &l.line, None, inner_w));
     }
-    let end = rows.len().saturating_sub(state.log_offset);
-    let start = end.saturating_sub(inner_h);
+    let (start, end) = log_window(rows.len(), inner_h, state.log_offset);
     let mut shown = if start < end {
         rows[start..end].to_vec()
     } else {
@@ -678,5 +695,73 @@ mod tests {
             "api trace cells survived the switch:\n{second}"
         );
         assert!(!second.contains("compiling leftover"), "{second}");
+    }
+
+    #[test]
+    fn log_offset_does_not_drop_lines_that_fit() {
+        let urls = DevUrls::defaults(true, true, true);
+        let mut state = TuiState::new("teryon", &urls);
+        state.logs = vec![
+            LogLine {
+                label: "api".into(),
+                line: "UNIQUE-FIRST".into(),
+            },
+            LogLine {
+                label: "api".into(),
+                line: "UNIQUE-MIDDLE".into(),
+            },
+            LogLine {
+                label: "api".into(),
+                line: "UNIQUE-LAST".into(),
+            },
+        ];
+        state.log_offset = 2;
+        let backend = TestBackend::new(160, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, &state)).unwrap();
+        let text = buffer_text(terminal.backend());
+        assert!(text.contains("UNIQUE-FIRST"), "{text}");
+        assert!(text.contains("UNIQUE-MIDDLE"), "{text}");
+        assert!(
+            text.contains("UNIQUE-LAST"),
+            "↑ hid a line that still fit:\n{text}"
+        );
+    }
+
+    #[test]
+    fn overflowing_log_scrolls_newest_out_from_the_bottom() {
+        let urls = DevUrls::defaults(true, true, true);
+        let mut state = TuiState::new("teryon", &urls);
+        let h = log_inner_height(160, 40);
+        assert!(h > 4, "expected a tall log pane, got {h}");
+        let n = h + 3;
+        state.logs = (0..n)
+            .map(|i| LogLine {
+                label: "api".into(),
+                line: format!("OVERFLOW-LINE-{i:02}"),
+            })
+            .collect();
+        let newest = format!("OVERFLOW-LINE-{:02}", n - 1);
+        let backend = TestBackend::new(160, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, &state)).unwrap();
+        let follow = buffer_text(terminal.backend());
+        assert!(follow.contains(&newest), "{follow}");
+        assert!(
+            !follow.contains("OVERFLOW-LINE-00"),
+            "follow should hide the oldest:\n{follow}"
+        );
+
+        state.log_offset = 1;
+        terminal.draw(|f| render(f, &state)).unwrap();
+        let scrolled = buffer_text(terminal.backend());
+        assert!(
+            !scrolled.contains(&newest),
+            "newest should leave the bottom on ↑:\n{scrolled}"
+        );
+        assert!(
+            scrolled.contains("OVERFLOW-LINE-02"),
+            "older lines should enter from the top:\n{scrolled}"
+        );
     }
 }
