@@ -82,6 +82,7 @@ Colour is enabled when stderr is a terminal that understands ANSI, and disabled 
 
 ```sh
 erno dev
+erno dev --no-ui
 erno dev --verbose
 erno dev --api
 erno dev --app --www
@@ -95,6 +96,21 @@ erno dev --all
 ```
 
 Starts the project’s dev servers (`api/` + `app/`, plus `www/` when present). Walks up from the current directory looking for `api/Cargo.toml`, so you can run it from `api/`, `app/`, or any subdirectory. Child tools are told to keep colour even though their stdout is piped — and told to drop it when you pass `--no-color`.
+
+On an interactive colour TTY, `erno dev` opens a dashboard instead of the pinned banner. It queries Prometheus, Tempo and Loki (the same stores as the monitoring console) plus `/dev/emails`, `/dev/jobs` and `/dev/migrations`. `--no-ui`, `--verbose`, `--quiet`, `--no-color`, `ERNO_STICKY=0`, a pipe, and terminals smaller than 80×24 keep the banner. `q`, Esc, and Ctrl+C quit and stop the children. A hard kill (`kill -9`) can leave the terminal in the alternate screen; `reset` recovers.
+
+| Key | Action |
+|-----|--------|
+| `1–9` / `0` | Focus a service / all |
+| `↑↓` | Scroll the log (pauses follow) |
+| `⏎` | Open the selected Tempo trace in the lens |
+| `r` / `o` | Restart / open the focused service URL |
+| `s` / `f` | Slowest traces / failures only |
+| `m` / `M` | Apply / revert one migration |
+| `e` | Open `$EDITOR` at a panic `file:line` |
+| `E` / `J` / `Tab` | Mail / jobs / cycle lens |
+| `w` | Toggle wire window 30s ↔ 5m |
+| `q` / Esc / Ctrl+C | Quit |
 
 By default only errors and ready events are printed; the full multiplex is written to `.erno/dev.log`. Pass the global `--verbose` (or `-v`) to stream every child line, prefixed by service (`[api]`, `[app]`, `[www]`). The `.erno/dev.log` copy is always uncoloured, so it greps cleanly.
 

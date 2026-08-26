@@ -58,6 +58,11 @@ static VERBOSE: AtomicBool = AtomicBool::new(false);
 /// The pinned region lives on stderr, so a stdout write only has to dodge it
 /// when both land on the same screen.
 static STDOUT_TTY: AtomicBool = AtomicBool::new(false);
+/// Called from [`fatal`] so the TUI can leave alt-screen even when we `exit`
+/// without unwinding (child spawn failures).
+static FATAL_HOOK: Mutex<Option<fn()>> = Mutex::new(None);
+/// When the TUI owns the screen, narration on stderr would scramble alt-screen.
+static TUI_LIVE: AtomicBool = AtomicBool::new(false);
 
 /// Called once from `main`, before any output. The values are immutable
 /// afterwards, which is why they live here rather than being threaded through
@@ -85,6 +90,22 @@ pub fn quiet() -> bool {
 
 pub fn verbose() -> bool {
     VERBOSE.load(Ordering::Relaxed)
+}
+
+/// Install a hook that [`fatal`] runs before printing. The TUI uses this to
+/// leave the alternate screen when a child spawn calls `exit` without dropping
+/// its guard. Pass `None` to clear.
+pub fn set_fatal_hook(hook: Option<fn()>) {
+    *FATAL_HOOK.lock().unwrap_or_else(PoisonError::into_inner) = hook;
+}
+
+/// Suppress `emit` / `prefixed` / `info` while the dashboard holds alt-screen.
+pub fn set_tui_live(live: bool) {
+    TUI_LIVE.store(live, Ordering::Relaxed);
+}
+
+pub fn tui_live() -> bool {
+    TUI_LIVE.load(Ordering::Relaxed)
 }
 
 /// `--no-color` wins, then `NO_COLOR`, then `CLICOLOR_FORCE`, then "is stderr a
@@ -239,6 +260,9 @@ pub enum Stream {
 }
 
 pub fn emit(stream: Stream, line: &str) {
+    if tui_live() {
+        return;
+    }
     frame(&mut region(), stream, &[line]);
 }
 
@@ -248,6 +272,9 @@ pub fn emit(stream: Stream, line: &str) {
 /// a banner or a row block, which it used to. Anything rendered as a block
 /// should go out as one.
 pub fn emit_block(stream: Stream, text: &str) {
+    if tui_live() {
+        return;
+    }
     let lines: Vec<&str> = text.lines().collect();
     frame(&mut region(), stream, &lines);
 }
@@ -829,6 +856,9 @@ pub fn render_fatal(face: Face, message: &str) -> String {
 /// screen, and this is also the guard for the non-unwinding paths — `ui::abort`
 /// and `dev::process`'s spawn failure both `exit` without dropping [`Pinned`].
 pub fn fatal(message: &str) {
+    if let Some(hook) = *FATAL_HOOK.lock().unwrap_or_else(PoisonError::into_inner) {
+        hook();
+    }
     clear_region();
     emit_block(Stream::Err, &render_fatal(Face::current(), message));
 }

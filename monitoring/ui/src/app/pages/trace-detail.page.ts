@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
-import { TempoService, TraceSpan } from '../core/tempo';
+import { n1Insight, TempoService, TraceSpan } from '../core/tempo';
 import { LokiService, LogLine, buildLogql } from '../core/loki';
 
 @Component({
@@ -43,9 +43,17 @@ import { LokiService, LogLine, buildLogql } from '../core/loki';
                     <p class="muted mono attrs">{{ attrs }}</p>
                   }
                 }
+                @for (ev of row.span.events; track $index) {
+                  @if (ev.attributes['db.statement'] || ev.name) {
+                    <p class="muted mono attrs">{{ ev.attributes['db.statement'] || ev.name }}</p>
+                  }
+                }
               </div>
             }
           </div>
+        }
+        @if (insight()) {
+          <p class="muted">↳ {{ insight() }}</p>
         }
       </section>
 
@@ -90,6 +98,7 @@ export class TraceDetailPage {
   error = signal('');
   logError = signal('');
   rows = computed(() => flatten(this.roots()));
+  insight = computed(() => n1Insight(this.roots()));
 
   constructor() {
     if (!this.id) {

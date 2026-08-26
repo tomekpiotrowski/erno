@@ -60,4 +60,9 @@ The public browser token is rejected on this path. Traces are server-side.
 
 The Performance page keeps every PromQL block and adds a Slow traces table
 (`duration > 500ms` in the selected window). Clicking a row opens an indented
-span tree. From there, Logs for this trace queries Loki by `trace_id`.
+span tree. sqlx query events on a span are listed, and eight or more similar
+statements become an N+1 callout. From there, Logs for this trace queries Loki
+by `trace_id`.
+
+`erno dev`'s TTY dashboard is a second client of the same Tempo instance
+(`http://127.0.0.1:3200`). It does not add a `/dev/traces` store.

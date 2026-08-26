@@ -18,7 +18,7 @@ cargo install --path .                   # install globally as `erno`
 | `erno doctor` | Checks the local environment: Rust, Node, Angular CLI, PostgreSQL, `~/.erno/config.toml`, admin DB access |
 | `erno new <name>` | Scaffolds a full-stack Erno project (Rust API + Ionic Angular standalone app + Astro www) |
 | `erno upgrade` | Inventories Erno-managed packages and runs official migrators (`ng update`, `@ionic/migrate`) toward this CLI generation |
-| `erno dev` | Starts api + app + www dev servers, readiness banner, `--ios`/`--android` live reload (`--target <id>` picks the device) |
+| `erno dev` | Starts api + app + www dev servers, `--ios`/`--android` live reload (`--target <id>` picks the device). On a colour TTY this is an interactive dashboard; `--no-ui` keeps the pinned banner |
 | `erno dev` | Also starts Prometheus, Tempo and Loki (if installed), `admin/` on :4300, and — when `monitoring/` is present — the collector on :3001 and its console on :4400 (`--no-monitoring` to skip); `--no-prometheus` / `--no-tempo` / `--no-loki` skip those binaries; `--package` / `--all` add `[[package.dev]]` extras; every banner row is probed |
 | `erno deploy init` | Scaffolds Docker/deploy files; generates admin password hash for production |
 | `erno deploy setup` | Once per cluster: applies cert-manager and ingress-nginx from their static YAML (no Helm) |
@@ -132,7 +132,8 @@ ALTER USER erno CREATEDB;
 | `src/commands/setup.rs` | Interactive config writer; validates admin connection before saving |
 | `src/commands/doctor.rs` | Environment checks — each returns a `CheckResult` (a `ui::Row` plus whether it is required) |
 | `src/commands/new.rs` | Project scaffolding — inline templates, directory creation, database creation |
-| `src/commands/dev/` | `erno dev` — process multiplexer, readiness banner, quiet logs |
+| `src/commands/dev/` | `erno dev` — process multiplexer, TUI dashboard, readiness banner, quiet logs |
+| `src/commands/dev/tui/` | Interactive dashboard (alt screen + raw mode). The banner path never goes through here |
 | `src/commands/packages.rs` | `erno.toml` parsing, package selection, and the sequential phase runner shared by build/lint/test |
 | `src/commands/build.rs` | `erno build` — runs the `build` phase |
 | `src/commands/lint.rs` | `erno lint` — runs the `lint` phase, with `--fix` |
@@ -208,7 +209,9 @@ erno dev --no-color / -q / -v / ERNO_STICKY=0 / TERM=dumb   # fallback in all fi
 
 ### The pinned region
 
-`erno dev` pins its status banner to the last rows of the terminal and redraws it in place as services become ready, with logs scrolling above it. This is the only cursor control in the CLI, it lives entirely in `ui.rs`, and it is stderr-only.
+`erno dev` on a colour TTY opens the interactive dashboard in `commands/dev/tui/` (alternate screen + raw mode). Pipes, `--quiet`, `--verbose`, `--no-color`, `--no-ui`, `ERNO_STICKY=0`, and terminals smaller than 80×24 keep the pinned banner below. A SIGKILL while the dashboard is up can leave the terminal in alt-screen; `reset` recovers. `ui::fatal` restores via `set_fatal_hook`.
+
+The **banner path** pins its status to the last rows of the terminal and redraws it in place as services become ready, with logs scrolling above it. That cursor control lives entirely in `ui.rs`, and it is stderr-only.
 
 - **`ui::pin(lines) -> Option<Pinned>`** starts it; `ui::repin(lines)` replaces the content; dropping the `Pinned` guard erases the region and leaves its final contents in the scrollback. The guard is modelled on `DevLock` — it is what makes an early `?` safe. `ui::fatal` also clears the region, which covers the paths that `exit` without unwinding.
 - **The banner is services only.** Every row is a service that was started, with a URL and a readiness state — `www`, `app`, `api`, `prom`, `admin`. The API's `/dev/emails` and `/dev/jobs` links used to sit below a blank line as stateless rows; they were three rows of a pinned region spent on two URLs that never change, and they are gone. `admin`'s URL is `dev::ADMIN_URL`, which has to agree with the `ng serve --port 4300` in `admin/package.json`, and it is resolved before the banner is pinned because the region's height cannot change afterwards.
@@ -220,11 +223,13 @@ erno dev --no-color / -q / -v / ERNO_STICKY=0 / TERM=dumb   # fallback in all fi
 
 ### Deliberate non-goals
 
-The escape vocabulary is exactly two sequences — cursor-up and erase-to-end-of-display. No alternate screen, no raw mode, no cursor hiding, no spinners, no `indicatif`. A SIGKILL therefore leaves the terminal in a completely normal state, and every renderer stays a pure function.
+**Banner path:** the escape vocabulary is exactly two sequences — cursor-up and erase-to-end-of-display. No alternate screen, no raw mode, no cursor hiding, no spinners, no `indicatif`. A SIGKILL therefore leaves the terminal in a completely normal state, and every renderer stays a pure function.
+
+**TUI path:** alternate screen + raw mode, restored on `Drop` and from `ui::fatal`. Draw functions stay pure (`ratatui::TestBackend`). SIGKILL may require `reset`.
 
 ## Architecture notes
 
-- **No dependency on `api/`**: the CLI does not depend on the `erno` library crate. Admin uses `reqwest` + `ratatui` as an HTTP client. Keeping it decoupled avoids version skew and circular concerns.
+- **No dependency on `api/`**: the CLI does not depend on the `erno` library crate. It talks to the running API, Prometheus, Tempo and Loki over HTTP (`reqwest`). The TUI is `ratatui`. Keeping it decoupled avoids version skew and circular concerns.
 - **One manifest, three sequential commands**: `build`, `lint`, and `test` differ only in which phase they run and whether `--fix` applies. The shared engine lives in `packages.rs`; the command modules are thin. `test.rs` is the only one that needs more, because the e2e package is orchestrated rather than shelled out — it passes a callback that `run_phase` gives first refusal on each package. `erno dev` also reads the manifest, but only for `[[package.dev]]` children of the multiplexer.
 - **Templates are inline strings**: `new.rs` holds all scaffold templates as Rust string constants/functions. `{{name}}` is substituted via `.replace()` — no template engine dependency.
 - **`erno upgrade` is an orchestrator**: scanners list Erno-managed packages; official tools (`ng update` one major at a time, `@ionic/migrate`) do the rewriting. Targets (`TARGET_ANGULAR_MAJOR`, `TARGET_IONIC_MAJOR`) are this CLI generation. Children run with `CI=true`.

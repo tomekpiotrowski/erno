@@ -89,6 +89,16 @@ cargo run -- db reset
 
 `db reset` wipes objects inside the existing database and reapplies every migration. It does not `DROP DATABASE`, so it works when the app role is not the database owner. `db migrate reset` instead rolls migrations back through their `down` methods, which fails if a migration is irreversible.
 
+In development and test, the running API also serves:
+
+| Method | Path | Effect |
+|--------|------|--------|
+| `GET` | `/dev/migrations` | `{ head, applied, pending }` |
+| `POST` | `/dev/migrations/up` | Apply one pending migration |
+| `POST` | `/dev/migrations/down` | Revert one applied migration |
+
+These are live against the process's pool. In-flight requests can fail across a schema change. Reset/reapply are not exposed. Production returns 404. `/dev/jobs` is available whenever `/dev/migrations` is (not only when email is mock).
+
 ## Test utilities
 
 Request-spec helpers (`setup_test`, factories, `TestUtils`) live behind the `test-utils` feature. They boot from your [`BootConfig`](/api/boot/) and wrap each example in a rolled-back transaction. See **[Testing](/api/testing/)** for the full guide.

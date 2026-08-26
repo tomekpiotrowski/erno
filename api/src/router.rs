@@ -71,6 +71,7 @@ where
     let metrics_path = app.config.metrics.path.clone();
     // Mock inbox is for local/test only. Production must never expose it, even
     // if someone sets `email.type = "mock"` by mistake.
+    let expose_dev = expose_dev(app.environment);
     let expose_dev_inbox = expose_dev_inbox(&app.config.email, app.environment);
 
     // WebSocket route needs App state resolved before merging into the rate-limited group
@@ -124,8 +125,11 @@ where
         );
     }
 
+    if expose_dev {
+        base = base.merge(dev::router::jobs_router(app_for_dev.clone()));
+    }
     if expose_dev_inbox {
-        base = base.merge(dev::router::dev_router(app_for_dev));
+        base = base.merge(dev::router::email_router(app_for_dev));
     }
 
     if !cors_origins.is_empty() {
@@ -154,9 +158,12 @@ pub fn cors_origin_list(configured: &[String]) -> Vec<HeaderValue> {
         .collect()
 }
 
+fn expose_dev(environment: Environment) -> bool {
+    matches!(environment, Environment::Development | Environment::Test)
+}
+
 fn expose_dev_inbox(email: &EmailConfig, environment: Environment) -> bool {
-    matches!(email, EmailConfig::Mock)
-        && matches!(environment, Environment::Development | Environment::Test)
+    matches!(email, EmailConfig::Mock) && expose_dev(environment)
 }
 
 pub fn parse_extra_cors_origins(raw: &str) -> Vec<String> {
@@ -322,6 +329,46 @@ mod dev_inbox_tests {
         let server = TestServer::new(router(app, empty_router)).expect("test server");
         assert_eq!(server.get("/dev/emails").await.status_code(), 404);
         assert_eq!(server.get("/dev/jobs").await.status_code(), 404);
+        assert_eq!(server.get("/dev/migrations").await.status_code(), 404);
+    }
+
+    #[tokio::test]
+    async fn development_serves_jobs_and_migrations_without_mock_mail() {
+        let t = setup_test::<Migrator, _>(test_boot(empty_router), no_fixtures).await;
+        let mut config = t.config.clone();
+        config.email = EmailConfig::Smtp {
+            host: "localhost".into(),
+            port: 25,
+            sender: "app@example.com".parse().unwrap(),
+            username: None,
+            password: None,
+            use_tls: false,
+        };
+        let app = App {
+            config,
+            environment: Environment::Development,
+            db: t.db.clone(),
+            mailer: t.mailer.clone(),
+            job_queue: t.job_queue.clone(),
+            sync_queue: SyncQueue::mock(),
+            sync_registry: Arc::new(SyncRegistry::new()),
+            rate_limit_state: RateLimitState::new(t.config.rate_limiting.clone()),
+            websocket_connections: Connections::new(),
+            storage: FileStorage::mock(),
+            prometheus_handle: setup_metrics(),
+            metrics_collectors: Arc::new(CollectorRegistry::default()),
+            job_failure_handler: None,
+            user_data_deleter: None,
+            error_reporter: crate::error_reporting::reporter::ErrorReporter::disabled(),
+        };
+        let server = TestServer::new(router(app, empty_router)).expect("test server");
+        assert_eq!(server.get("/dev/jobs").await.status_code(), 200);
+        assert_eq!(server.get("/dev/migrations").await.status_code(), 200);
+        assert_eq!(server.get("/dev/emails").await.status_code(), 404);
+        let status = server.get("/dev/migrations").await;
+        let body: serde_json::Value = status.json();
+        assert!(body.get("applied").is_some(), "{body}");
+        assert!(body.get("pending").is_some(), "{body}");
     }
 
     #[tokio::test]

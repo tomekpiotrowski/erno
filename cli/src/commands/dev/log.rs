@@ -1,14 +1,26 @@
+use std::collections::VecDeque;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use crate::ui;
+
+const RING: usize = 200;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LogLine {
+    pub label: String,
+    pub line: String,
+}
 
 pub struct LogSink {
     verbose: bool,
     file: Option<Mutex<File>>,
     path: Option<PathBuf>,
+    recent: Mutex<VecDeque<LogLine>>,
+    capture_only: AtomicBool,
 }
 
 impl LogSink {
@@ -31,11 +43,26 @@ impl LogSink {
             verbose,
             file,
             path: opened.then_some(path),
+            recent: Mutex::new(VecDeque::new()),
+            capture_only: AtomicBool::new(false),
         }
     }
 
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
+    }
+
+    /// The TUI owns the screen: keep writing the file and the ring, but do not
+    /// print. Prompts and errors still land in the log pane.
+    pub fn set_capture_only(&self, yes: bool) {
+        self.capture_only.store(yes, Ordering::Relaxed);
+    }
+
+    pub fn recent(&self) -> Vec<LogLine> {
+        self.recent
+            .lock()
+            .map(|g| g.iter().cloned().collect())
+            .unwrap_or_default()
     }
 
     pub fn write_line(&self, stream: ui::Stream, label: &str, line: &str) {
@@ -44,6 +71,18 @@ impl LogSink {
                 // The file copy stays uncoloured so it greps cleanly.
                 let _ = writeln!(f, "[{label}] {line}");
             }
+        }
+        if let Ok(mut q) = self.recent.lock() {
+            if q.len() >= RING {
+                q.pop_front();
+            }
+            q.push_back(LogLine {
+                label: label.to_string(),
+                line: line.to_string(),
+            });
+        }
+        if self.capture_only.load(Ordering::Relaxed) {
+            return;
         }
         if should_print_line(line, self.verbose) {
             ui::prefixed(stream, label, line);
@@ -83,7 +122,7 @@ fn is_prompt_line(line: &str) -> bool {
 // The `✖` here comes from the `api` crate's own output, not from this CLI —
 // the CLI's own icons are a separate set, and text it only forwards is not
 // ours to restyle. Changing this means changing `api/`.
-fn is_error_line(line: &str) -> bool {
+pub fn is_error_line(line: &str) -> bool {
     let plain = ui::strip_ansi(line);
     let lower = plain.to_ascii_lowercase();
     lower.contains("error")
@@ -109,6 +148,21 @@ mod tests {
         assert!(should_print_line("error[E0433]: failed to resolve", false));
         assert!(should_print_line("thread panicked at foo.rs", false));
         assert!(should_print_line("\u{1b}[31mERROR\u{1b}[0m boom", false));
+    }
+
+    #[test]
+    fn capture_only_keeps_the_ring_and_stays_quiet() {
+        let dir = std::env::temp_dir().join(format!("erno-log-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let sink = LogSink::new(&dir);
+        sink.set_capture_only(true);
+        sink.write_line(ui::Stream::Err, "api", "hello");
+        sink.write_line(ui::Stream::Err, "api", "error: boom");
+        let recent = sink.recent();
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].label, "api");
+        assert_eq!(recent[1].line, "error: boom");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -10,6 +10,11 @@ export interface TraceHit {
   durationMs: number;
 }
 
+export interface SpanEvent {
+  name: string;
+  attributes: Record<string, string>;
+}
+
 export interface TraceSpan {
   id: string;
   parentId: string;
@@ -19,6 +24,7 @@ export interface TraceSpan {
   startMs: number;
   status: string;
   attributes: Record<string, string>;
+  events: SpanEvent[];
   children: TraceSpan[];
 }
 
@@ -82,6 +88,14 @@ export function toTree(res: TempoTraceResponse): TraceSpan[] {
               .map((a) => [a.key, otelString(a)] as const)
               .filter(([, v]) => v !== ''),
           ),
+          events: (span.events ?? []).map((e) => ({
+            name: e.name ?? '',
+            attributes: Object.fromEntries(
+              (e.attributes ?? [])
+                .map((a) => [a.key, otelString(a)] as const)
+                .filter(([, v]) => v !== ''),
+            ),
+          })),
         });
       }
     }
@@ -89,10 +103,45 @@ export function toTree(res: TempoTraceResponse): TraceSpan[] {
   return nest(flat);
 }
 
+export function n1Insight(spans: TraceSpan[]): string | null {
+  const counts = new Map<string, number>();
+  const walk = (nodes: TraceSpan[]) => {
+    for (const n of nodes) {
+      for (const e of n.events ?? []) {
+        const sql = e.attributes['db.statement'] || (looksSql(e.name) ? e.name : '');
+        if (!sql) continue;
+        const key = normalizeSql(sql);
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+      walk(n.children);
+    }
+  };
+  walk(spans);
+  let best: [string, number] | null = null;
+  for (const [sql, n] of counts) {
+    if (!best || n > best[1]) best = [sql, n];
+  }
+  if (!best || best[1] < 8) return null;
+  return `${best[1]} similar queries · ${best[0]}`;
+}
+
+function looksSql(s: string): boolean {
+  const u = s.trimStart().toUpperCase();
+  return u.startsWith('SELECT') || u.startsWith('INSERT') || u.startsWith('UPDATE') || u.startsWith('DELETE');
+}
+
+function normalizeSql(sql: string): string {
+  return sql
+    .replace(/'[^']*'/g, '?')
+    .replace(/\b\d+\b/g, '?')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function nest(flat: Omit<TraceSpan, 'children'>[]): TraceSpan[] {
   const byId = new Map<string, TraceSpan>();
   for (const s of flat) {
-    byId.set(s.id, { ...s, children: [] });
+    byId.set(s.id, { ...s, events: s.events ?? [], children: [] });
   }
   const roots: TraceSpan[] = [];
   for (const node of byId.values()) {
@@ -178,4 +227,5 @@ interface OtelSpan {
   endTimeUnixNano?: string | number;
   status?: { code?: number | string };
   attributes?: OtelAttribute[];
+  events?: { name?: string; attributes?: OtelAttribute[] }[];
 }

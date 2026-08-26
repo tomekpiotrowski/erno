@@ -13,6 +13,7 @@ mod prometheus;
 mod seed;
 mod selection;
 mod tempo;
+mod tui;
 mod watch;
 
 use std::sync::Arc;
@@ -77,6 +78,9 @@ pub struct DevArgs {
     /// Start every `[[package.dev]]`, including `default = false`
     #[arg(long)]
     pub all: bool,
+    /// Keep the pinned banner instead of the interactive dashboard
+    #[arg(long)]
+    pub no_ui: bool,
 }
 
 pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) -> ui::Cmd {
@@ -240,11 +244,17 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) -> ui::
         }
     }
 
+    let use_tui = tui::TuiGate::from_env(args.no_ui).should_start();
+    if use_tui {
+        sink.set_capture_only(true);
+    }
+
     // Held for the lifetime of the command like `_lock` above: its `Drop` takes
     // the pinned banner off the screen, which is why the `?`s below are safe.
     // `None` means this terminal cannot pin, so the banner scrolled and the
-    // readiness watcher narrates each change as a row instead.
-    let banner = banner::start(&urls);
+    // readiness watcher narrates each change as a row instead. The TUI path
+    // skips the banner entirely.
+    let banner = if use_tui { None } else { banner::start(&urls) };
     let sticky = banner.is_some();
     if args.open {
         if let Some(url) = open::url_to_open(
@@ -264,7 +274,9 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) -> ui::
             seed::maybe_seed(&seed_root, &api_url, force_seed).await;
         });
     }
-    spawn_readiness_watcher(urls.clone(), sticky);
+    if !use_tui {
+        spawn_readiness_watcher(urls.clone(), sticky);
+    }
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
@@ -423,7 +435,58 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) -> ui::
         })
         .collect();
 
-    let _ = tokio::signal::ctrl_c().await;
+    if use_tui {
+        let mut supervisors = std::collections::HashMap::new();
+        if let Some(s) = api.clone() {
+            supervisors.insert("api".into(), s);
+        }
+        if let Some(s) = app.clone() {
+            supervisors.insert("app".into(), s);
+        }
+        if let Some(s) = www.clone() {
+            supervisors.insert("www".into(), s);
+        }
+        if let Some(s) = prometheus.clone() {
+            supervisors.insert("prom".into(), s);
+        }
+        if let Some(s) = tempo.clone() {
+            supervisors.insert("tempo".into(), s);
+        }
+        if let Some(s) = loki.clone() {
+            supervisors.insert("loki".into(), s);
+        }
+        if let Some(s) = admin.clone() {
+            supervisors.insert("admin".into(), s);
+        }
+        if let Some(s) = console.clone() {
+            supervisors.insert("console".into(), s);
+        }
+        if let Some(s) = monitoring.clone() {
+            supervisors.insert("mon".into(), s);
+        }
+        for (i, s) in extra_supervisors.iter().enumerate() {
+            if let Some((name, _)) = urls.extra.get(i) {
+                supervisors.insert(name.clone(), s.clone());
+            }
+        }
+        let project = root.file_name().and_then(|s| s.to_str()).unwrap_or("erno");
+        let metrics_toml =
+            std::fs::read_to_string(root.join("api/config/development.toml")).unwrap_or_default();
+        let scrape_token = ports::parse_table_string(&metrics_toml, "metrics", "auth_token");
+        let opts = tui::TuiOpts {
+            prometheus: urls.prometheus.clone(),
+            prometheus_token: scrape_token,
+            tempo: urls.tempo.clone(),
+            loki: urls.loki.clone(),
+            api: urls.api.clone(),
+            console: urls.console.clone(),
+        };
+        if let Err(e) = tui::run(&urls, sink.clone(), project, supervisors, opts).await {
+            ui::warn(e);
+        }
+    } else {
+        let _ = tokio::signal::ctrl_c().await;
+    }
     // Unpin before anything else prints: the final banner lands in the
     // scrollback, and the watcher stops narrating as the children go down.
     drop(banner);

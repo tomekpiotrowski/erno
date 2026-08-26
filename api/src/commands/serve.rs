@@ -28,7 +28,7 @@ use crate::{
 
 // Boot wiring: every argument is a distinct subsystem the server needs.
 #[allow(clippy::too_many_arguments)]
-pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
+pub async fn handle_serve_command<AppMigrator: MigratorTrait + 'static, ExtraConfig>(
     environment: Environment,
     config: Config<ExtraConfig>,
     app_router: fn(App<ExtraConfig>) -> Router,
@@ -179,6 +179,8 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait, ExtraConfig>(
             },
         );
     }
+
+    crate::dev::migrations::install::<AppMigrator>();
 
     let app = App {
         config: config.clone(),

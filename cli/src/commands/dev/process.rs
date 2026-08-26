@@ -195,6 +195,10 @@ impl Supervisor {
         }
     }
 
+    pub async fn pid(&self) -> Option<u32> {
+        self.slot.lock().await.as_ref().and_then(Child::id)
+    }
+
     pub async fn restart(&self) {
         self.restart_requested.store(true, Ordering::SeqCst);
         if let Some(child) = self.slot.lock().await.as_mut() {

@@ -38,6 +38,7 @@ Rate limiting and email sending are disabled in the test environment.
 | `admin` | HTTP admin API (`/admin/api/*`) for the Angular operator app |
 | `admin_events` | Operator event log + matching counters |
 | `error_reporting` | Error capture and reporting; the collector half runs in the separate `monitoring/` deployment |
+| `dev` | `/dev/jobs` and `/dev/migrations` in Development/Test; `/dev/emails` only when `email.type = mock` |
 
 ## Architecture notes
 

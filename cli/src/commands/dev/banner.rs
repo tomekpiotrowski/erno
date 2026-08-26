@@ -12,7 +12,7 @@ pub enum ServiceState {
 }
 
 impl ServiceState {
-    fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             Self::Starting => "starting",
             Self::Migrating => "migrating",
@@ -189,6 +189,14 @@ fn banner_rows(urls: &DevUrls, snap: &BannerSnapshot) -> Vec<BannerRow> {
         push(name, url, *state, None);
     }
     rows
+}
+
+/// Started services in banner order: `(name, url)`.
+pub fn listed_services(urls: &DevUrls) -> Vec<(String, String)> {
+    banner_rows(urls, &starting_snapshot(urls))
+        .into_iter()
+        .map(|r| (r.name, r.url))
+        .collect()
 }
 
 pub fn render_banner(urls: &DevUrls, snap: &BannerSnapshot) -> String {
@@ -434,54 +442,102 @@ pub fn spawn_readiness_watcher(urls: DevUrls, sticky: bool) {
     });
 }
 
-async fn probe_all(client: &Client, urls: &DevUrls) -> BannerSnapshot {
-    let api = match urls.api.as_deref() {
-        Some(_) => Some(probe_erno(client, urls.api_readiness(), urls.api_liveness()).await),
-        None => None,
-    };
-    let app = match urls.app.as_deref() {
-        Some(url) => Some(probe_http(client, url).await),
-        None => None,
-    };
-    let www = match urls.www.as_deref() {
-        Some(url) => Some(probe_http(client, url).await),
-        None => None,
-    };
-    let prometheus = match urls.prometheus_ready() {
-        Some(url) => Some(probe_http(client, &url).await),
-        None => None,
-    };
-    let tempo = match urls.tempo_ready() {
-        Some(url) => Some(probe_http(client, &url).await),
-        None => None,
-    };
-    let loki = match urls.loki_ready() {
-        Some(url) => Some(probe_http(client, &url).await),
-        None => None,
-    };
-    let monitoring = match urls.monitoring.as_deref() {
-        Some(_) => Some(
-            probe_erno(
-                client,
-                urls.monitoring_readiness(),
-                urls.monitoring_liveness(),
-            )
-            .await,
-        ),
-        None => None,
-    };
-    let console = match urls.console.as_deref() {
-        Some(url) => Some(probe_http(client, url).await),
-        None => None,
-    };
-    let admin = match urls.admin.as_deref() {
-        Some(url) => Some(probe_http(client, url).await),
-        None => None,
-    };
-    let mut extra = Vec::with_capacity(urls.extra.len());
-    for (_, url) in &urls.extra {
-        extra.push(probe_http(client, url).await);
+pub fn state_named(snap: &BannerSnapshot, urls: &DevUrls, name: &str) -> Option<ServiceState> {
+    match name {
+        "www" => snap.www,
+        "app" => snap.app,
+        "api" => snap.api,
+        "prom" => snap.prometheus,
+        "tempo" => snap.tempo,
+        "loki" => snap.loki,
+        "mon" => snap.monitoring,
+        "console" => snap.console,
+        "admin" => snap.admin,
+        other => urls
+            .extra
+            .iter()
+            .zip(&snap.extra)
+            .find(|((n, _), _)| n == other)
+            .map(|(_, s)| *s),
     }
+}
+
+pub async fn probe_all(client: &Client, urls: &DevUrls) -> BannerSnapshot {
+    let prom_ready = urls.prometheus_ready();
+    let tempo_ready = urls.tempo_ready();
+    let loki_ready = urls.loki_ready();
+    let (api, app, www, prometheus, tempo, loki, monitoring, console, admin, extra) = tokio::join!(
+        async {
+            match urls.api.as_deref() {
+                Some(_) => {
+                    Some(probe_erno(client, urls.api_readiness(), urls.api_liveness()).await)
+                }
+                None => None,
+            }
+        },
+        async {
+            match urls.app.as_deref() {
+                Some(url) => Some(probe_http(client, url).await),
+                None => None,
+            }
+        },
+        async {
+            match urls.www.as_deref() {
+                Some(url) => Some(probe_http(client, url).await),
+                None => None,
+            }
+        },
+        async {
+            match &prom_ready {
+                Some(url) => Some(probe_http(client, url).await),
+                None => None,
+            }
+        },
+        async {
+            match &tempo_ready {
+                Some(url) => Some(probe_http(client, url).await),
+                None => None,
+            }
+        },
+        async {
+            match &loki_ready {
+                Some(url) => Some(probe_http(client, url).await),
+                None => None,
+            }
+        },
+        async {
+            match urls.monitoring.as_deref() {
+                Some(_) => Some(
+                    probe_erno(
+                        client,
+                        urls.monitoring_readiness(),
+                        urls.monitoring_liveness(),
+                    )
+                    .await,
+                ),
+                None => None,
+            }
+        },
+        async {
+            match urls.console.as_deref() {
+                Some(url) => Some(probe_http(client, url).await),
+                None => None,
+            }
+        },
+        async {
+            match urls.admin.as_deref() {
+                Some(url) => Some(probe_http(client, url).await),
+                None => None,
+            }
+        },
+        async {
+            let mut extra = Vec::with_capacity(urls.extra.len());
+            for (_, url) in &urls.extra {
+                extra.push(probe_http(client, url).await);
+            }
+            extra
+        },
+    );
     BannerSnapshot {
         api,
         app,
@@ -509,14 +565,16 @@ async fn probe_erno(
     let Some(readiness) = readiness else {
         return ServiceState::Starting;
     };
-    if is_up(client, &readiness).await {
-        ServiceState::Ready
-    } else if let Some(liveness) = liveness {
-        if is_up(client, &liveness).await {
-            ServiceState::Migrating
-        } else {
-            ServiceState::Starting
+    let (ready, live) = tokio::join!(is_up(client, &readiness), async {
+        match &liveness {
+            Some(url) => is_up(client, url).await,
+            None => false,
         }
+    });
+    if ready {
+        ServiceState::Ready
+    } else if live {
+        ServiceState::Migrating
     } else {
         ServiceState::Starting
     }

@@ -129,7 +129,7 @@ impl<ExtraConfig> BootConfig<ExtraConfig> {
     }
 }
 
-pub async fn boot<AppMigrator: MigratorTrait, ExtraConfig>(config: BootConfig<ExtraConfig>)
+pub async fn boot<AppMigrator: MigratorTrait + 'static, ExtraConfig>(config: BootConfig<ExtraConfig>)
 where
     ExtraConfig: Clone + Default + DeserializeOwned + Send + Sync + 'static,
 {
@@ -229,7 +229,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn handle_command<AppMigrator: MigratorTrait, ExtraConfig>(
+pub async fn handle_command<AppMigrator: MigratorTrait + 'static, ExtraConfig>(
     environment: Environment,
     config: Config<ExtraConfig>,
     cli: Cli,

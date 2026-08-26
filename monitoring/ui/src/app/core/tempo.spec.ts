@@ -1,4 +1,4 @@
-import { TempoService, toHit, toTree } from './tempo';
+import { n1Insight, TempoService, toHit, toTree } from './tempo';
 
 describe('toHit', () => {
   it('maps a search row into a typed hit', () => {
@@ -61,6 +61,35 @@ describe('toTree', () => {
     expect(tree[0].children[0].status).toBe('error');
     expect(tree[0].children[0].attributes['kind']).toBe('deck');
     expect(tree[0].durationMs).toBe(1000);
+    expect(tree[0].events).toEqual([]);
+  });
+
+  it('keeps sqlx events and reports N+1', () => {
+    const events = Array.from({ length: 8 }, () => ({
+      name: 'query',
+      attributes: [{ key: 'db.statement', value: { stringValue: 'SELECT 1' } }],
+    }));
+    const tree = toTree({
+      batches: [
+        {
+          scopeSpans: [
+            {
+              spans: [
+                {
+                  spanId: 'aa',
+                  name: 'GET /x',
+                  startTimeUnixNano: '1',
+                  endTimeUnixNano: '2',
+                  events,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(tree[0].events).toHaveLength(8);
+    expect(n1Insight(tree)).toMatch(/8 similar/);
   });
 });
 

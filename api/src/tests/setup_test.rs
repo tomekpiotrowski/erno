@@ -175,10 +175,11 @@ pub async fn setup_test<AppMigrator, ExtraConfig>(
     fixture_loader: FixtureLoader,
 ) -> TestUtils
 where
-    AppMigrator: MigratorTrait,
+    AppMigrator: MigratorTrait + 'static,
     ExtraConfig: Clone + Send + Sync + DeserializeOwned + Default + 'static,
 {
     init_tracing();
+    crate::dev::migrations::install::<AppMigrator>();
 
     debug!("Setting up test");
 
