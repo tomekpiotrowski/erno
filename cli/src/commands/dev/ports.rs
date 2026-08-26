@@ -25,6 +25,8 @@ pub fn discover_urls(root: &Path, sel: &ServiceSelection) -> DevUrls {
         app: sel.app.then_some(app_url),
         www: sel.www.then_some(www_url),
         prometheus: None,
+        tempo: None,
+        loki: None,
         // Filled in by `handle_dev` once it knows whether monitoring/ is
         // present — but before the banner is pinned, since its height is fixed
         // at that point.
@@ -48,6 +50,13 @@ pub fn ports_to_check(urls: &DevUrls) -> Vec<u16> {
     }
     if let Some(url) = &urls.prometheus {
         ports.push(port_from_url(Some(url)).unwrap_or(9090));
+    }
+    if let Some(url) = &urls.tempo {
+        ports.push(port_from_url(Some(url)).unwrap_or(3200));
+        ports.push(super::tempo::OTLP_PORT);
+    }
+    if let Some(url) = &urls.loki {
+        ports.push(port_from_url(Some(url)).unwrap_or(3100));
     }
     if let Some(url) = &urls.admin {
         ports.push(port_from_url(Some(url)).unwrap_or(4300));
@@ -242,6 +251,8 @@ port = 3005
             app: None,
             www: None,
             prometheus: None,
+            tempo: None,
+            loki: None,
             monitoring: None,
             console: None,
             admin: None,

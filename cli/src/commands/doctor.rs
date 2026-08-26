@@ -89,6 +89,8 @@ async fn run_checks() -> Vec<CheckResult> {
         check_postgres_admin().await,
         check_sea_orm_cli(),
         check_prometheus(),
+        check_tempo(),
+        check_loki(),
     ];
     if deploy_dir_present() || std::path::Path::new("chart").is_dir() {
         results.push(check_kubectl());
@@ -428,6 +430,32 @@ fn check_prometheus() -> CheckResult {
             "prometheus",
             v.lines().next().unwrap_or(v.trim()).to_string(),
         ),
+    }
+}
+
+fn check_tempo() -> CheckResult {
+    match run_cmd("tempo", &["-version"]).or_else(|| run_cmd("tempo", &["--version"])) {
+        None => CheckResult::fail(
+            "tempo",
+            "not found",
+            "Install Tempo for `erno dev`:\n\
+             https://grafana.com/docs/tempo/latest/setup/\n\
+             Or pass --no-tempo to `erno dev`.",
+        ),
+        Some(v) => CheckResult::pass("tempo", v.lines().next().unwrap_or(v.trim()).to_string()),
+    }
+}
+
+fn check_loki() -> CheckResult {
+    match run_cmd("loki", &["-version"]).or_else(|| run_cmd("loki", &["--version"])) {
+        None => CheckResult::fail(
+            "loki",
+            "not found",
+            "Install Loki for `erno dev`:\n\
+             https://grafana.com/docs/loki/latest/setup/install/\n\
+             Or pass --no-loki to `erno dev`.",
+        ),
+        Some(v) => CheckResult::pass("loki", v.lines().next().unwrap_or(v.trim()).to_string()),
     }
 }
 

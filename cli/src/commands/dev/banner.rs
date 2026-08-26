@@ -42,6 +42,8 @@ pub struct DevUrls {
     pub app: Option<String>,
     pub www: Option<String>,
     pub prometheus: Option<String>,
+    pub tempo: Option<String>,
+    pub loki: Option<String>,
     /// The monitoring collector. An Erno app of its own, so it gets the same
     /// readiness/liveness treatment as `api` — it migrates its database on boot
     /// and the banner should say so rather than sitting on "starting".
@@ -61,6 +63,8 @@ impl DevUrls {
             app: start_app.then(|| "http://localhost:4200".to_string()),
             www: start_www.then(|| "http://localhost:4321".to_string()),
             prometheus: start_api.then(|| super::prometheus::LISTEN_URL.to_string()),
+            tempo: start_api.then(|| super::tempo::LISTEN_URL.to_string()),
+            loki: start_api.then(|| super::loki::LISTEN_URL.to_string()),
             monitoring: start_api.then(super::monitoring_url),
             console: start_api.then(|| super::CONSOLE_URL.to_string()),
             admin: start_api.then(|| super::ADMIN_URL.to_string()),
@@ -101,6 +105,18 @@ impl DevUrls {
             .as_deref()
             .map(|u| format!("{}/-/ready", u.trim_end_matches('/')))
     }
+
+    pub fn tempo_ready(&self) -> Option<String> {
+        self.tempo
+            .as_deref()
+            .map(|u| format!("{}/ready", u.trim_end_matches('/')))
+    }
+
+    pub fn loki_ready(&self) -> Option<String> {
+        self.loki
+            .as_deref()
+            .map(|u| format!("{}/ready", u.trim_end_matches('/')))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -109,6 +125,8 @@ pub struct BannerSnapshot {
     pub app: Option<ServiceState>,
     pub www: Option<ServiceState>,
     pub prometheus: Option<ServiceState>,
+    pub tempo: Option<ServiceState>,
+    pub loki: Option<ServiceState>,
     pub monitoring: Option<ServiceState>,
     pub console: Option<ServiceState>,
     pub admin: Option<ServiceState>,
@@ -151,6 +169,12 @@ fn banner_rows(urls: &DevUrls, snap: &BannerSnapshot) -> Vec<BannerRow> {
     }
     if let (Some(url), Some(state)) = (urls.prometheus.as_deref(), snap.prometheus) {
         push("prom", url, state, None);
+    }
+    if let (Some(url), Some(state)) = (urls.tempo.as_deref(), snap.tempo) {
+        push("tempo", url, state, None);
+    }
+    if let (Some(url), Some(state)) = (urls.loki.as_deref(), snap.loki) {
+        push("loki", url, state, None);
     }
     if let (Some(url), Some(state)) = (urls.monitoring.as_deref(), snap.monitoring) {
         push("mon", url, state, None);
@@ -277,7 +301,9 @@ pub struct Transition {
 }
 
 /// The banner's built-in services, in banner order.
-const SERVICES: [&str; 7] = ["www", "app", "api", "prom", "mon", "console", "admin"];
+const SERVICES: [&str; 9] = [
+    "www", "app", "api", "prom", "tempo", "loki", "mon", "console", "admin",
+];
 
 fn transitions(urls: &DevUrls, prev: &BannerSnapshot, next: &BannerSnapshot) -> Vec<Transition> {
     let pairs = [
@@ -285,6 +311,8 @@ fn transitions(urls: &DevUrls, prev: &BannerSnapshot, next: &BannerSnapshot) -> 
         (prev.app, next.app),
         (prev.api, next.api),
         (prev.prometheus, next.prometheus),
+        (prev.tempo, next.tempo),
+        (prev.loki, next.loki),
         (prev.monitoring, next.monitoring),
         (prev.console, next.console),
         (prev.admin, next.admin),
@@ -366,6 +394,8 @@ pub fn starting_snapshot(urls: &DevUrls) -> BannerSnapshot {
         app: urls.app.as_ref().map(|_| ServiceState::Starting),
         www: urls.www.as_ref().map(|_| ServiceState::Starting),
         prometheus: urls.prometheus.as_ref().map(|_| ServiceState::Starting),
+        tempo: urls.tempo.as_ref().map(|_| ServiceState::Starting),
+        loki: urls.loki.as_ref().map(|_| ServiceState::Starting),
         monitoring: urls.monitoring.as_ref().map(|_| ServiceState::Starting),
         console: urls.console.as_ref().map(|_| ServiceState::Starting),
         admin: urls.admin.as_ref().map(|_| ServiceState::Starting),
@@ -421,6 +451,14 @@ async fn probe_all(client: &Client, urls: &DevUrls) -> BannerSnapshot {
         Some(url) => Some(probe_http(client, &url).await),
         None => None,
     };
+    let tempo = match urls.tempo_ready() {
+        Some(url) => Some(probe_http(client, &url).await),
+        None => None,
+    };
+    let loki = match urls.loki_ready() {
+        Some(url) => Some(probe_http(client, &url).await),
+        None => None,
+    };
     let monitoring = match urls.monitoring.as_deref() {
         Some(_) => Some(
             probe_erno(
@@ -449,6 +487,8 @@ async fn probe_all(client: &Client, urls: &DevUrls) -> BannerSnapshot {
         app,
         www,
         prometheus,
+        tempo,
+        loki,
         monitoring,
         console,
         admin,
@@ -513,6 +553,8 @@ mod tests {
             app: urls.app.as_ref().map(|_| state),
             www: urls.www.as_ref().map(|_| state),
             prometheus: urls.prometheus.as_ref().map(|_| state),
+            tempo: urls.tempo.as_ref().map(|_| state),
+            loki: urls.loki.as_ref().map(|_| state),
             monitoring: urls.monitoring.as_ref().map(|_| state),
             console: urls.console.as_ref().map(|_| state),
             admin: urls.admin.as_ref().map(|_| state),
@@ -528,6 +570,8 @@ mod tests {
             app: Some(ServiceState::Starting),
             www: Some(ServiceState::Ready),
             prometheus: Some(ServiceState::Ready),
+            tempo: Some(ServiceState::Ready),
+            loki: Some(ServiceState::Ready),
             monitoring: Some(ServiceState::Ready),
             console: Some(ServiceState::Ready),
             admin: Some(ServiceState::Ready),
@@ -580,6 +624,8 @@ mod tests {
             app: Some(ServiceState::Starting),
             www: None,
             prometheus: Some(ServiceState::Starting),
+            tempo: Some(ServiceState::Starting),
+            loki: Some(ServiceState::Starting),
             monitoring: Some(ServiceState::Migrating),
             console: None,
             admin: None,
@@ -652,6 +698,8 @@ mod tests {
             app: Some(ServiceState::Starting),
             www: Some(ServiceState::Ready),
             prometheus: Some(ServiceState::Ready),
+            tempo: Some(ServiceState::Ready),
+            loki: Some(ServiceState::Ready),
             monitoring: Some(ServiceState::Ready),
             console: Some(ServiceState::Ready),
             admin: Some(ServiceState::Migrating),
@@ -670,7 +718,7 @@ mod tests {
                         .map(|byte| ui::display_width(&l[..byte]))
                 })
                 .collect();
-            assert_eq!(offsets.len(), 7, "expected a state on every row:\n{text}");
+            assert_eq!(offsets.len(), 9, "expected a state on every row:\n{text}");
             assert!(
                 offsets.windows(2).all(|w| w[0] == w[1]),
                 "state column ragged: {offsets:?}\n{text}"
@@ -718,6 +766,8 @@ mod tests {
                 app: Some(ServiceState::Ready),
                 www: Some(ServiceState::Migrating),
                 prometheus: Some(ServiceState::Ready),
+                tempo: Some(ServiceState::Ready),
+                loki: Some(ServiceState::Ready),
                 monitoring: Some(ServiceState::Ready),
                 console: Some(ServiceState::Ready),
                 admin: Some(ServiceState::Ready),
@@ -763,6 +813,8 @@ mod tests {
             app: None,
             www: None,
             prometheus: Some(ServiceState::Ready),
+            tempo: Some(ServiceState::Ready),
+            loki: Some(ServiceState::Ready),
             monitoring: Some(ServiceState::Ready),
             console: None,
             admin: None,
@@ -788,7 +840,7 @@ mod tests {
         let after = snapshot(ServiceState::Ready, &urls);
         let text = render_transitions(ui::Face::PLAIN, &transitions(&urls, &before, &after), &[]);
         let offsets: Vec<usize> = text.lines().filter_map(|l| l.find("ready")).collect();
-        assert_eq!(offsets.len(), 7);
+        assert_eq!(offsets.len(), 9);
         assert!(
             offsets.windows(2).all(|w| w[0] == w[1]),
             "state column ragged: {offsets:?}\n{text}"
@@ -830,6 +882,26 @@ mod tests {
         assert!(text.contains("api"));
         assert!(!text.contains("prom"));
         assert!(!text.contains("9090"));
+    }
+
+    #[test]
+    fn banner_omits_tempo_when_disabled() {
+        let mut urls = DevUrls::defaults(true, false, false);
+        urls.tempo = None;
+        let text = render_banner_when(ui::Face::PLAIN, &urls, &starting_snapshot(&urls));
+        assert!(text.contains("api"));
+        assert!(!text.contains("tempo"));
+        assert!(!text.contains("3200"));
+    }
+
+    #[test]
+    fn banner_omits_loki_when_disabled() {
+        let mut urls = DevUrls::defaults(true, false, false);
+        urls.loki = None;
+        let text = render_banner_when(ui::Face::PLAIN, &urls, &starting_snapshot(&urls));
+        assert!(text.contains("api"));
+        assert!(!text.contains("loki"));
+        assert!(!text.contains("3100"));
     }
 
     #[test]

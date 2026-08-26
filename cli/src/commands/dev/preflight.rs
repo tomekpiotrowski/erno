@@ -4,15 +4,39 @@ use std::process::Command;
 use crate::ui;
 
 const FRIENDLY_COMMANDS: &[&str] = &[
-    "erno", "cargo", "node", "npm", "ng", "astro", "esbuild", "vite", "python", "python3",
+    "erno",
+    "cargo",
+    "node",
+    "npm",
+    "ng",
+    "astro",
+    "esbuild",
+    "vite",
+    "python",
+    "python3",
+    "prometheus",
+    "tempo",
+    "loki",
 ];
 
-pub fn run_preflight(check_db: bool, check_prometheus: bool, ports: &[u16]) -> Result<(), String> {
+pub fn run_preflight(
+    check_db: bool,
+    check_prometheus: bool,
+    check_tempo: bool,
+    check_loki: bool,
+    ports: &[u16],
+) -> Result<(), String> {
     if check_db {
         check_postgres()?;
     }
     if check_prometheus {
         check_prometheus_binary()?;
+    }
+    if check_tempo {
+        check_tempo_binary()?;
+    }
+    if check_loki {
+        check_loki_binary()?;
     }
     for port in ports {
         check_port(*port)?;
@@ -39,6 +63,26 @@ fn check_prometheus_binary() -> Result<(), String> {
     Err("prometheus not found on PATH\n\
          Install Prometheus: https://prometheus.io/docs/prometheus/latest/installation/\n\
          Or pass --no-prometheus to start without the scrape server."
+        .to_string())
+}
+
+fn check_tempo_binary() -> Result<(), String> {
+    if super::tempo::binary_on_path() {
+        return Ok(());
+    }
+    Err("tempo not found on PATH\n\
+         Install Tempo: https://grafana.com/docs/tempo/latest/setup/\n\
+         Or pass --no-tempo to start without the trace store."
+        .to_string())
+}
+
+fn check_loki_binary() -> Result<(), String> {
+    if super::loki::binary_on_path() {
+        return Ok(());
+    }
+    Err("loki not found on PATH\n\
+         Install Loki: https://grafana.com/docs/loki/latest/setup/install/\n\
+         Or pass --no-loki to start without the log store."
         .to_string())
 }
 
@@ -184,6 +228,8 @@ mod tests {
         assert!(should_default_kill("ng"));
         assert!(should_default_kill("python3"));
         assert!(should_default_kill("/usr/bin/python"));
+        assert!(should_default_kill("tempo"));
+        assert!(should_default_kill("loki"));
         assert!(!should_default_kill("firefox"));
         assert!(!should_default_kill("postgres"));
     }
