@@ -10,6 +10,8 @@ import { UptimePage } from './pages/uptime.page';
 import { StatusPage } from './pages/status.page';
 import { AlertsPage } from './pages/alerts.page';
 import { PerformancePage } from './pages/performance.page';
+import { TraceDetailPage } from './pages/trace-detail.page';
+import { LogsPage } from './pages/logs.page';
 import { BusinessPage } from './pages/business.page';
 
 export const routes: Routes = [
@@ -28,6 +30,8 @@ export const routes: Routes = [
       { path: 'status', component: StatusPage },
       { path: 'alerts', component: AlertsPage },
       { path: 'performance', component: PerformancePage },
+      { path: 'performance/traces/:id', component: TraceDetailPage },
+      { path: 'logs', component: LogsPage },
       { path: 'business', component: BusinessPage },
     ],
   },

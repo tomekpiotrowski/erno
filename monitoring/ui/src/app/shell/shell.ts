@@ -213,6 +213,12 @@ export class Shell {
       icon: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 8v4.5l3 2',
     },
     {
+      path: '/logs',
+      label: 'Logs',
+      exact: false,
+      icon: 'M5 4h14M5 8h10M5 12h14M5 16h8M5 20h12',
+    },
+    {
       path: '/business',
       label: 'Statistics',
       exact: false,
