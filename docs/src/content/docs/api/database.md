@@ -83,9 +83,11 @@ cargo run -- db migrate reapply
 # Open a psql session
 cargo run -- db console
 
-# Drop and recreate the database, then migrate up
+# Drop all tables and types, then migrate up
 cargo run -- db reset
 ```
+
+`db reset` wipes objects inside the existing database and reapplies every migration. It does not `DROP DATABASE`, so it works when the app role is not the database owner. `db migrate reset` instead rolls migrations back through their `down` methods, which fails if a migration is irreversible.
 
 ## Test utilities
 
