@@ -1,115 +1,18 @@
 # Erno Monitoring
 
-Separate deployment that watches an Erno application: errors, deploys,
-subsystem health, uptime checks, alerts and a public status page. Its own
-binary, its own database, its own operator console — deployed to infrastructure
-separate from the application, so it survives the outages it exists to report.
-
-All commands below run from this directory (`monitoring/`).
-
-## Building & testing
+Separate deployment that watches an Erno application. Commands run from `monitoring/`.
 
 ```sh
 cargo build
-cargo test                  # requires PostgreSQL — see below
+cargo test                 # PostgreSQL at postgres://erno:erno@localhost/erno_monitoring_test
 cargo clippy -- -D warnings
 cargo fmt
-
-cd ui && npm start          # operator console on :4400
-cd ui && npm run build
+cargo run -- serve         # collector on :3001
+cd ui && npm start         # operator console on :4400
 ```
 
-**Tests require PostgreSQL** at `postgres://erno:erno@localhost/erno_monitoring_test`
-(configured in `config/test.toml`). This is a *different* database from the
-API's test database; both suites reset their own schema, so sharing one would
-have them destroy each other's data.
+This is a different database from the API tests. Tests run single-threaded (`.cargo/config.toml`). Never `cargo test --workspace` from the repo root. Every test must boot through `setup_with` so the single-thread guard runs.
 
-**Tests run single-threaded** (`.cargo/config.toml` sets `RUST_TEST_THREADS=1`).
-Several tests operate table-wide by nature — the retention sweep, the regression
-tests that resolve every issue — and in parallel those block on rows other tests
-have inserted but not yet rolled back, which Postgres reports as a deadlock.
+Collector logic lives in `api/src/error_reporting/collector/`. Collector migrations are not in `erno_migrations()`.
 
-Cargo finds `.cargo/config.toml` by walking up from the working directory, so it
-applies to `cd monitoring && cargo test` but **not** to `cargo test --workspace`
-from the repo root. `setup_with` therefore calls
-`erno::tests::require_single_test_thread`, which panics with an explanation
-instead of letting the deadlocks happen. Every test boots through `setup_with`
-for exactly that reason — a new test that calls `setup_test` directly would
-bypass the guard.
-
-Run the collector locally with `cargo run -- serve` (port 3001, database
-`erno_monitoring`). Apply migrations with `cargo run -- db migrate up`.
-
-## Layout
-
-| Path | What it is |
-|------|------------|
-| `src/main.rs` | Boots an ordinary Erno app and mounts the collector |
-| `src/config.rs` | `MonitorConfig` — the `[collector]` section, via Erno's `ExtraConfig` |
-| `src/migrator.rs` | Framework migrations chained ahead of the collector's |
-| `src/tests.rs` | Collector request tests |
-| `status/` | The public status page: one dependency-free HTML file |
-| `ui/` | Angular operator console, scaffolded from `admin/` |
-
-The collector's own logic lives in the library, at
-`api/src/error_reporting/collector/` — this crate is a thin consumer. Subsystem
-health gathering lives in `api/src/health/`, because the application side needs
-it too.
-
-| Collector module | What it does |
-|---|---|
-| `ingest`, `fingerprint`, `scrub` | Error ingest, grouping and redaction |
-| `releases` | Deploy tracking |
-| `health` | Application heartbeats and their verdicts |
-| `uptime` | Synthetic probes and flap damping |
-| `alerting` | Rule evaluation, state machine, notifications |
-| `status` | Public snapshot and its publisher |
-| `retention` | Bounding what is kept |
-
-## Architecture notes
-
-- **An Erno application**: config, migrations, jobs, mailer, metrics, health
-  checks, and operator Basic auth all come from the library.
-- **Two ingest credentials**: a trusted server token and a *public* browser
-  token. The browser token ships in JS bundles and is a speed bump, not a
-  security control. OTLP traces/logs accept only the server token
-  (`GET /api/otlp/auth` for nginx `auth_request`; that path is exempt from
-  IP rate limits because every replica shares the console pod's address).
-- **Tempo and Loki live in this deployment**, queried from the console
-  (`/tempo/`, `/loki/`) the same way Prometheus is. Grafana is not shipped.
-- **Collector migrations are not in `erno_migrations()`** — they belong to this
-  database, and adding them to the framework list would give every application
-  deployment tables it never writes to.
-- **Test isolation**: `config/test.toml` sets `sync_writes = true` so ingest
-  writes on the request's own connection and rolls back with the test. A
-  background writer on a second connection would deadlock the single-connection
-  test pool and never see the test's data.
-- **Operator auth is independent of the application's auth service**, which may
-  be exactly what is broken when an operator needs this console.
-- **Singleton background work takes an advisory lock**: retention, the uptime
-  prober, the status publisher and the alert evaluator each hold one, so
-  replicas do not duplicate probes or multiply every alert by the replica count.
-- **Issue upserts are sorted by fingerprint** before the multi-row statement, so
-  concurrent writers take index locks in the same order. Without it, two batches
-  sharing fingerprints in different orders deadlock.
-- **The status page must not depend on this service.** The collector publishes a
-  static document; the page reads only that.
-
-## Documentation
-
-| Topic | Doc page |
-|-------|----------|
-| Deployment overview | `docs/src/content/docs/monitoring/index.md` |
-| Error reporting | `docs/src/content/docs/monitoring/error-reporting.md` |
-| Releases | `docs/src/content/docs/monitoring/releases.md` |
-| Subsystem health | `docs/src/content/docs/monitoring/subsystem-health.md` |
-| Uptime checks | `docs/src/content/docs/monitoring/uptime.md` |
-| Alerts | `docs/src/content/docs/monitoring/alerts.md` |
-| Status page | `docs/src/content/docs/monitoring/status-page.md` |
-| Metrics | `docs/src/content/docs/monitoring/metrics.md` |
-| Tracing | `docs/src/content/docs/monitoring/tracing.md` |
-| Logs | `docs/src/content/docs/monitoring/logs.md` |
-| Angular SDK | `docs/src/content/docs/app/error-reporting.md` |
-
-**If you change the ingest contract, the config keys, the grouping rules,
-or the OTLP paths / Tempo / Loki ports, update the corresponding doc page.**
+Narrative docs: `docs/src/content/docs/monitoring/`. Update the matching page when you change the ingest contract, config keys, grouping rules, or OTLP / Tempo / Loki paths.
