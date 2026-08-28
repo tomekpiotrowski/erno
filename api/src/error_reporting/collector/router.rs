@@ -162,30 +162,16 @@ where
 
     // Operator console: HTTP Basic, applied as a layer so no route can be added
     // later without it.
-    let operator_routes = Router::new()
+    // Everything an operator can read or change about one application hangs off
+    // `/projects/{slug}`, so a handler cannot reach another project's rows by
+    // being handed the wrong id. The two un-nested reads below are the
+    // cross-application views.
+    let project_routes = Router::new()
+        .route("/issues", get(operator::list_project_issues::<ExtraConfig>))
         .route(
-            "/projects",
-            get(projects::list_projects::<ExtraConfig>)
-                .post(projects::create_project::<ExtraConfig>),
+            "/issues/counts",
+            get(operator::project_issue_counts::<ExtraConfig>),
         )
-        .route(
-            "/projects/{slug}",
-            get(projects::get_project::<ExtraConfig>),
-        )
-        .route(
-            "/projects/{slug}/tokens/server",
-            post(projects::rotate_server_token::<ExtraConfig>),
-        )
-        .route(
-            "/projects/{slug}/tokens/browser",
-            post(projects::rotate_browser_token::<ExtraConfig>),
-        )
-        .route(
-            "/projects/{slug}/tokens/scrape",
-            post(projects::set_scrape_metrics_token::<ExtraConfig>),
-        )
-        .route("/issues", get(operator::list_issues::<ExtraConfig>))
-        .route("/issues/counts", get(operator::issue_counts::<ExtraConfig>))
         .route(
             "/issues/{id}",
             get(operator::get_issue::<ExtraConfig>).delete(operator::delete_issue::<ExtraConfig>),
@@ -263,7 +249,38 @@ where
         .route(
             "/alerts/{id}/silence",
             post(operator::silence_rule::<ExtraConfig>),
+        );
+
+    let operator_routes = Router::new()
+        .route(
+            "/projects",
+            get(projects::list_projects::<ExtraConfig>)
+                .post(projects::create_project::<ExtraConfig>),
         )
+        .route(
+            "/projects/{slug}",
+            get(projects::get_project::<ExtraConfig>)
+                .patch(projects::patch_project::<ExtraConfig>)
+                .delete(projects::delete_project::<ExtraConfig>),
+        )
+        .route(
+            "/projects/{slug}/tokens/server",
+            post(projects::rotate_server_token::<ExtraConfig>),
+        )
+        .route(
+            "/projects/{slug}/tokens/browser",
+            post(projects::rotate_browser_token::<ExtraConfig>),
+        )
+        .route(
+            "/projects/{slug}/tokens/scrape",
+            post(projects::set_scrape_metrics_token::<ExtraConfig>),
+        )
+        .nest("/projects/{slug}", project_routes)
+        // All projects at once: the console's cross-application list, and the
+        // counts route the console nginx `auth_request` probes by a hard-coded
+        // path. Neither may move under a slug.
+        .route("/issues", get(operator::list_issues::<ExtraConfig>))
+        .route("/issues/counts", get(operator::issue_counts::<ExtraConfig>))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             operator::require_operator::<ExtraConfig>,
@@ -288,7 +305,7 @@ where
     // with the collector.
     let public_routes = Router::new()
         .route(
-            "/status.json",
+            "/projects/{slug}/status.json",
             get(operator::status_snapshot::<ExtraConfig>),
         )
         .with_state(public_state);

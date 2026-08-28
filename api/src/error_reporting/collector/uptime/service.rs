@@ -133,8 +133,12 @@ pub async fn create(
 /// # Errors
 ///
 /// Returns the database error.
-pub async fn delete(db: &DatabaseConnection, id: Uuid) -> Result<bool, DbErr> {
-    let result = uptime_check::Entity::delete_by_id(id).exec(db).await?;
+pub async fn delete(db: &DatabaseConnection, project_id: Uuid, id: Uuid) -> Result<bool, DbErr> {
+    let result = uptime_check::Entity::delete_many()
+        .filter(uptime_check::Column::Id.eq(id))
+        .filter(uptime_check::Column::ProjectId.eq(project_id))
+        .exec(db)
+        .await?;
     Ok(result.rows_affected > 0)
 }
 
@@ -145,10 +149,15 @@ pub async fn delete(db: &DatabaseConnection, id: Uuid) -> Result<bool, DbErr> {
 /// Returns the database error.
 pub async fn set_enabled(
     db: &DatabaseConnection,
+    project_id: Uuid,
     id: Uuid,
     enabled: bool,
 ) -> Result<Option<uptime_check::Model>, DbErr> {
-    let Some(model) = uptime_check::Entity::find_by_id(id).one(db).await? else {
+    let Some(model) = uptime_check::Entity::find_by_id(id)
+        .filter(uptime_check::Column::ProjectId.eq(project_id))
+        .one(db)
+        .await?
+    else {
         return Ok(None);
     };
     let mut active: uptime_check::ActiveModel = model.into();
@@ -161,11 +170,16 @@ pub async fn set_enabled(
 /// # Errors
 ///
 /// Returns the database error.
-pub async fn list(db: &DatabaseConnection, window_hours: i64) -> Result<CheckListResponse, DbErr> {
+pub async fn list(
+    db: &DatabaseConnection,
+    project_id: Uuid,
+    window_hours: i64,
+) -> Result<CheckListResponse, DbErr> {
     let window_hours = window_hours.clamp(1, 24 * 365);
     let since = Utc::now().naive_utc() - Duration::hours(window_hours);
 
     let checks = uptime_check::Entity::find()
+        .filter(uptime_check::Column::ProjectId.eq(project_id))
         .order_by_asc(uptime_check::Column::Name)
         .all(db)
         .await?;

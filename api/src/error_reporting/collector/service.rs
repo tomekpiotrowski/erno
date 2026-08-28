@@ -12,8 +12,10 @@ use sea_orm::{
 };
 use uuid::Uuid;
 
+use std::collections::HashMap;
+
 use super::{
-    models::{error_event, error_issue, IssueStatus},
+    models::{error_event, error_issue, project, IssueStatus},
     operator_dto::{
         EventDto, EventListResponse, IssueCounts, IssueDetail, IssueListResponse, IssueSummary,
         SeriesPoint, SeriesResponse,
@@ -46,24 +48,59 @@ fn escape_like(term: &str) -> String {
         .replace('_', "\\_")
 }
 
-impl From<error_issue::Model> for IssueSummary {
-    fn from(model: error_issue::Model) -> Self {
-        Self {
-            id: model.id,
-            fingerprint: model.fingerprint,
-            source: model.source,
-            error_type: model.error_type,
-            title: model.title,
-            culprit: model.culprit,
-            level: model.level,
-            status: model.status,
-            times_seen: model.times_seen,
-            first_seen: model.first_seen,
-            last_seen: model.last_seen,
-            first_release: model.first_release,
-            last_release: model.last_release,
-            environment: model.environment,
-        }
+/// Slug and display name per project id, for labelling issue rows.
+///
+/// The all-projects list has to say which application each row came from, and
+/// a per-row lookup would be one query per issue. One query per page instead.
+type ProjectLabels = HashMap<Uuid, (String, String)>;
+
+async fn project_labels<I>(db: &DatabaseConnection, ids: I) -> Result<ProjectLabels, DbErr>
+where
+    I: IntoIterator<Item = Uuid>,
+{
+    let ids: Vec<Uuid> = {
+        let mut ids: Vec<Uuid> = ids.into_iter().collect();
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    };
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    Ok(project::Entity::find()
+        .filter(project::Column::Id.is_in(ids))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|p| (p.id, (p.slug, p.name)))
+        .collect())
+}
+
+fn summary(model: error_issue::Model, labels: &ProjectLabels) -> IssueSummary {
+    // A missing label means the project row vanished between the two queries.
+    // Empty strings keep the row visible rather than dropping an issue from the
+    // list over a label.
+    let (slug, name) = labels
+        .get(&model.project_id)
+        .cloned()
+        .unwrap_or_else(|| (String::new(), String::new()));
+    IssueSummary {
+        id: model.id,
+        fingerprint: model.fingerprint,
+        source: model.source,
+        error_type: model.error_type,
+        title: model.title,
+        culprit: model.culprit,
+        level: model.level,
+        status: model.status,
+        times_seen: model.times_seen,
+        first_seen: model.first_seen,
+        last_seen: model.last_seen,
+        first_release: model.first_release,
+        last_release: model.last_release,
+        environment: model.environment,
+        project_slug: slug,
+        project_name: name,
     }
 }
 
@@ -91,6 +128,8 @@ impl From<error_event::Model> for EventDto {
 /// Filters for [`list_issues`], already parsed from the query string.
 #[derive(Debug, Clone, Default)]
 pub struct IssueFilters {
+    /// Restrict to one project. `None` is the all-projects view.
+    pub project_id: Option<Uuid>,
     pub status: Option<String>,
     pub source: Option<String>,
     pub q: Option<String>,
@@ -102,6 +141,12 @@ pub struct IssueFilters {
 
 fn issue_condition(filters: &IssueFilters, since: NaiveDateTime) -> Condition {
     let mut condition = Condition::all().add(error_issue::Column::LastSeen.gte(since));
+
+    // Nested routes always set this; the all-projects list leaves it open. The
+    // (project_id, status, last_seen) index serves both.
+    if let Some(project_id) = filters.project_id {
+        condition = condition.add(error_issue::Column::ProjectId.eq(project_id));
+    }
 
     // `all` is an explicit opt-out; anything unrecognised falls back to the
     // default rather than silently returning everything.
@@ -165,16 +210,16 @@ pub async fn list_issues(
         .count(db)
         .await?;
 
-    let issues = error_issue::Entity::find()
+    let rows = error_issue::Entity::find()
         .filter(condition)
         .order_by_desc(error_issue::Column::LastSeen)
         .offset((page - 1) * per_page)
         .limit(per_page)
         .all(db)
-        .await?
-        .into_iter()
-        .map(IssueSummary::from)
-        .collect();
+        .await?;
+
+    let labels = project_labels(db, rows.iter().map(|i| i.project_id)).await?;
+    let issues = rows.into_iter().map(|i| summary(i, &labels)).collect();
 
     Ok(IssueListResponse {
         issues,
@@ -191,6 +236,7 @@ pub async fn list_issues(
 /// Returns the underlying [`DbErr`] when the query fails.
 pub async fn issue_counts(
     db: &DatabaseConnection,
+    project_id: Option<Uuid>,
     hours: Option<i64>,
 ) -> Result<IssueCounts, DbErr> {
     let since = Utc::now().naive_utc() - Duration::hours(clamp_hours(hours));
@@ -205,11 +251,13 @@ pub async fn issue_counts(
         IssueStatus::Resolved,
         IssueStatus::Ignored,
     ] {
-        let count = error_issue::Entity::find()
+        let mut query = error_issue::Entity::find()
             .filter(error_issue::Column::LastSeen.gte(since))
-            .filter(error_issue::Column::Status.eq(status.as_str()))
-            .count(db)
-            .await? as i64;
+            .filter(error_issue::Column::Status.eq(status.as_str()));
+        if let Some(project_id) = project_id {
+            query = query.filter(error_issue::Column::ProjectId.eq(project_id));
+        }
+        let count = query.count(db).await? as i64;
         match status {
             IssueStatus::Unresolved => counts.unresolved = count,
             IssueStatus::Resolved => counts.resolved = count,
@@ -225,8 +273,19 @@ pub async fn issue_counts(
 /// # Errors
 ///
 /// Returns the underlying [`DbErr`] when the query fails.
-pub async fn get_issue(db: &DatabaseConnection, id: Uuid) -> Result<Option<IssueDetail>, DbErr> {
-    let Some(issue) = error_issue::Entity::find_by_id(id).one(db).await? else {
+pub async fn get_issue(
+    db: &DatabaseConnection,
+    project_id: Uuid,
+    id: Uuid,
+) -> Result<Option<IssueDetail>, DbErr> {
+    // Filtering rather than fetch-then-compare: an id from another project is
+    // indistinguishable from one that does not exist, which is what the nested
+    // route should say.
+    let Some(issue) = error_issue::Entity::find_by_id(id)
+        .filter(error_issue::Column::ProjectId.eq(project_id))
+        .one(db)
+        .await?
+    else {
         return Ok(None);
     };
 
@@ -245,8 +304,10 @@ pub async fn get_issue(db: &DatabaseConnection, id: Uuid) -> Result<Option<Issue
         .map(EventDto::from)
         .collect();
 
+    let labels = project_labels(db, [issue.project_id]).await?;
+
     Ok(Some(IssueDetail {
-        issue: IssueSummary::from(issue),
+        issue: summary(issue, &labels),
         stored_events,
         latest_event: events.first().cloned(),
         events,
@@ -260,6 +321,7 @@ pub async fn get_issue(db: &DatabaseConnection, id: Uuid) -> Result<Option<Issue
 /// Returns the underlying [`DbErr`] when the query fails.
 pub async fn list_events(
     db: &DatabaseConnection,
+    project_id: Uuid,
     issue_id: Uuid,
     page: Option<u64>,
     per_page: Option<u64>,
@@ -267,12 +329,16 @@ pub async fn list_events(
     let page = clamp_page(page);
     let per_page = clamp_per_page(per_page);
 
+    // `error_event.project_id` is denormalised precisely so this does not have
+    // to join `error_issue` to prove the issue belongs here.
     let total = error_event::Entity::find()
+        .filter(error_event::Column::ProjectId.eq(project_id))
         .filter(error_event::Column::IssueId.eq(issue_id))
         .count(db)
         .await?;
 
     let events = error_event::Entity::find()
+        .filter(error_event::Column::ProjectId.eq(project_id))
         .filter(error_event::Column::IssueId.eq(issue_id))
         .order_by_desc(error_event::Column::CreatedAt)
         .offset((page - 1) * per_page)
@@ -312,6 +378,7 @@ const fn bucket_for(hours: i64) -> (&'static str, &'static str) {
 /// Returns the underlying [`DbErr`] when the query fails.
 pub async fn series(
     db: &DatabaseConnection,
+    project_id: Option<Uuid>,
     issue_id: Option<Uuid>,
     hours: Option<i64>,
     source: Option<&str>,
@@ -323,6 +390,12 @@ pub async fn series(
     let mut values: Vec<Value> = vec![hours.into()];
     let mut filters = String::new();
 
+    // Placeholder numbers come from `values.len()` rather than being written
+    // out, so adding a filter cannot silently shift the ones after it.
+    if let Some(id) = project_id {
+        values.push(id.into());
+        filters.push_str(&format!(" AND e.project_id = ${}", values.len()));
+    }
     if let Some(id) = issue_id {
         values.push(id.into());
         filters.push_str(&format!(" AND e.issue_id = ${}", values.len()));
@@ -386,12 +459,17 @@ pub async fn series(
 /// Returns the underlying [`DbErr`] when the update fails.
 pub async fn set_status(
     db: &DatabaseConnection,
+    project_id: Uuid,
     id: Uuid,
     status: IssueStatus,
 ) -> Result<Option<IssueSummary>, DbErr> {
     use sea_orm::{ActiveModelTrait, ActiveValue::Set};
 
-    let Some(issue) = error_issue::Entity::find_by_id(id).one(db).await? else {
+    let Some(issue) = error_issue::Entity::find_by_id(id)
+        .filter(error_issue::Column::ProjectId.eq(project_id))
+        .one(db)
+        .await?
+    else {
         return Ok(None);
     };
 
@@ -402,7 +480,9 @@ pub async fn set_status(
         IssueStatus::Unresolved | IssueStatus::Ignored => None,
     });
 
-    Ok(Some(IssueSummary::from(active.update(db).await?)))
+    let updated = active.update(db).await?;
+    let labels = project_labels(db, [updated.project_id]).await?;
+    Ok(Some(summary(updated, &labels)))
 }
 
 /// Delete an issue and, by cascade, its events.
@@ -410,8 +490,16 @@ pub async fn set_status(
 /// # Errors
 ///
 /// Returns the underlying [`DbErr`] when the delete fails.
-pub async fn delete_issue(db: &DatabaseConnection, id: Uuid) -> Result<bool, DbErr> {
-    let result = error_issue::Entity::delete_by_id(id).exec(db).await?;
+pub async fn delete_issue(
+    db: &DatabaseConnection,
+    project_id: Uuid,
+    id: Uuid,
+) -> Result<bool, DbErr> {
+    let result = error_issue::Entity::delete_many()
+        .filter(error_issue::Column::Id.eq(id))
+        .filter(error_issue::Column::ProjectId.eq(project_id))
+        .exec(db)
+        .await?;
     Ok(result.rows_affected > 0)
 }
 

@@ -1,5 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
+import { ProjectContext } from './project';
 
 // Docs: docs/src/content/docs/monitoring/error-reporting.md
 //
@@ -26,6 +27,9 @@ export interface IssueSummary {
   first_release: string | null;
   last_release: string | null;
   environment: string | null;
+  /** Which application this issue belongs to. */
+  project_slug: string;
+  project_name: string;
 }
 
 export interface IssueList {
@@ -221,6 +225,18 @@ export type IssueStatus = 'unresolved' | 'resolved' | 'ignored' | 'all';
 @Injectable({ providedIn: 'root' })
 export class CollectorApi {
   private readonly http = inject(HttpClient);
+  private readonly project = inject(ProjectContext);
+
+  /**
+   * Base path of the project the console is looking at.
+   *
+   * Every operator route below the project list is nested under a slug, so a
+   * request cannot be built before {@link ProjectContext.load} has settled on
+   * one.
+   */
+  private get base(): string {
+    return this.project.base;
+  }
 
   issues(
     status: IssueStatus = 'unresolved',
@@ -245,21 +261,21 @@ export class CollectorApi {
     if (release) {
       params = params.set('release', release);
     }
-    return this.http.get<IssueList>('/api/collector/issues', { params });
+    return this.http.get<IssueList>(`${this.base}/issues`, { params });
   }
 
   counts(hours = 168) {
-    return this.http.get<IssueCounts>('/api/collector/issues/counts', {
+    return this.http.get<IssueCounts>(`${this.base}/issues/counts`, {
       params: new HttpParams().set('hours', hours),
     });
   }
 
   issue(id: string) {
-    return this.http.get<IssueDetail>(`/api/collector/issues/${id}`);
+    return this.http.get<IssueDetail>(`${this.base}/issues/${id}`);
   }
 
   issueSeries(id: string, hours = 24) {
-    return this.http.get<Series>(`/api/collector/issues/${id}/series`, {
+    return this.http.get<Series>(`${this.base}/issues/${id}/series`, {
       params: new HttpParams().set('hours', hours),
     });
   }
@@ -269,23 +285,23 @@ export class CollectorApi {
     if (source && source !== 'all') {
       params = params.set('source', source);
     }
-    return this.http.get<Series>('/api/collector/series', { params });
+    return this.http.get<Series>(`${this.base}/series`, { params });
   }
 
   resolve(id: string) {
-    return this.http.post<IssueSummary>(`/api/collector/issues/${id}/resolve`, {});
+    return this.http.post<IssueSummary>(`${this.base}/issues/${id}/resolve`, {});
   }
 
   ignore(id: string) {
-    return this.http.post<IssueSummary>(`/api/collector/issues/${id}/ignore`, {});
+    return this.http.post<IssueSummary>(`${this.base}/issues/${id}/ignore`, {});
   }
 
   unresolve(id: string) {
-    return this.http.post<IssueSummary>(`/api/collector/issues/${id}/unresolve`, {});
+    return this.http.post<IssueSummary>(`${this.base}/issues/${id}/unresolve`, {});
   }
 
   remove(id: string) {
-    return this.http.delete<void>(`/api/collector/issues/${id}`);
+    return this.http.delete<void>(`${this.base}/issues/${id}`);
   }
 
   releases(environment = 'all', limit = 20) {
@@ -293,15 +309,15 @@ export class CollectorApi {
     if (environment && environment !== 'all') {
       params = params.set('environment', environment);
     }
-    return this.http.get<ReleaseList>('/api/collector/releases', { params });
+    return this.http.get<ReleaseList>(`${this.base}/releases`, { params });
   }
 
   health() {
-    return this.http.get<HealthResponse>('/api/collector/health');
+    return this.http.get<HealthResponse>(`${this.base}/health`);
   }
 
   uptime(hours = 24) {
-    return this.http.get<UptimeList>('/api/collector/uptime', {
+    return this.http.get<UptimeList>(`${this.base}/uptime`, {
       params: new HttpParams().set('hours', hours),
     });
   }
@@ -312,26 +328,26 @@ export class CollectorApi {
     interval_seconds?: number;
     expected_status?: number;
   }) {
-    return this.http.post<{ id: string }>('/api/collector/uptime', body);
+    return this.http.post<{ id: string }>(`${this.base}/uptime`, body);
   }
 
   deleteCheck(id: string) {
-    return this.http.delete<void>(`/api/collector/uptime/${id}`);
+    return this.http.delete<void>(`${this.base}/uptime/${id}`);
   }
 
   setCheckEnabled(id: string, enabled: boolean) {
     return this.http.post<{ id: string; enabled: boolean }>(
-      `/api/collector/uptime/${id}/${enabled ? 'enable' : 'disable'}`,
+      `${this.base}/uptime/${id}/${enabled ? 'enable' : 'disable'}`,
       {},
     );
   }
 
   statusSnapshot() {
-    return this.http.get<StatusSnapshot>('/api/collector/status.json');
+    return this.http.get<StatusSnapshot>(`${this.base}/status.json`);
   }
 
   statusComponents() {
-    return this.http.get<{ components: StatusComponent[] }>('/api/collector/status/components');
+    return this.http.get<{ components: StatusComponent[] }>(`${this.base}/status/components`);
   }
 
   createStatusComponent(body: {
@@ -339,27 +355,27 @@ export class CollectorApi {
     description?: string;
     auto_from_check_id?: string | null;
   }) {
-    return this.http.post<{ id: string }>('/api/collector/status/components', body);
+    return this.http.post<{ id: string }>(`${this.base}/status/components`, body);
   }
 
   deleteStatusComponent(id: string) {
-    return this.http.delete<void>(`/api/collector/status/components/${id}`);
+    return this.http.delete<void>(`${this.base}/status/components/${id}`);
   }
 
   setStatusComponentState(id: string, state: string) {
-    return this.http.post(`/api/collector/status/components/${id}/state`, { state });
+    return this.http.post(`${this.base}/status/components/${id}/state`, { state });
   }
 
   openIncident(body: { title: string; impact: string; body: string }) {
-    return this.http.post<{ id: string }>('/api/collector/status/incidents', body);
+    return this.http.post<{ id: string }>(`${this.base}/status/incidents`, body);
   }
 
   addIncidentUpdate(id: string, body: { status: string; body: string }) {
-    return this.http.post(`/api/collector/status/incidents/${id}/updates`, body);
+    return this.http.post(`${this.base}/status/incidents/${id}/updates`, body);
   }
 
   alertRules() {
-    return this.http.get<{ rules: AlertRule[] }>('/api/collector/alerts');
+    return this.http.get<{ rules: AlertRule[] }>(`${this.base}/alerts`);
   }
 
   createAlertRule(body: {
@@ -371,19 +387,19 @@ export class CollectorApi {
     for_seconds?: number;
     notify_email?: string;
   }) {
-    return this.http.post<{ id: string }>('/api/collector/alerts', body);
+    return this.http.post<{ id: string }>(`${this.base}/alerts`, body);
   }
 
   deleteAlertRule(id: string) {
-    return this.http.delete<void>(`/api/collector/alerts/${id}`);
+    return this.http.delete<void>(`${this.base}/alerts/${id}`);
   }
 
   setAlertRuleEnabled(id: string, enabled: boolean) {
-    return this.http.post(`/api/collector/alerts/${id}/${enabled ? 'enable' : 'disable'}`, {});
+    return this.http.post(`${this.base}/alerts/${id}/${enabled ? 'enable' : 'disable'}`, {});
   }
 
   silenceAlertRule(id: string, minutes: number) {
-    return this.http.post(`/api/collector/alerts/${id}/silence`, { minutes });
+    return this.http.post(`${this.base}/alerts/${id}/silence`, { minutes });
   }
 
   /** This console reporting its own errors. */

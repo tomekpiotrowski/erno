@@ -29,15 +29,15 @@ use super::{
     state::CollectorState,
 };
 
-/// Un-nested operator writes need a project until those routes are nested.
-async fn require_project_id(db: &sea_orm::DatabaseConnection) -> Result<Uuid, Response> {
-    match projects::first_project_id(db).await {
-        Ok(Some(id)) => Ok(id),
-        Ok(None) => Err((
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(json!({ "error": "no project" })),
-        )
-            .into_response()),
+/// Resolve the `{slug}` of a nested operator route to a project id.
+///
+/// Every query below then filters on that id, so a row belonging to another
+/// project reads as missing rather than as somebody else's data. An unknown
+/// slug is a 404, the same answer as an unknown id.
+async fn project_id_for(db: &sea_orm::DatabaseConnection, slug: &str) -> Result<Uuid, Response> {
+    match projects::find_by_slug(db, slug).await {
+        Ok(Some(project)) => Ok(project.id),
+        Ok(None) => Err(not_found()),
         Err(e) => Err(db_error(e)),
     }
 }
@@ -75,6 +75,9 @@ fn not_found() -> Response {
 impl From<IssueQuery> for IssueFilters {
     fn from(query: IssueQuery) -> Self {
         Self {
+            // Set by the caller: the nested route takes it from the path, the
+            // all-projects route from an optional `?project=` slug.
+            project_id: None,
             status: query.status,
             source: query.source,
             q: query.q,
@@ -86,7 +89,26 @@ impl From<IssueQuery> for IssueFilters {
     }
 }
 
-/// `GET /api/collector/issues`
+async fn respond_issues<ExtraConfig>(
+    state: &CollectorState<ExtraConfig>,
+    project_id: Option<Uuid>,
+    query: IssueQuery,
+) -> Response
+where
+    ExtraConfig: Clone + Send + Sync + 'static,
+{
+    let mut filters = IssueFilters::from(query);
+    filters.project_id = project_id;
+    match service::list_issues(&state.app.db, &filters).await {
+        Ok(body) => Json(body).into_response(),
+        Err(e) => db_error(e),
+    }
+}
+
+/// `GET /api/collector/issues` — every project, newest activity first.
+///
+/// Stays un-nested: it is the console's cross-application view, and the
+/// optional `?project=` slug narrows it without a second route.
 pub async fn list_issues<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
     Query(query): Query<IssueQuery>,
@@ -94,14 +116,41 @@ pub async fn list_issues<ExtraConfig>(
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    let filters = IssueFilters::from(query);
-    match service::list_issues(&state.app.db, &filters).await {
-        Ok(body) => Json(body).into_response(),
-        Err(e) => db_error(e),
-    }
+    let project_id = match query
+        .project
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(slug) => match project_id_for(&state.app.db, slug).await {
+            Ok(id) => Some(id),
+            Err(response) => return response,
+        },
+        None => None,
+    };
+    respond_issues(&state, project_id, query).await
 }
 
-/// `GET /api/collector/issues/counts`
+/// `GET /api/collector/projects/{slug}/issues`
+pub async fn list_project_issues<ExtraConfig>(
+    State(state): State<CollectorState<ExtraConfig>>,
+    Path(slug): Path<String>,
+    Query(query): Query<IssueQuery>,
+) -> Response
+where
+    ExtraConfig: Clone + Send + Sync + 'static,
+{
+    let project_id = match project_id_for(&state.app.db, &slug).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    respond_issues(&state, Some(project_id), query).await
+}
+
+/// `GET /api/collector/issues/counts` — every project.
+///
+/// Also the console nginx auth probe (`/__monitoring_auth`), which hard-codes
+/// this path with no slug. It must stay here.
 pub async fn issue_counts<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
     Query(query): Query<SeriesQuery>,
@@ -109,66 +158,110 @@ pub async fn issue_counts<ExtraConfig>(
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    match service::issue_counts(&state.app.db, query.hours).await {
+    match service::issue_counts(&state.app.db, None, query.hours).await {
         Ok(body) => Json(body).into_response(),
         Err(e) => db_error(e),
     }
 }
 
-/// `GET /api/collector/issues/{id}`
-pub async fn get_issue<ExtraConfig>(
+/// `GET /api/collector/projects/{slug}/issues/counts`
+pub async fn project_issue_counts<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
-    Path(id): Path<Uuid>,
+    Path(slug): Path<String>,
+    Query(query): Query<SeriesQuery>,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    match service::get_issue(&state.app.db, id).await {
+    let project_id = match project_id_for(&state.app.db, &slug).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    match service::issue_counts(&state.app.db, Some(project_id), query.hours).await {
+        Ok(body) => Json(body).into_response(),
+        Err(e) => db_error(e),
+    }
+}
+
+/// `GET /api/collector/projects/{slug}/issues/{id}`
+pub async fn get_issue<ExtraConfig>(
+    State(state): State<CollectorState<ExtraConfig>>,
+    Path((slug, id)): Path<(String, Uuid)>,
+) -> Response
+where
+    ExtraConfig: Clone + Send + Sync + 'static,
+{
+    let project_id = match project_id_for(&state.app.db, &slug).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    match service::get_issue(&state.app.db, project_id, id).await {
         Ok(Some(body)) => Json(body).into_response(),
         Ok(None) => not_found(),
         Err(e) => db_error(e),
     }
 }
 
-/// `GET /api/collector/issues/{id}/events`
+/// `GET /api/collector/projects/{slug}/issues/{id}/events`
 pub async fn list_events<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
-    Path(id): Path<Uuid>,
+    Path((slug, id)): Path<(String, Uuid)>,
     Query(query): Query<EventQuery>,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    match service::list_events(&state.app.db, id, query.page, query.per_page).await {
+    let project_id = match project_id_for(&state.app.db, &slug).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    match service::list_events(&state.app.db, project_id, id, query.page, query.per_page).await {
         Ok(body) => Json(body).into_response(),
         Err(e) => db_error(e),
     }
 }
 
-/// `GET /api/collector/issues/{id}/series`
+/// `GET /api/collector/projects/{slug}/issues/{id}/series`
 pub async fn issue_series<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
-    Path(id): Path<Uuid>,
+    Path((slug, id)): Path<(String, Uuid)>,
     Query(query): Query<SeriesQuery>,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    match service::series(&state.app.db, Some(id), query.hours, None).await {
+    let project_id = match project_id_for(&state.app.db, &slug).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    match service::series(&state.app.db, Some(project_id), Some(id), query.hours, None).await {
         Ok(body) => Json(body).into_response(),
         Err(e) => db_error(e),
     }
 }
 
-/// `GET /api/collector/series`
+/// `GET /api/collector/projects/{slug}/series`
 pub async fn global_series<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
+    Path(slug): Path<String>,
     Query(query): Query<SeriesQuery>,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    match service::series(&state.app.db, None, query.hours, query.source.as_deref()).await {
+    let project_id = match project_id_for(&state.app.db, &slug).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    match service::series(
+        &state.app.db,
+        Some(project_id),
+        None,
+        query.hours,
+        query.source.as_deref(),
+    )
+    .await
+    {
         Ok(body) => Json(body).into_response(),
         Err(e) => db_error(e),
     }
@@ -176,13 +269,18 @@ where
 
 async fn update_status<ExtraConfig>(
     state: &CollectorState<ExtraConfig>,
+    slug: &str,
     id: Uuid,
     status: IssueStatus,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    match service::set_status(&state.app.db, id, status).await {
+    let project_id = match project_id_for(&state.app.db, slug).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    match service::set_status(&state.app.db, project_id, id, status).await {
         Ok(Some(body)) => {
             // Triage decisions belong in the operator audit log.
             crate::admin_events::emit_ok(
@@ -199,48 +297,52 @@ where
     }
 }
 
-/// `POST /api/collector/issues/{id}/resolve`
+/// `POST /api/collector/projects/{slug}/issues/{id}/resolve`
 pub async fn resolve<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
-    Path(id): Path<Uuid>,
+    Path((slug, id)): Path<(String, Uuid)>,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    update_status(&state, id, IssueStatus::Resolved).await
+    update_status(&state, &slug, id, IssueStatus::Resolved).await
 }
 
-/// `POST /api/collector/issues/{id}/ignore`
+/// `POST /api/collector/projects/{slug}/issues/{id}/ignore`
 pub async fn ignore<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
-    Path(id): Path<Uuid>,
+    Path((slug, id)): Path<(String, Uuid)>,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    update_status(&state, id, IssueStatus::Ignored).await
+    update_status(&state, &slug, id, IssueStatus::Ignored).await
 }
 
-/// `POST /api/collector/issues/{id}/unresolve`
+/// `POST /api/collector/projects/{slug}/issues/{id}/unresolve`
 pub async fn unresolve<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
-    Path(id): Path<Uuid>,
+    Path((slug, id)): Path<(String, Uuid)>,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    update_status(&state, id, IssueStatus::Unresolved).await
+    update_status(&state, &slug, id, IssueStatus::Unresolved).await
 }
 
-/// `DELETE /api/collector/issues/{id}`
+/// `DELETE /api/collector/projects/{slug}/issues/{id}`
 pub async fn delete_issue<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
-    Path(id): Path<Uuid>,
+    Path((slug, id)): Path<(String, Uuid)>,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    match service::delete_issue(&state.app.db, id).await {
+    let project_id = match project_id_for(&state.app.db, &slug).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    match service::delete_issue(&state.app.db, project_id, id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => not_found(),
         Err(e) => db_error(e),
@@ -283,15 +385,20 @@ where
     }
 }
 
-/// `GET /api/collector/releases`
+/// `GET /api/collector/projects/{slug}/releases`
 pub async fn list_releases<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
+    Path(slug): Path<String>,
     Query(query): Query<ReleaseQuery>,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    match releases::list(&state.app.db, &query).await {
+    let project_id = match project_id_for(&state.app.db, &slug).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    match releases::list(&state.app.db, project_id, &query).await {
         Ok(body) => Json(body).into_response(),
         Err(e) => db_error(e),
     }
@@ -344,12 +451,19 @@ where
     }
 }
 
-/// `GET /api/collector/health`
-pub async fn get_health<ExtraConfig>(State(state): State<CollectorState<ExtraConfig>>) -> Response
+/// `GET /api/collector/projects/{slug}/health`
+pub async fn get_health<ExtraConfig>(
+    State(state): State<CollectorState<ExtraConfig>>,
+    Path(slug): Path<String>,
+) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    match super::health::list(&state.app.db, &state.config.health).await {
+    let project_id = match project_id_for(&state.app.db, &slug).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    match super::health::list(&state.app.db, project_id, &state.config.health).await {
         Ok(body) => Json(body).into_response(),
         Err(e) => db_error(e),
     }
@@ -397,29 +511,35 @@ pub struct UptimeQuery {
     pub hours: Option<i64>,
 }
 
-/// `GET /api/collector/uptime`
+/// `GET /api/collector/projects/{slug}/uptime`
 pub async fn list_checks<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
+    Path(slug): Path<String>,
     Query(query): Query<UptimeQuery>,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    match super::uptime::service::list(&state.app.db, query.hours.unwrap_or(24)).await {
+    let project_id = match project_id_for(&state.app.db, &slug).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    match super::uptime::service::list(&state.app.db, project_id, query.hours.unwrap_or(24)).await {
         Ok(body) => Json(body).into_response(),
         Err(e) => db_error(e),
     }
 }
 
-/// `POST /api/collector/uptime`
+/// `POST /api/collector/projects/{slug}/uptime`
 pub async fn create_check<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
+    Path(slug): Path<String>,
     Json(input): Json<super::uptime::service::UpsertCheck>,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    let project_id = match require_project_id(&state.app.db).await {
+    let project_id = match project_id_for(&state.app.db, &slug).await {
         Ok(id) => id,
         Err(response) => return response,
     };
@@ -434,15 +554,19 @@ where
     }
 }
 
-/// `DELETE /api/collector/uptime/{id}`
+/// `DELETE /api/collector/projects/{slug}/uptime/{id}`
 pub async fn delete_check<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
-    Path(id): Path<Uuid>,
+    Path((slug, id)): Path<(String, Uuid)>,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    match super::uptime::service::delete(&state.app.db, id).await {
+    let project_id = match project_id_for(&state.app.db, &slug).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    match super::uptime::service::delete(&state.app.db, project_id, id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => not_found(),
         Err(e) => db_error(e),
@@ -452,13 +576,18 @@ where
 /// `POST /api/collector/uptime/{id}/enable` and `/disable`
 async fn set_check_enabled<ExtraConfig>(
     state: &CollectorState<ExtraConfig>,
+    slug: &str,
     id: Uuid,
     enabled: bool,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    match super::uptime::service::set_enabled(&state.app.db, id, enabled).await {
+    let project_id = match project_id_for(&state.app.db, slug).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    match super::uptime::service::set_enabled(&state.app.db, project_id, id, enabled).await {
         Ok(Some(model)) => {
             Json(json!({ "id": model.id, "enabled": model.enabled })).into_response()
         }
@@ -467,44 +596,50 @@ where
     }
 }
 
-/// `POST /api/collector/uptime/{id}/enable`
+/// `POST /api/collector/projects/{slug}/uptime/{id}/enable`
 pub async fn enable_check<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
-    Path(id): Path<Uuid>,
+    Path((slug, id)): Path<(String, Uuid)>,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    set_check_enabled(&state, id, true).await
+    set_check_enabled(&state, &slug, id, true).await
 }
 
-/// `POST /api/collector/uptime/{id}/disable`
+/// `POST /api/collector/projects/{slug}/uptime/{id}/disable`
 pub async fn disable_check<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
-    Path(id): Path<Uuid>,
+    Path((slug, id)): Path<(String, Uuid)>,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    set_check_enabled(&state, id, false).await
+    set_check_enabled(&state, &slug, id, false).await
 }
 
-/// `GET /api/collector/status/components`
+/// `GET /api/collector/projects/{slug}/status/components`
 pub async fn list_components<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
+    Path(slug): Path<String>,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    match super::status::service::list_components(&state.app.db).await {
+    let project_id = match project_id_for(&state.app.db, &slug).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    match super::status::service::list_components(&state.app.db, project_id).await {
         Ok(components) => Json(json!({ "components": components })).into_response(),
         Err(e) => db_error(e),
     }
 }
 
-/// `POST /api/collector/status/components`
+/// `POST /api/collector/projects/{slug}/status/components`
 pub async fn create_component<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
+    Path(slug): Path<String>,
     Json(input): Json<super::status::service::UpsertComponent>,
 ) -> Response
 where
@@ -517,7 +652,7 @@ where
         )
             .into_response();
     }
-    let project_id = match require_project_id(&state.app.db).await {
+    let project_id = match project_id_for(&state.app.db, &slug).await {
         Ok(id) => id,
         Err(response) => return response,
     };
@@ -527,15 +662,19 @@ where
     }
 }
 
-/// `DELETE /api/collector/status/components/{id}`
+/// `DELETE /api/collector/projects/{slug}/status/components/{id}`
 pub async fn delete_component<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
-    Path(id): Path<Uuid>,
+    Path((slug, id)): Path<(String, Uuid)>,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    match super::status::service::delete_component(&state.app.db, id).await {
+    let project_id = match project_id_for(&state.app.db, &slug).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    match super::status::service::delete_component(&state.app.db, project_id, id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => not_found(),
         Err(e) => db_error(e),
@@ -548,16 +687,22 @@ pub struct ComponentStateBody {
     pub state: String,
 }
 
-/// `POST /api/collector/status/components/{id}/state`
+/// `POST /api/collector/projects/{slug}/status/components/{id}/state`
 pub async fn set_component_state<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
-    Path(id): Path<Uuid>,
+    Path((slug, id)): Path<(String, Uuid)>,
     Json(body): Json<ComponentStateBody>,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    match super::status::service::set_component_state(&state.app.db, id, &body.state).await {
+    let project_id = match project_id_for(&state.app.db, &slug).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    match super::status::service::set_component_state(&state.app.db, project_id, id, &body.state)
+        .await
+    {
         Ok(Some(model)) => {
             Json(json!({ "id": model.id, "state": model.manual_state })).into_response()
         }
@@ -566,9 +711,10 @@ where
     }
 }
 
-/// `POST /api/collector/status/incidents`
+/// `POST /api/collector/projects/{slug}/status/incidents`
 pub async fn open_incident<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
+    Path(slug): Path<String>,
     Json(input): Json<super::status::service::OpenIncident>,
 ) -> Response
 where
@@ -581,7 +727,7 @@ where
         )
             .into_response();
     }
-    let project_id = match require_project_id(&state.app.db).await {
+    let project_id = match project_id_for(&state.app.db, &slug).await {
         Ok(id) => id,
         Err(response) => return response,
     };
@@ -591,10 +737,10 @@ where
     }
 }
 
-/// `POST /api/collector/status/incidents/{id}/updates`
+/// `POST /api/collector/projects/{slug}/status/incidents/{id}/updates`
 pub async fn add_incident_update<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
-    Path(id): Path<Uuid>,
+    Path((slug, id)): Path<(String, Uuid)>,
     Json(input): Json<super::status::service::AddUpdate>,
 ) -> Response
 where
@@ -607,27 +753,41 @@ where
         )
             .into_response();
     }
-    match super::status::service::add_update(&state.app.db, id, input).await {
+    let project_id = match project_id_for(&state.app.db, &slug).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    match super::status::service::add_update(&state.app.db, project_id, id, input).await {
         Ok(Some(model)) => Json(json!({ "id": model.id, "status": model.status })).into_response(),
         Ok(None) => not_found(),
         Err(e) => db_error(e),
     }
 }
 
-/// `GET /api/collector/status.json`
+/// `GET /api/collector/projects/{slug}/status.json`
 ///
 /// Unauthenticated preview of the published document, for local development.
 /// Relying on it in production defeats the point: a status page served by the
 /// collector goes down with the collector.
+///
+/// Per project rather than global: one document covering every application
+/// would tell each product's users about the others' outages.
 pub async fn status_snapshot<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
+    Path(slug): Path<String>,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
+    let project = match projects::find_by_slug(&state.app.db, &slug).await {
+        Ok(Some(project)) => project,
+        Ok(None) => return not_found(),
+        Err(e) => return db_error(e),
+    };
     let config = &state.config.status;
     match super::status::service::build_snapshot(
         &state.app.db,
+        &project,
         &config.name,
         config.refresh_seconds,
     )
@@ -638,26 +798,34 @@ where
     }
 }
 
-/// `GET /api/collector/alerts`
-pub async fn list_rules<ExtraConfig>(State(state): State<CollectorState<ExtraConfig>>) -> Response
+/// `GET /api/collector/projects/{slug}/alerts`
+pub async fn list_rules<ExtraConfig>(
+    State(state): State<CollectorState<ExtraConfig>>,
+    Path(slug): Path<String>,
+) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    match super::alerting::service::list(&state.app.db).await {
+    let project_id = match project_id_for(&state.app.db, &slug).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    match super::alerting::service::list(&state.app.db, project_id).await {
         Ok(rules) => Json(json!({ "rules": rules })).into_response(),
         Err(e) => db_error(e),
     }
 }
 
-/// `POST /api/collector/alerts`
+/// `POST /api/collector/projects/{slug}/alerts`
 pub async fn create_rule<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
+    Path(slug): Path<String>,
     Json(input): Json<super::alerting::service::CreateRule>,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    let project_id = match require_project_id(&state.app.db).await {
+    let project_id = match project_id_for(&state.app.db, &slug).await {
         Ok(id) => id,
         Err(response) => return response,
     };
@@ -672,15 +840,19 @@ where
     }
 }
 
-/// `DELETE /api/collector/alerts/{id}`
+/// `DELETE /api/collector/projects/{slug}/alerts/{id}`
 pub async fn delete_rule<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
-    Path(id): Path<Uuid>,
+    Path((slug, id)): Path<(String, Uuid)>,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    match super::alerting::service::delete(&state.app.db, id).await {
+    let project_id = match project_id_for(&state.app.db, &slug).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    match super::alerting::service::delete(&state.app.db, project_id, id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => not_found(),
         Err(e) => db_error(e),
@@ -690,13 +862,18 @@ where
 /// `POST /api/collector/alerts/{id}/enable` and `/disable`
 async fn set_rule_enabled<ExtraConfig>(
     state: &CollectorState<ExtraConfig>,
+    slug: &str,
     id: Uuid,
     enabled: bool,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    match super::alerting::service::set_enabled(&state.app.db, id, enabled).await {
+    let project_id = match project_id_for(&state.app.db, slug).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    match super::alerting::service::set_enabled(&state.app.db, project_id, id, enabled).await {
         Ok(Some(model)) => {
             Json(json!({ "id": model.id, "enabled": model.enabled })).into_response()
         }
@@ -705,26 +882,26 @@ where
     }
 }
 
-/// `POST /api/collector/alerts/{id}/enable`
+/// `POST /api/collector/projects/{slug}/alerts/{id}/enable`
 pub async fn enable_rule<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
-    Path(id): Path<Uuid>,
+    Path((slug, id)): Path<(String, Uuid)>,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    set_rule_enabled(&state, id, true).await
+    set_rule_enabled(&state, &slug, id, true).await
 }
 
-/// `POST /api/collector/alerts/{id}/disable`
+/// `POST /api/collector/projects/{slug}/alerts/{id}/disable`
 pub async fn disable_rule<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
-    Path(id): Path<Uuid>,
+    Path((slug, id)): Path<(String, Uuid)>,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    set_rule_enabled(&state, id, false).await
+    set_rule_enabled(&state, &slug, id, false).await
 }
 
 /// Body of a silence request.
@@ -734,16 +911,20 @@ pub struct SilenceBody {
     pub minutes: i64,
 }
 
-/// `POST /api/collector/alerts/{id}/silence`
+/// `POST /api/collector/projects/{slug}/alerts/{id}/silence`
 pub async fn silence_rule<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
-    Path(id): Path<Uuid>,
+    Path((slug, id)): Path<(String, Uuid)>,
     Json(body): Json<SilenceBody>,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    match super::alerting::service::silence(&state.app.db, id, body.minutes).await {
+    let project_id = match project_id_for(&state.app.db, &slug).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    match super::alerting::service::silence(&state.app.db, project_id, id, body.minutes).await {
         Ok(Some(model)) => Json(json!({
             "id": model.id,
             "silence_until": model.silence_until

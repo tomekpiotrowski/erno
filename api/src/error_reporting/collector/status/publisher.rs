@@ -51,25 +51,28 @@ pub fn spawn(db: DatabaseConnection, config: StatusConfig) {
     });
 }
 
-/// Build and write one snapshot.
+/// Build and write one snapshot per opted-in project.
 ///
-/// `output_path` is a directory. Until snapshots are project-scoped, this
-/// writes a single `{dir}/status.json`. Per-slug files would currently mix
-/// every project's components under one name.
+/// `output_path` is a directory; each project gets `{dir}/{slug}/status.json`.
+/// One shared document would tell every product's users about the others'
+/// outages, and the slug is the only stable name a static host can address.
 ///
 /// # Errors
 ///
 /// Returns a message describing what failed — a database error, a serialisation
-/// error, or a filesystem error.
+/// error, or a filesystem error. The first failure stops the pass; the next
+/// tick retries every project.
 pub async fn publish_once(db: &DatabaseConnection, config: &StatusConfig) -> Result<(), String> {
     let output = Path::new(config.output_path.trim());
-    let enabled = project::Entity::find()
+    let projects: Vec<_> = project::Entity::find()
         .all(db)
         .await
         .map_err(|e| format!("listing projects: {e}"))?
         .into_iter()
-        .any(|p| p.status_enabled);
-    if !enabled {
+        .filter(|p| p.status_enabled)
+        .collect();
+
+    if projects.is_empty() {
         // `[collector.status] enabled` only turns the publisher on; a project
         // still has to opt in. Say so once, or an operator who set the config
         // key is left wondering why no document ever appears.
@@ -83,10 +86,13 @@ pub async fn publish_once(db: &DatabaseConnection, config: &StatusConfig) -> Res
         return Ok(());
     }
 
-    let snapshot = build_snapshot(db, &config.name, config.refresh_seconds)
-        .await
-        .map_err(|e| format!("building snapshot: {e}"))?;
-    write_snapshot(&output.join("status.json"), &snapshot).await
+    for project in projects {
+        let snapshot = build_snapshot(db, &project, &config.name, config.refresh_seconds)
+            .await
+            .map_err(|e| format!("building snapshot for {}: {e}", project.slug))?;
+        write_snapshot(&output.join(&project.slug).join("status.json"), &snapshot).await?;
+    }
+    Ok(())
 }
 
 async fn write_snapshot(

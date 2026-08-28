@@ -23,16 +23,26 @@ enabled = true
 name = "Acme status"
 # In production this must be somewhere served independently of this deployment
 # — object storage behind a CDN — or the page goes down with the collector.
-output_path = "status/status.json"
+output_path = "status/"
 refresh_seconds = 30
 ```
+
+`output_path` is a **directory**. Each project that has `status_enabled` set
+gets its own `{output_path}/{slug}/status.json`, headed by its `status_name`
+(falling back to `[collector.status] name`). One shared document would tell
+every product's users about the others' outages, and the slug is the only
+stable name a static host can address.
+
+Turning the publisher on is not enough on its own: a project has to opt in. If
+none has, the collector says so on stderr rather than writing nothing in
+silence.
 
 The document is written to a temporary file and renamed, because a reader that
 caught a half-written document would show nonsense at exactly the wrong moment.
 
 For local development the collector also exposes
-`GET /api/collector/status.json`, unauthenticated. Relying on it in production
-defeats the whole point.
+`GET /api/collector/projects/{slug}/status.json`, unauthenticated. Relying on it
+in production defeats the whole point.
 
 ## Staleness is the important part
 

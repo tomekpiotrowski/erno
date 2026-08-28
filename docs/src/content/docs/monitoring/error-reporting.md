@@ -100,6 +100,44 @@ Create a project with `POST /api/collector/projects` (operator Basic) or the
 boot seed: if `project` is empty, the collector inserts slug `monitoring` from
 `[error_reporting] ingest_token` (and optional `[collector.seed]`).
 
+## The operator API is per project
+
+Everything an operator reads or changes about one application hangs off its
+slug, so a console bug cannot hand a handler an id from somewhere else and be
+served another product's data. An id that belongs to a different project reads
+as **404**, the same answer as one that does not exist.
+
+```
+GET|POST         /api/collector/projects
+GET|PATCH|DELETE /api/collector/projects/{slug}
+POST             /api/collector/projects/{slug}/tokens/{server,browser,scrape}
+GET              /api/collector/projects/{slug}/issues[/counts|/{id}|/{id}/events|/{id}/series]
+POST             /api/collector/projects/{slug}/issues/{id}/{resolve,ignore,unresolve}
+GET              /api/collector/projects/{slug}/{series,releases,health}
+GET|POST         /api/collector/projects/{slug}/{uptime,alerts}
+GET|POST         /api/collector/projects/{slug}/status/components
+POST             /api/collector/projects/{slug}/status/incidents
+```
+
+Three things stay un-nested, on purpose:
+
+| Route | Why |
+|---|---|
+| `GET /api/collector/issues` | The cross-application list. `?project={slug}` narrows it without a second endpoint. |
+| `GET /api/collector/issues/counts` | Same, and the console's nginx `auth_request` probes this exact path with no slug baked into the image. |
+| `POST /releases`, `POST /health`, `DELETE /users/{id}/events` | Machine routes. The project comes from the presenting ingest token, so an application cannot record against another. |
+
+`PATCH` can change the name, CORS origins, scrape settings, retention and status
+fields. It **cannot change the slug**: that is the Tempo and Loki `X-Scope-OrgID`
+and the directory name of the published status document, so a rename would
+orphan a tenant and a URL. A rename is a new project.
+
+`DELETE` requires `?force=1`. It cascades in Postgres to every issue, event,
+release, health row, uptime check, status component and alert rule recorded
+against the project, which is not something a console should offer as one click.
+Tempo and Loki tenants are **not** reaped — their data lives in a store the
+collector does not own.
+
 Browsers are cross-origin. The collector CORS layer is the union of
 `project.cors_origins` and `[cors] allowed_origins` (the extras: console
 origin). A missing origin fails *silently*: reports simply stop.

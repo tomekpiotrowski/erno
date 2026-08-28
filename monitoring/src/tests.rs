@@ -117,15 +117,35 @@ async fn observe_rule(
     t: &TestUtils,
     rule: &erno::error_reporting::collector::models::alert_rule::Model,
 ) -> Result<erno::error_reporting::collector::alerting::evaluator::Observation, sea_orm::DbErr> {
+    observe_rule_with(t, rule, None).await
+}
+
+/// Evaluate a rule with a Prometheus base URL, for the PromQL source.
+async fn observe_rule_with(
+    t: &TestUtils,
+    rule: &erno::error_reporting::collector::models::alert_rule::Model,
+    prometheus_url: Option<&str>,
+) -> Result<erno::error_reporting::collector::alerting::evaluator::Observation, sea_orm::DbErr> {
     use erno::error_reporting::collector::alerting::evaluator::{observe, ObserveContext};
+    use erno::error_reporting::collector::models::project;
+    use sea_orm::EntityTrait;
+
     let http = reqwest::Client::new();
     let thresholds = erno::health::HealthThresholds::default();
+    let project_slugs: std::collections::HashMap<uuid::Uuid, String> = project::Entity::find()
+        .all(&t.db)
+        .await
+        .expect("projects")
+        .into_iter()
+        .map(|p| (p.id, p.slug))
+        .collect();
     observe(
         &ObserveContext {
             db: &t.db,
             thresholds: &thresholds,
             http: &http,
-            prometheus_url: None,
+            prometheus_url,
+            project_slugs: &project_slugs,
         },
         rule,
     )
@@ -535,7 +555,11 @@ async fn the_test_config_selects_synchronous_writes() {
 // Operator console API
 // ---------------------------------------------------------------------------
 
-const ISSUES: &str = "/api/collector/issues";
+/// The seeded project every test boots with.
+const PROJECT: &str = "/api/collector/projects/monitoring";
+const ISSUES: &str = "/api/collector/projects/monitoring/issues";
+/// The cross-application list, which stays un-nested.
+const ALL_ISSUES: &str = "/api/collector/issues";
 /// `admin:admin`, matching the test config's argon2 hash.
 const OPERATOR: &str = "Basic YWRtaW46YWRtaW4=";
 
@@ -544,16 +568,7 @@ async fn seed(t: &TestUtils, error_type: &str, message: &str) {
 }
 
 async fn first_issue_id(t: &TestUtils) -> String {
-    let response = t
-        .server
-        .get(ISSUES)
-        .add_header("authorization", OPERATOR)
-        .await;
-    let body: Value = response.json();
-    body["issues"][0]["id"]
-        .as_str()
-        .expect("an issue id")
-        .to_string()
+    first_issue_id_in(t, ISSUES).await
 }
 
 #[tokio::test]
@@ -749,7 +764,7 @@ async fn the_series_endpoint_zero_fills_empty_buckets() {
 
     let response = t
         .server
-        .get("/api/collector/series?hours=24")
+        .get("/api/collector/projects/monitoring/series?hours=24")
         .add_header("authorization", OPERATOR)
         .await;
     assert_eq!(response.status_code(), 200, "body: {}", response.text());
@@ -939,7 +954,9 @@ async fn retention_is_a_no_op_when_nothing_is_old() {
 // Release tracking
 // ---------------------------------------------------------------------------
 
-const RELEASES: &str = "/api/collector/releases";
+const RELEASES: &str = "/api/collector/projects/monitoring/releases";
+/// Machine route: the project comes from the presenting token, not the path.
+const RECORD_RELEASE: &str = "/api/collector/releases";
 
 async fn record_release(
     t: &TestUtils,
@@ -947,7 +964,7 @@ async fn record_release(
     environment: &str,
 ) -> axum_test::TestResponse {
     t.server
-        .post(RELEASES)
+        .post(RECORD_RELEASE)
         .add_header("x-erno-ingest-key", SERVER_TOKEN)
         .json(&json!({
             "version": version,
@@ -1058,7 +1075,7 @@ async fn recording_a_release_requires_the_trusted_token() {
     let t = setup().await;
     let response = t
         .server
-        .post(RELEASES)
+        .post(RECORD_RELEASE)
         .add_header("x-erno-ingest-key", BROWSER_TOKEN)
         .json(&json!({ "version": "1.0.0", "environment": "production" }))
         .await;
@@ -1080,7 +1097,7 @@ async fn a_release_without_a_version_is_refused() {
     let t = setup().await;
     let response = t
         .server
-        .post(RELEASES)
+        .post(RECORD_RELEASE)
         .add_header("x-erno-ingest-key", SERVER_TOKEN)
         .json(&json!({ "version": "  ", "environment": "production" }))
         .await;
@@ -1091,7 +1108,9 @@ async fn a_release_without_a_version_is_refused() {
 // Subsystem health
 // ---------------------------------------------------------------------------
 
-const HEALTH: &str = "/api/collector/health";
+const HEALTH: &str = "/api/collector/projects/monitoring/health";
+/// Machine route: the project comes from the presenting token, not the path.
+const RECORD_HEALTH: &str = "/api/collector/health";
 
 fn health_snapshot(instance: &str) -> Value {
     json!({
@@ -1111,7 +1130,7 @@ fn health_snapshot(instance: &str) -> Value {
 
 async fn post_health(t: &TestUtils, body: &Value) -> axum_test::TestResponse {
     t.server
-        .post(HEALTH)
+        .post(RECORD_HEALTH)
         .add_header("x-erno-ingest-key", SERVER_TOKEN)
         .json(body)
         .await
@@ -1254,7 +1273,7 @@ async fn heartbeats_require_the_trusted_token() {
     let t = setup().await;
     let response = t
         .server
-        .post(HEALTH)
+        .post(RECORD_HEALTH)
         .add_header("x-erno-ingest-key", BROWSER_TOKEN)
         .json(&health_snapshot("api-0"))
         .await;
@@ -1299,7 +1318,7 @@ async fn retired_replicas_are_forgotten() {
 // Uptime checks
 // ---------------------------------------------------------------------------
 
-const UPTIME: &str = "/api/collector/uptime";
+const UPTIME: &str = "/api/collector/projects/monitoring/uptime";
 
 async fn create_check(t: &TestUtils, name: &str, url: &str) -> axum_test::TestResponse {
     t.server
@@ -1650,9 +1669,9 @@ async fn old_probe_results_are_pruned() {
 // Status page
 // ---------------------------------------------------------------------------
 
-const COMPONENTS: &str = "/api/collector/status/components";
-const INCIDENTS: &str = "/api/collector/status/incidents";
-const SNAPSHOT: &str = "/api/collector/status.json";
+const COMPONENTS: &str = "/api/collector/projects/monitoring/status/components";
+const INCIDENTS: &str = "/api/collector/projects/monitoring/status/incidents";
+const SNAPSHOT: &str = "/api/collector/projects/monitoring/status.json";
 
 async fn create_component(t: &TestUtils, name: &str, check_id: Option<&str>) -> String {
     let mut body = json!({ "name": name });
@@ -1930,7 +1949,10 @@ async fn the_publisher_writes_a_document_that_the_page_can_read() {
         .await
         .expect("publish");
 
-    let written = std::fs::read_to_string(dir.join("status.json")).expect("the document exists");
+    // One document per project, addressed by slug: a shared file would tell
+    // every product's users about the others' outages.
+    let written = std::fs::read_to_string(dir.join("monitoring").join("status.json"))
+        .expect("the document exists");
     let snapshot: Value = serde_json::from_str(&written).expect("it is valid JSON");
     assert_eq!(snapshot["name"], "Acme status");
     assert_eq!(snapshot["state"], "operational");
@@ -1959,6 +1981,10 @@ async fn the_publisher_writes_nothing_when_no_project_has_status_enabled() {
         .expect("publish");
 
     assert!(
+        !dir.join("monitoring").join("status.json").exists(),
+        "a project that has not opted in is not published"
+    );
+    assert!(
         !dir.join("status.json").exists(),
         "output_path is a directory and is never treated as a file"
     );
@@ -1968,7 +1994,7 @@ async fn the_publisher_writes_nothing_when_no_project_has_status_enabled() {
 // Alert rules
 // ---------------------------------------------------------------------------
 
-const ALERTS: &str = "/api/collector/alerts";
+const ALERTS: &str = "/api/collector/projects/monitoring/alerts";
 
 async fn create_rule(t: &TestUtils, body: Value) -> axum_test::TestResponse {
     t.server
@@ -2636,7 +2662,7 @@ async fn machine_routes_are_scoped_to_the_presenting_token() {
     );
     let cubeast_release = t
         .server
-        .post(RELEASES)
+        .post(RECORD_RELEASE)
         .add_header("x-erno-ingest-key", "cubeast-server")
         .json(&json!({ "version": "1.0.0", "environment": "production" }))
         .await;
@@ -2655,7 +2681,7 @@ async fn machine_routes_are_scoped_to_the_presenting_token() {
     );
     let cubeast_health = t
         .server
-        .post(HEALTH)
+        .post(RECORD_HEALTH)
         .add_header("x-erno-ingest-key", "cubeast-server")
         .json(&health_snapshot("api-0"))
         .await;
@@ -2735,4 +2761,517 @@ fn monitoring_boot_skips_the_framework_cors_layer() {
     // The helper has to agree, or every request spec here exercises a stack the
     // deployed binary never runs.
     assert!(boot(collector_test_router).skip_default_cors);
+}
+
+// ---------------------------------------------------------------------------
+// Project-scoped operator API
+// ---------------------------------------------------------------------------
+
+const CUBEAST: &str = "/api/collector/projects/cubeast";
+
+/// Two projects, each with one issue of its own. Returns (monitoring, cubeast)
+/// issue ids.
+async fn two_projects_with_an_issue_each(t: &TestUtils) -> (String, String) {
+    insert_project(t, "cubeast", "cubeast-server", "cubeast-browser", &[]).await;
+    for (token, message) in [
+        (SERVER_TOKEN, "from monitoring"),
+        ("cubeast-server", "from cubeast"),
+    ] {
+        t.server
+            .post(INGEST)
+            .add_header("x-erno-ingest-key", token)
+            .json(&envelope(vec![event("TypeError", message)]))
+            .await;
+    }
+
+    (
+        first_issue_id_in(t, ISSUES).await,
+        first_issue_id_in(t, "/api/collector/projects/cubeast/issues").await,
+    )
+}
+
+async fn first_issue_id_in(t: &TestUtils, path: &str) -> String {
+    operator_json(t, path).await["issues"][0]["id"]
+        .as_str()
+        .expect("an issue")
+        .to_string()
+}
+
+/// `GET` as the operator, decoded.
+async fn operator_json(t: &TestUtils, path: &str) -> Value {
+    t.server
+        .get(path)
+        .add_header("authorization", OPERATOR)
+        .await
+        .json()
+}
+
+/// `GET` as the operator, status only.
+async fn operator_status(t: &TestUtils, path: &str) -> axum::http::StatusCode {
+    t.server
+        .get(path)
+        .add_header("authorization", OPERATOR)
+        .await
+        .status_code()
+}
+
+#[tokio::test]
+async fn a_nested_operator_route_404s_on_an_unknown_project() {
+    let t = setup().await;
+    let response = t
+        .server
+        .get("/api/collector/projects/nosuch/issues")
+        .add_header("authorization", OPERATOR)
+        .await;
+    assert_eq!(response.status_code(), 404);
+}
+
+/// The property the nesting exists for: an id is only addressable through the
+/// project that owns it, so a console bug cannot read another product's data.
+#[tokio::test]
+async fn an_issue_is_invisible_through_another_projects_routes() {
+    let t = setup().await;
+    let (mine, theirs) = two_projects_with_an_issue_each(&t).await;
+
+    assert_eq!(operator_status(&t, &format!("{ISSUES}/{mine}")).await, 200);
+    assert_eq!(
+        operator_status(&t, &format!("{ISSUES}/{theirs}")).await,
+        404
+    );
+    assert_eq!(
+        operator_status(&t, &format!("{CUBEAST}/issues/{theirs}")).await,
+        200
+    );
+    assert_eq!(
+        operator_status(&t, &format!("{CUBEAST}/issues/{mine}")).await,
+        404
+    );
+    // The events list is filtered on project_id too, not merely on issue_id.
+    let events = operator_json(&t, &format!("{ISSUES}/{theirs}/events")).await;
+    assert_eq!(
+        events["total"], 0,
+        "another project's occurrences are not listed"
+    );
+}
+
+#[tokio::test]
+async fn triage_and_delete_refuse_an_issue_from_another_project() {
+    let t = setup().await;
+    let (mine, theirs) = two_projects_with_an_issue_each(&t).await;
+
+    let resolve = t
+        .server
+        .post(&format!("{ISSUES}/{theirs}/resolve"))
+        .add_header("authorization", OPERATOR)
+        .await;
+    assert_eq!(
+        resolve.status_code(),
+        404,
+        "cannot triage another project's issue"
+    );
+
+    let deleted = t
+        .server
+        .delete(&format!("{ISSUES}/{theirs}"))
+        .add_header("authorization", OPERATOR)
+        .await;
+    assert_eq!(deleted.status_code(), 404);
+    assert_eq!(issue_count(&t).await, 2, "nothing was removed");
+
+    let own = t
+        .server
+        .delete(&format!("{ISSUES}/{mine}"))
+        .add_header("authorization", OPERATOR)
+        .await;
+    assert_eq!(own.status_code(), 204);
+}
+
+#[tokio::test]
+async fn the_scoped_list_shows_one_project_and_the_union_shows_both() {
+    let t = setup().await;
+    two_projects_with_an_issue_each(&t).await;
+
+    let scoped = operator_json(&t, ISSUES).await;
+    assert_eq!(scoped["total"], 1);
+    assert_eq!(scoped["issues"][0]["project_slug"], "monitoring");
+
+    let all = operator_json(&t, ALL_ISSUES).await;
+    assert_eq!(all["total"], 2);
+    let slugs: Vec<&str> = all["issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["project_slug"].as_str().unwrap())
+        .collect();
+    assert!(slugs.contains(&"monitoring") && slugs.contains(&"cubeast"));
+
+    // Same route, narrowed by slug rather than by a second endpoint.
+    let filtered = operator_json(&t, &format!("{ALL_ISSUES}?project=cubeast")).await;
+    assert_eq!(filtered["total"], 1);
+    assert_eq!(filtered["issues"][0]["project_slug"], "cubeast");
+}
+
+#[tokio::test]
+async fn counts_are_per_project_and_across_all_projects() {
+    let t = setup().await;
+    two_projects_with_an_issue_each(&t).await;
+
+    let unresolved = |body: Value| body["unresolved"].as_i64().unwrap();
+
+    assert_eq!(
+        unresolved(operator_json(&t, &format!("{ISSUES}/counts")).await),
+        1
+    );
+    assert_eq!(
+        unresolved(operator_json(&t, &format!("{CUBEAST}/issues/counts")).await),
+        1
+    );
+    // The console nginx auth probe hits this path with no slug; it must stay
+    // the all-projects answer.
+    assert_eq!(
+        unresolved(operator_json(&t, &format!("{ALL_ISSUES}/counts")).await),
+        2
+    );
+}
+
+#[tokio::test]
+async fn both_issue_lists_clamp_the_page_size() {
+    let t = setup().await;
+    for path in [ISSUES, ALL_ISSUES] {
+        let body = operator_json(&t, &format!("{path}?per_page=5000")).await;
+        assert_eq!(body["per_page"], 200, "{path} clamps to MAX_PER_PAGE");
+    }
+}
+
+#[tokio::test]
+async fn patching_a_project_cannot_rename_it() {
+    let t = setup().await;
+    let renamed = t
+        .server
+        .patch(PROJECT)
+        .add_header("authorization", OPERATOR)
+        .json(&json!({ "slug": "renamed" }))
+        .await;
+    assert_eq!(
+        renamed.status_code(),
+        422,
+        "the slug is the Tempo/Loki tenant and the status document's directory"
+    );
+
+    // The same slug is not a rename, so it is accepted alongside other fields.
+    let ok = t
+        .server
+        .patch(PROJECT)
+        .add_header("authorization", OPERATOR)
+        .json(&json!({ "slug": "monitoring", "name": "Monitoring collector" }))
+        .await;
+    assert_eq!(ok.status_code(), 200);
+    assert_eq!(
+        operator_json(&t, PROJECT).await["name"],
+        "Monitoring collector"
+    );
+}
+
+#[tokio::test]
+async fn patching_a_project_updates_cors_and_never_echoes_the_scrape_token() {
+    let t = setup().await;
+    let patched = t
+        .server
+        .patch(PROJECT)
+        .add_header("authorization", OPERATOR)
+        .json(&json!({
+            "cors_origins": ["https://app.example.com", "  ", ""],
+            "scrape_target": "api.example.com:443",
+            "scrape_metrics_token": "a-scrape-secret",
+            "status_enabled": true
+        }))
+        .await;
+    assert_eq!(patched.status_code(), 200);
+
+    let body = operator_json(&t, PROJECT).await;
+    assert_eq!(body["cors_origins"], json!(["https://app.example.com"]));
+    assert_eq!(body["scrape_target"], "api.example.com:443");
+    assert_eq!(body["status_enabled"], true);
+    assert_eq!(body["scrape_metrics_token_set"], true);
+    assert!(
+        body.get("scrape_metrics_token").is_none(),
+        "the bearer Prometheus uses is write-only"
+    );
+}
+
+#[tokio::test]
+async fn patching_an_unknown_project_is_a_404() {
+    let t = setup().await;
+    let response = t
+        .server
+        .patch("/api/collector/projects/nosuch")
+        .add_header("authorization", OPERATOR)
+        .json(&json!({ "name": "x" }))
+        .await;
+    assert_eq!(response.status_code(), 404);
+}
+
+/// Deleting a project takes every issue, event and rule with it, so it is not
+/// one click: `?force=1` is the typed confirmation.
+#[tokio::test]
+async fn deleting_a_project_needs_force_and_then_cascades() {
+    let t = setup().await;
+    two_projects_with_an_issue_each(&t).await;
+    create_rule(
+        &t,
+        json!({ "name": "New types", "source": "errors", "selector": "new_issues", "threshold": 1 }),
+    )
+    .await;
+    assert_eq!(issue_count(&t).await, 2);
+
+    let unforced = t
+        .server
+        .delete(PROJECT)
+        .add_header("authorization", OPERATOR)
+        .await;
+    assert_eq!(unforced.status_code(), 400);
+    assert_eq!(issue_count(&t).await, 2, "nothing was removed");
+
+    let forced = t
+        .server
+        .delete(&format!("{PROJECT}?force=1"))
+        .add_header("authorization", OPERATOR)
+        .await;
+    assert_eq!(forced.status_code(), 204);
+
+    assert_eq!(issue_count(&t).await, 1, "only cubeast's issue survives");
+    assert_eq!(event_count(&t).await, 1);
+    assert_eq!(
+        scalar(&t, "SELECT count(*)::bigint AS value FROM alert_rule").await,
+        0,
+        "rules cascade with their project"
+    );
+    assert_eq!(
+        operator_status(&t, PROJECT).await,
+        404,
+        "the project itself is gone"
+    );
+}
+
+#[tokio::test]
+async fn deleting_an_unknown_project_is_a_404_even_with_force() {
+    let t = setup().await;
+    let response = t
+        .server
+        .delete("/api/collector/projects/nosuch?force=1")
+        .add_header("authorization", OPERATOR)
+        .await;
+    assert_eq!(response.status_code(), 404);
+}
+
+// ---------------------------------------------------------------------------
+// Alert sources stay inside their own project
+// ---------------------------------------------------------------------------
+
+/// A rule belonging to `cubeast`, so an unscoped query would count the seeded
+/// `monitoring` project's rows instead of its own.
+async fn cubeast_rule(
+    t: &TestUtils,
+    body: Value,
+) -> erno::error_reporting::collector::models::alert_rule::Model {
+    use erno::error_reporting::collector::alerting::service;
+
+    insert_project(t, "cubeast", "cubeast-server", "cubeast-browser", &[]).await;
+    let input = serde_json::from_value(body).expect("rule body");
+    service::create(&t.db, project_id(t, "cubeast").await, input)
+        .await
+        .expect("create rule")
+}
+
+/// One project's id, by slug.
+async fn project_id(t: &TestUtils, slug: &str) -> Uuid {
+    let raw = scalar_text(
+        t,
+        &format!("SELECT id::text AS value FROM project WHERE slug = '{slug}'"),
+    )
+    .await;
+    raw.parse().expect("a uuid")
+}
+
+#[tokio::test]
+async fn an_errors_rule_does_not_count_another_projects_issues() {
+    let t = setup().await;
+    let rule = cubeast_rule(
+        &t,
+        json!({
+            "name": "New types",
+            "source": "errors",
+            "selector": "new_issues",
+            "threshold": 1,
+            "window_seconds": 3600
+        }),
+    )
+    .await;
+
+    // Everything that follows lands in `monitoring`, not in the rule's project.
+    seed(&t, "TypeError", "boom").await;
+    seed(&t, "RangeError", "bang").await;
+    assert_eq!(issue_count(&t).await, 2);
+
+    assert_eq!(
+        observe_rule(&t, &rule).await.expect("observe").value,
+        0.0,
+        "cubeast's rule must not fire on monitoring's issues"
+    );
+
+    t.server
+        .post(INGEST)
+        .add_header("x-erno-ingest-key", "cubeast-server")
+        .json(&envelope(vec![event("TypeError", "cubeast boom")]))
+        .await;
+    assert_eq!(observe_rule(&t, &rule).await.expect("observe").value, 1.0);
+}
+
+#[tokio::test]
+async fn an_event_volume_rule_does_not_count_another_projects_events() {
+    let t = setup().await;
+    let rule = cubeast_rule(
+        &t,
+        json!({
+            "name": "Volume",
+            "source": "errors",
+            "selector": "all",
+            "threshold": 1,
+            "window_seconds": 3600
+        }),
+    )
+    .await;
+
+    seed(&t, "TypeError", "boom").await;
+    assert_eq!(
+        observe_rule(&t, &rule).await.expect("observe").value,
+        0.0,
+        "the raw-SQL source filters project_id too"
+    );
+
+    t.server
+        .post(INGEST)
+        .add_header("x-erno-ingest-key", "cubeast-server")
+        .json(&envelope(vec![event("TypeError", "cubeast boom")]))
+        .await;
+    assert_eq!(observe_rule(&t, &rule).await.expect("observe").value, 1.0);
+}
+
+#[tokio::test]
+async fn a_subsystem_rule_does_not_count_another_projects_instances() {
+    let t = setup().await;
+    let rule = cubeast_rule(
+        &t,
+        json!({ "name": "Instances down", "source": "subsystem", "threshold": 0 }),
+    )
+    .await;
+
+    let mut broken = health_snapshot("api-1");
+    broken["jobs"]["stuck_running"] = json!(3);
+    post_health(&t, &broken).await;
+
+    assert_eq!(
+        observe_rule(&t, &rule).await.expect("observe").value,
+        0.0,
+        "the unhealthy instance belongs to monitoring, not cubeast"
+    );
+}
+
+#[tokio::test]
+async fn an_uptime_rule_does_not_count_another_projects_checks() {
+    use erno::error_reporting::collector::uptime::service as uptime_service;
+
+    let t = setup().await;
+    let rule = cubeast_rule(
+        &t,
+        json!({ "name": "Checks down", "source": "uptime", "threshold": 0 }),
+    )
+    .await;
+
+    // A down check on the seeded project.
+    uptime_service::create(
+        &t.db,
+        project_id(&t, "monitoring").await,
+        serde_json::from_value(json!({ "name": "api", "url": "https://api.example.com" }))
+            .expect("check"),
+    )
+    .await
+    .expect("create check");
+    t.db.execute(Statement::from_string(
+        DbBackend::Postgres,
+        "UPDATE uptime_check SET current_state = 'down'",
+    ))
+    .await
+    .expect("mark down");
+
+    assert_eq!(
+        observe_rule(&t, &rule).await.expect("observe").value,
+        0.0,
+        "the down check belongs to monitoring, not cubeast"
+    );
+}
+
+/// Prometheus holds every project's metrics, so a selector that does not name
+/// its own project would fire this project's alert on another app's traffic.
+/// The check is a literal substring on purpose — injecting a matcher into
+/// arbitrary PromQL would need a parser this repository does not have.
+#[tokio::test]
+async fn a_promql_rule_without_its_project_matcher_does_not_fire() {
+    // Nothing listens here. The scope check runs before the query, so an
+    // unscoped rule never reaches the network.
+    const NOWHERE: &str = "http://127.0.0.1:1";
+
+    let t = setup().await;
+    let rule = cubeast_rule(
+        &t,
+        json!({
+            "name": "Error rate",
+            "source": "promql",
+            "selector": "rate(http_requests_total[5m]) > 10",
+            "threshold": 0
+        }),
+    )
+    .await;
+
+    let unscoped = observe_rule_with(&t, &rule, Some(NOWHERE))
+        .await
+        .expect("observe");
+    assert_eq!(unscoped.value, 0.0);
+    assert!(
+        unscoped.description.contains("not scoped")
+            && unscoped.description.contains(r#"erno_project="cubeast""#),
+        "the description names the matcher the operator has to add: {}",
+        unscoped.description
+    );
+
+    // With the matcher present the rule is allowed through to Prometheus, which
+    // is unreachable here — a different answer, and the point of the test.
+    let scoped_rule = cubeast_rule_replacing_selector(
+        &t,
+        &rule,
+        r#"rate(http_requests_total{erno_project="cubeast"}[5m]) > 10"#,
+    )
+    .await;
+    let scoped = observe_rule_with(&t, &scoped_rule, Some(NOWHERE))
+        .await
+        .expect("observe");
+    assert_eq!(scoped.value, 0.0);
+    assert!(
+        scoped.description.contains("unavailable"),
+        "a scoped selector reaches the query: {}",
+        scoped.description
+    );
+}
+
+async fn cubeast_rule_replacing_selector(
+    t: &TestUtils,
+    rule: &erno::error_reporting::collector::models::alert_rule::Model,
+    selector: &str,
+) -> erno::error_reporting::collector::models::alert_rule::Model {
+    use erno::error_reporting::collector::models::alert_rule;
+    use sea_orm::ActiveModelTrait;
+
+    let mut active: alert_rule::ActiveModel = rule.clone().into();
+    active.selector = Set(selector.to_string());
+    active.update(&t.db).await.expect("update selector")
 }

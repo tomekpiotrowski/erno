@@ -7,7 +7,7 @@
 //! stdout (never `tracing::info`).
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
@@ -75,6 +75,40 @@ pub struct CreateProject {
     pub status_enabled: bool,
     #[serde(default)]
     pub status_name: String,
+}
+
+/// Patch-project body. Every field is optional; absent means "leave alone".
+///
+/// `slug` is deliberately absent. It is the Tempo/Loki `X-Scope-OrgID` and the
+/// directory name of the published status document, so renaming one would
+/// orphan a tenant and a URL. A rename is a new project.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PatchProject {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub cors_origins: Option<Vec<String>>,
+    #[serde(default)]
+    pub scrape_target: Option<String>,
+    #[serde(default)]
+    pub scrape_scheme: Option<String>,
+    /// Write-only. `GET` never echoes it.
+    #[serde(default)]
+    pub scrape_metrics_token: Option<String>,
+    #[serde(default)]
+    pub event_retention_days: Option<Option<i64>>,
+    #[serde(default)]
+    pub issue_retention_days: Option<Option<i64>>,
+    #[serde(default)]
+    pub max_events_per_issue: Option<Option<i64>>,
+    #[serde(default)]
+    pub status_enabled: Option<bool>,
+    #[serde(default)]
+    pub status_name: Option<String>,
+    /// Present only so an attempt to rename can be refused loudly rather than
+    /// silently ignored.
+    #[serde(default)]
+    pub slug: Option<String>,
 }
 
 /// Create response: the DTO plus plaintext tokens shown once.
@@ -230,13 +264,92 @@ pub async fn find_by_slug(
         .await
 }
 
-/// First project, for un-nested operator writes until those routes are nested.
-pub async fn first_project_id(db: &DatabaseConnection) -> Result<Option<Uuid>, DbErr> {
-    Ok(project::Entity::find()
-        .order_by_asc(project::Column::CreatedAt)
-        .one(db)
-        .await?
-        .map(|p| p.id))
+/// Update the mutable fields of a project.
+///
+/// # Errors
+///
+/// [`ProjectError::Invalid`] for a rename attempt or an empty name, and the
+/// database error otherwise.
+pub async fn patch(
+    db: &DatabaseConnection,
+    slug: &str,
+    input: PatchProject,
+) -> Result<Option<project::Model>, ProjectError> {
+    if let Some(requested) = input.slug.as_deref().map(str::trim) {
+        if requested != slug {
+            return Err(ProjectError::Invalid(
+                "slug is immutable: it identifies the Tempo and Loki tenant and the published status document".to_string(),
+            ));
+        }
+    }
+
+    let Some(row) = find_by_slug(db, slug).await? else {
+        return Ok(None);
+    };
+
+    let mut active: project::ActiveModel = row.into();
+
+    if let Some(name) = input.name.as_deref().map(str::trim) {
+        if name.is_empty() {
+            return Err(ProjectError::Invalid("name is required".to_string()));
+        }
+        active.name = Set(truncate(name, 200));
+    }
+    if let Some(origins) = input.cors_origins {
+        let cleaned = serde_json::to_value(
+            origins
+                .iter()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap_or_else(|_| json!([]));
+        active.cors_origins = Set(cleaned);
+    }
+    if let Some(target) = input.scrape_target.as_deref().map(str::trim) {
+        active.scrape_target = Set(target.to_string());
+    }
+    if let Some(scheme) = input
+        .scrape_scheme
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        active.scrape_scheme = Set(scheme.to_string());
+    }
+    if let Some(token) = input.scrape_metrics_token {
+        active.scrape_metrics_token = Set(token);
+    }
+    if let Some(days) = input.event_retention_days {
+        active.event_retention_days = Set(days);
+    }
+    if let Some(days) = input.issue_retention_days {
+        active.issue_retention_days = Set(days);
+    }
+    if let Some(cap) = input.max_events_per_issue {
+        active.max_events_per_issue = Set(cap);
+    }
+    if let Some(enabled) = input.status_enabled {
+        active.status_enabled = Set(enabled);
+    }
+    if let Some(name) = input.status_name.as_deref().map(str::trim) {
+        active.status_name = Set(name.to_string());
+    }
+
+    Ok(Some(active.update(db).await?))
+}
+
+/// Delete a project and, by cascade, everything recorded against it.
+///
+/// # Errors
+///
+/// Returns the database error.
+pub async fn delete(db: &DatabaseConnection, slug: &str) -> Result<bool, DbErr> {
+    let result = project::Entity::delete_many()
+        .filter(project::Column::Slug.eq(slug))
+        .exec(db)
+        .await?;
+    Ok(result.rows_affected > 0)
 }
 
 /// Rotate the server ingest token. Returns plaintext once.
@@ -450,6 +563,95 @@ where
                 .into_response()
         }
         Err(e) => project_error(e),
+    }
+}
+
+/// `PATCH /api/collector/projects/{slug}`
+pub async fn patch_project<ExtraConfig>(
+    State(state): State<CollectorState<ExtraConfig>>,
+    Path(slug): Path<String>,
+    Json(input): Json<PatchProject>,
+) -> Response
+where
+    ExtraConfig: Clone + Send + Sync + 'static,
+{
+    match patch(&state.app.db, &slug, input).await {
+        Ok(Some(row)) => {
+            // Origins may have changed; reload before answering so the next
+            // preflight on this replica already knows.
+            state
+                .origin_set
+                .extend(origins_from_json(&row.cors_origins));
+            if let Err(e) = refresh_origins(
+                &state.origin_set,
+                &state.app.db,
+                &state.app.config.cors.allowed_origins,
+            )
+            .await
+            {
+                tracing::error!(
+                    target: "erno::error_reporting::collector",
+                    "could not reload CORS origins after patch: {e}"
+                );
+            }
+            Json(ProjectDto::from(row)).into_response()
+        }
+        Ok(None) => (StatusCode::NOT_FOUND, Json(json!({ "error": "not_found" }))).into_response(),
+        Err(e) => project_error(e),
+    }
+}
+
+/// Query string of the delete route.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DeleteProjectQuery {
+    #[serde(default)]
+    pub force: Option<String>,
+}
+
+/// `DELETE /api/collector/projects/{slug}?force=1`
+///
+/// Deleting a project cascades to every issue, event, release, health row,
+/// uptime check, status component and alert rule recorded against it. `force`
+/// is required so that is never one click away in the console.
+///
+/// Tempo and Loki tenants are not reaped: their data is keyed by slug in a
+/// store the collector does not own.
+pub async fn delete_project<ExtraConfig>(
+    State(state): State<CollectorState<ExtraConfig>>,
+    Path(slug): Path<String>,
+    Query(query): Query<DeleteProjectQuery>,
+) -> Response
+where
+    ExtraConfig: Clone + Send + Sync + 'static,
+{
+    if query.force.as_deref() != Some("1") {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "deleting a project removes every issue, event, release, uptime check and alert rule recorded against it; repeat with ?force=1"
+            })),
+        )
+            .into_response();
+    }
+
+    match delete(&state.app.db, &slug).await {
+        Ok(true) => {
+            if let Err(e) = refresh_origins(
+                &state.origin_set,
+                &state.app.db,
+                &state.app.config.cors.allowed_origins,
+            )
+            .await
+            {
+                tracing::error!(
+                    target: "erno::error_reporting::collector",
+                    "could not reload CORS origins after delete: {e}"
+                );
+            }
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Ok(false) => (StatusCode::NOT_FOUND, Json(json!({ "error": "not_found" }))).into_response(),
+        Err(e) => db_error(e),
     }
 }
 

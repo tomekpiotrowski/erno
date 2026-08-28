@@ -28,6 +28,11 @@ pub struct IssueSummary {
     pub first_release: Option<String>,
     pub last_release: Option<String>,
     pub environment: Option<String>,
+    /// Which application this issue belongs to. Present on every response so
+    /// the all-projects table can name the app without a second request; the
+    /// nested lists carry it too rather than having two shapes.
+    pub project_slug: String,
+    pub project_name: String,
 }
 
 /// A paginated issues list.
@@ -115,6 +120,10 @@ pub struct IssueQuery {
     /// Restrict to a release.
     #[serde(default)]
     pub release: Option<String>,
+    /// Restrict the all-projects list to one project slug. Ignored on the
+    /// nested route, where the slug is already in the path.
+    #[serde(default)]
+    pub project: Option<String>,
     /// Look-back window in hours.
     #[serde(default)]
     pub hours: Option<i64>,

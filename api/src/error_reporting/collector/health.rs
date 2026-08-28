@@ -3,7 +3,9 @@
 //! Docs: docs/src/content/docs/monitoring/subsystem-health.md
 
 use chrono::{NaiveDateTime, Utc};
-use sea_orm::{ActiveValue::Set, DatabaseConnection, DbErr, EntityTrait, QueryOrder};
+use sea_orm::{
+    ActiveValue::Set, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter, QueryOrder,
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -85,9 +87,11 @@ pub async fn record(
 /// Returns the underlying [`DbErr`] when the query fails.
 pub async fn list(
     db: &DatabaseConnection,
+    project_id: Uuid,
     thresholds: &HealthThresholds,
 ) -> Result<HealthResponse, DbErr> {
     let rows = app_health::Entity::find()
+        .filter(app_health::Column::ProjectId.eq(project_id))
         .order_by_asc(app_health::Column::Instance)
         .all(db)
         .await?;

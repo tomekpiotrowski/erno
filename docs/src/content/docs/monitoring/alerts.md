@@ -67,8 +67,25 @@ Two behaviours worth knowing:
   increase(erno_alert_source_unavailable_total[10m]) > 0
   ```
 
+- **A PromQL selector must name its own project.** Prometheus holds every
+  project's metrics, so an unscoped query counts the whole organisation and
+  fires one application's alert on another's traffic. The selector has to
+  contain the literal matcher `erno_project="<slug>"`; the console's rule
+  editor inserts it. A selector without it reads as not breaching and
+  increments `erno_alert_source_unavailable_total{source="promql_unscoped"}`,
+  so the same catch-all rule above surfaces it.
+
+  The check is a substring test, deliberately. Injecting a matcher into
+  arbitrary PromQL — `rate(...)`, `or`, `ignoring(...)` — needs a query parser,
+  and a half-right rewrite of someone's alerting expression is worse than
+  asking them to be explicit.
+
+  ```
+  rate(http_requests_total{erno_project="teryon"}[5m]) > 10
+  ```
+
 ```sh
-curl -X POST https://monitoring.example.com/api/collector/alerts \
+curl -X POST https://monitoring.example.com/api/collector/projects/teryon/alerts \
   -u operator:secret \
   -H 'content-type: application/json' \
   -d '{"name":"New error types","source":"errors","selector":"new_issues",

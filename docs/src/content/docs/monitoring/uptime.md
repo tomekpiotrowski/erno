@@ -12,7 +12,7 @@ Without probes, a status page is a manual claim. With them it is an observation.
 ## Defining a check
 
 ```sh
-curl -X POST https://monitoring.example.com/api/collector/uptime \
+curl -X POST https://monitoring.example.com/api/collector/projects/teryon/uptime \
   -u operator:secret \
   -H 'content-type: application/json' \
   -d '{"name":"API liveness","url":"https://api.example.com/liveness","interval_seconds":60}'

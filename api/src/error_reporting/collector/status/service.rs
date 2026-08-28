@@ -15,7 +15,7 @@ use super::snapshot::{
     StatusSnapshot,
 };
 use crate::error_reporting::collector::{
-    models::{status_component, status_incident, status_incident_update, uptime_check},
+    models::{project, status_component, status_incident, status_incident_update, uptime_check},
     uptime::state::CheckState,
 };
 
@@ -97,10 +97,15 @@ pub async fn create_component(
 /// Returns the database error.
 pub async fn set_component_state(
     db: &DatabaseConnection,
+    project_id: Uuid,
     id: Uuid,
     state: &str,
 ) -> Result<Option<status_component::Model>, DbErr> {
-    let Some(model) = status_component::Entity::find_by_id(id).one(db).await? else {
+    let Some(model) = status_component::Entity::find_by_id(id)
+        .filter(status_component::Column::ProjectId.eq(project_id))
+        .one(db)
+        .await?
+    else {
         return Ok(None);
     };
     let mut active: status_component::ActiveModel = model.into();
@@ -115,8 +120,16 @@ pub async fn set_component_state(
 /// # Errors
 ///
 /// Returns the database error.
-pub async fn delete_component(db: &DatabaseConnection, id: Uuid) -> Result<bool, DbErr> {
-    let result = status_component::Entity::delete_by_id(id).exec(db).await?;
+pub async fn delete_component(
+    db: &DatabaseConnection,
+    project_id: Uuid,
+    id: Uuid,
+) -> Result<bool, DbErr> {
+    let result = status_component::Entity::delete_many()
+        .filter(status_component::Column::Id.eq(id))
+        .filter(status_component::Column::ProjectId.eq(project_id))
+        .exec(db)
+        .await?;
     Ok(result.rows_affected > 0)
 }
 
@@ -165,10 +178,12 @@ pub async fn open_incident(
 /// Returns the database error.
 pub async fn add_update(
     db: &DatabaseConnection,
+    project_id: Uuid,
     incident_id: Uuid,
     input: AddUpdate,
 ) -> Result<Option<status_incident::Model>, DbErr> {
     let Some(incident) = status_incident::Entity::find_by_id(incident_id)
+        .filter(status_incident::Column::ProjectId.eq(project_id))
         .one(db)
         .await?
     else {
@@ -222,11 +237,19 @@ fn normalize_incident_status(status: &str) -> String {
 /// Returns the database error.
 pub async fn build_snapshot(
     db: &DatabaseConnection,
-    name: &str,
+    project: &project::Model,
+    default_name: &str,
     refresh_seconds: u64,
 ) -> Result<StatusSnapshot, DbErr> {
-    let components = build_components(db).await?;
-    let (active_incidents, recent_incidents) = build_incidents(db).await?;
+    let components = build_components(db, project.id).await?;
+    let (active_incidents, recent_incidents) = build_incidents(db, project.id).await?;
+
+    // The project's own heading, falling back to the collector-wide one so an
+    // operator who never set it still gets a titled page.
+    let name = match project.status_name.trim() {
+        "" => default_name,
+        name => name,
+    };
 
     Ok(StatusSnapshot {
         name: name.to_string(),
@@ -239,8 +262,12 @@ pub async fn build_snapshot(
     })
 }
 
-async fn build_components(db: &DatabaseConnection) -> Result<Vec<PublicComponent>, DbErr> {
+async fn build_components(
+    db: &DatabaseConnection,
+    project_id: Uuid,
+) -> Result<Vec<PublicComponent>, DbErr> {
     let rows = status_component::Entity::find()
+        .filter(status_component::Column::ProjectId.eq(project_id))
         .order_by_asc(status_component::Column::Position)
         .order_by_asc(status_component::Column::Name)
         .all(db)
@@ -325,10 +352,12 @@ async fn component_from_check(
 
 async fn build_incidents(
     db: &DatabaseConnection,
+    project_id: Uuid,
 ) -> Result<(Vec<PublicIncident>, Vec<PublicIncident>), DbErr> {
     let cutoff = Utc::now().naive_utc() - Duration::days(RECENT_INCIDENT_DAYS);
 
     let rows = status_incident::Entity::find()
+        .filter(status_incident::Column::ProjectId.eq(project_id))
         .filter(
             status_incident::Column::ResolvedAt
                 .is_null()
@@ -382,8 +411,10 @@ async fn build_incidents(
 /// Returns the database error.
 pub async fn list_components(
     db: &DatabaseConnection,
+    project_id: Uuid,
 ) -> Result<Vec<status_component::Model>, DbErr> {
     status_component::Entity::find()
+        .filter(status_component::Column::ProjectId.eq(project_id))
         .order_by_asc(status_component::Column::Position)
         .all(db)
         .await

@@ -121,8 +121,12 @@ fn normalize_severity(severity: Option<&str>) -> String {
 /// # Errors
 ///
 /// Returns the database error.
-pub async fn list(db: &DatabaseConnection) -> Result<Vec<alert_rule::Model>, DbErr> {
+pub async fn list(
+    db: &DatabaseConnection,
+    project_id: Uuid,
+) -> Result<Vec<alert_rule::Model>, DbErr> {
     let mut rules = alert_rule::Entity::find()
+        .filter(alert_rule::Column::ProjectId.eq(project_id))
         .order_by_asc(alert_rule::Column::Name)
         .all(db)
         .await?;
@@ -152,8 +156,12 @@ pub async fn enabled(db: &DatabaseConnection) -> Result<Vec<alert_rule::Model>, 
 /// # Errors
 ///
 /// Returns the database error.
-pub async fn delete(db: &DatabaseConnection, id: Uuid) -> Result<bool, DbErr> {
-    let result = alert_rule::Entity::delete_by_id(id).exec(db).await?;
+pub async fn delete(db: &DatabaseConnection, project_id: Uuid, id: Uuid) -> Result<bool, DbErr> {
+    let result = alert_rule::Entity::delete_many()
+        .filter(alert_rule::Column::Id.eq(id))
+        .filter(alert_rule::Column::ProjectId.eq(project_id))
+        .exec(db)
+        .await?;
     Ok(result.rows_affected > 0)
 }
 
@@ -164,10 +172,15 @@ pub async fn delete(db: &DatabaseConnection, id: Uuid) -> Result<bool, DbErr> {
 /// Returns the database error.
 pub async fn set_enabled(
     db: &DatabaseConnection,
+    project_id: Uuid,
     id: Uuid,
     enabled: bool,
 ) -> Result<Option<alert_rule::Model>, DbErr> {
-    let Some(model) = alert_rule::Entity::find_by_id(id).one(db).await? else {
+    let Some(model) = alert_rule::Entity::find_by_id(id)
+        .filter(alert_rule::Column::ProjectId.eq(project_id))
+        .one(db)
+        .await?
+    else {
         return Ok(None);
     };
     let mut active: alert_rule::ActiveModel = model.into();
@@ -185,10 +198,15 @@ pub async fn set_enabled(
 /// Returns the database error.
 pub async fn silence(
     db: &DatabaseConnection,
+    project_id: Uuid,
     id: Uuid,
     minutes: i64,
 ) -> Result<Option<alert_rule::Model>, DbErr> {
-    let Some(model) = alert_rule::Entity::find_by_id(id).one(db).await? else {
+    let Some(model) = alert_rule::Entity::find_by_id(id)
+        .filter(alert_rule::Column::ProjectId.eq(project_id))
+        .one(db)
+        .await?
+    else {
         return Ok(None);
     };
     let mut active: alert_rule::ActiveModel = model.into();

@@ -122,11 +122,14 @@ pub async fn record(
 /// Returns the underlying [`DbErr`] when a query fails.
 pub async fn list(
     db: &DatabaseConnection,
+    project_id: Uuid,
     query: &ReleaseQuery,
 ) -> Result<ReleaseListResponse, DbErr> {
     let limit = query.limit.unwrap_or(20).clamp(1, MAX_LIMIT);
 
-    let mut finder = release::Entity::find().order_by_desc(release::Column::DeployedAt);
+    let mut finder = release::Entity::find()
+        .filter(release::Column::ProjectId.eq(project_id))
+        .order_by_desc(release::Column::DeployedAt);
     if let Some(environment) = query
         .environment
         .as_deref()
@@ -141,7 +144,10 @@ pub async fn list(
     for model in releases {
         // `first_release` is written only on insert, so this counts issues born
         // in this version rather than merely seen during it.
+        // Scoped to the project: two applications can ship a version named
+        // `1.0.0`, and counting both would credit one with the other's issues.
         let new_issues = error_issue::Entity::find()
+            .filter(error_issue::Column::ProjectId.eq(project_id))
             .filter(error_issue::Column::FirstRelease.eq(model.version.clone()))
             .count(db)
             .await? as i64;

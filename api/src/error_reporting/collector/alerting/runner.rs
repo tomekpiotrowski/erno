@@ -6,10 +6,14 @@
 //! each notifying would multiply every alert by the replica count, which is the
 //! fastest possible route to people muting the whole system.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use chrono::Utc;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection, EntityTrait};
+use uuid::Uuid;
+
+use crate::error_reporting::collector::models::project;
 
 use super::{
     evaluator::{observe, ObserveContext},
@@ -91,12 +95,21 @@ pub async fn evaluate_all(
     let rules = service::enabled(db).await?;
     let now = Utc::now().naive_utc();
 
-    // Built once per pass: every rule reads from the same sources.
+    // Built once per pass: every rule reads from the same sources. The slug map
+    // is here rather than joined per rule because a pass evaluates every
+    // project's rules and there are only ever a handful of projects.
+    let project_slugs: HashMap<Uuid, String> = project::Entity::find()
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|p| (p.id, p.slug))
+        .collect();
     let ctx = ObserveContext {
         db,
         thresholds,
         http: client,
         prometheus_url,
+        project_slugs: &project_slugs,
     };
 
     for rule in rules {

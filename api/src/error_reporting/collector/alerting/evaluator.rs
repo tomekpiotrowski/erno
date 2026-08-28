@@ -2,6 +2,8 @@
 //!
 //! Docs: docs/src/content/docs/monitoring/alerts.md
 
+use std::collections::HashMap;
+
 use chrono::{Duration, Utc};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseConnection, DbBackend, DbErr, EntityTrait,
@@ -11,6 +13,7 @@ use sea_orm::{
 use super::rules::RuleSource;
 use crate::error_reporting::collector::models::{alert_rule, app_health, uptime_check};
 use crate::health::{HealthSnapshot, HealthState, HealthThresholds};
+use uuid::Uuid;
 
 /// What a rule observed, plus how to say it.
 #[derive(Debug, Clone)]
@@ -30,6 +33,9 @@ pub struct ObserveContext<'a> {
     pub http: &'a reqwest::Client,
     /// Base URL of the bundled Prometheus. `None` disables the PromQL source.
     pub prometheus_url: Option<&'a str>,
+    /// Project id to slug, built once per pass. PromQL rules are checked
+    /// against their own project's slug, which is not on the rule row.
+    pub project_slugs: &'a HashMap<Uuid, String>,
 }
 
 /// Evaluate one rule against current data.
@@ -74,6 +80,17 @@ async fn observe_promql(ctx: &ObserveContext<'_>, rule: &alert_rule::Model) -> O
             description: format!("PromQL unavailable ({reason})"),
         }
     };
+    // Same counter, a different label value, so the one catch-all rule an
+    // operator writes over `erno_alert_source_unavailable_total` also catches
+    // a selector that forgot its project.
+    let unscoped = |wanted: &str| {
+        metrics::counter!("erno_alert_source_unavailable_total", "source" => "promql_unscoped")
+            .increment(1);
+        Observation {
+            value: 0.0,
+            description: format!("PromQL selector is not scoped to this project (needs {wanted})"),
+        }
+    };
 
     let Some(base) = ctx.prometheus_url.filter(|u| !u.trim().is_empty()) else {
         return unavailable("no prometheus url configured");
@@ -83,6 +100,20 @@ async fn observe_promql(ctx: &ObserveContext<'_>, rule: &alert_rule::Model) -> O
             value: 0.0,
             description: "PromQL rule has no query".to_string(),
         };
+    }
+
+    // Prometheus holds every project's metrics, so an unscoped selector counts
+    // the whole organisation and fires this project's alert on another app's
+    // traffic. Requiring the matcher as a literal substring is deliberate: the
+    // alternative is injecting it into arbitrary PromQL (`rate(...)`, `or`,
+    // `ignoring(...)`), which needs a parser this repository does not have.
+    // The console's rule editor inserts it.
+    let Some(slug) = ctx.project_slugs.get(&rule.project_id) else {
+        return unscoped("project has no slug");
+    };
+    let matcher = format!("erno_project=\"{slug}\"");
+    if !rule.selector.contains(&matcher) {
+        return unscoped(&matcher);
     }
 
     let url = format!("{}/api/v1/query", base.trim_end_matches('/'));
@@ -162,6 +193,10 @@ async fn observe_errors(
     if rule.selector == "new_issues" {
         let count = crate::error_reporting::collector::models::error_issue::Entity::find()
             .filter(
+                crate::error_reporting::collector::models::error_issue::Column::ProjectId
+                    .eq(rule.project_id),
+            )
+            .filter(
                 crate::error_reporting::collector::models::error_issue::Column::FirstSeen
                     .gte(since),
             )
@@ -173,13 +208,17 @@ async fn observe_errors(
         });
     }
 
-    // Otherwise: event volume, optionally narrowed to one source.
+    // Otherwise: event volume, optionally narrowed to one source. Placeholder
+    // numbers come from `values.len()`, so adding a filter cannot shift the
+    // ones written after it.
     let mut sql =
         String::from("SELECT count(*)::bigint AS value FROM error_event WHERE created_at >= $1");
     let mut values: Vec<Value> = vec![Value::ChronoDateTime(Some(Box::new(since)))];
+    values.push(rule.project_id.into());
+    sql.push_str(&format!(" AND project_id = ${}", values.len()));
     if !rule.selector.is_empty() && rule.selector != "all" {
         values.push(rule.selector.clone().into());
-        sql.push_str(" AND source = $2");
+        sql.push_str(&format!(" AND source = ${}", values.len()));
     }
 
     let row = db
@@ -202,6 +241,7 @@ async fn observe_uptime(
     rule: &alert_rule::Model,
 ) -> Result<Observation, DbErr> {
     let mut finder = uptime_check::Entity::find()
+        .filter(uptime_check::Column::ProjectId.eq(rule.project_id))
         .filter(uptime_check::Column::Enabled.eq(true))
         .filter(uptime_check::Column::CurrentState.eq("down"));
 
@@ -231,7 +271,10 @@ async fn observe_subsystem(
     rule: &alert_rule::Model,
     thresholds: &HealthThresholds,
 ) -> Result<Observation, DbErr> {
-    let rows = app_health::Entity::find().all(db).await?;
+    let rows = app_health::Entity::find()
+        .filter(app_health::Column::ProjectId.eq(rule.project_id))
+        .all(db)
+        .await?;
     let now = Utc::now().naive_utc();
 
     // "degraded" counts anything that is not fully healthy; the default counts
