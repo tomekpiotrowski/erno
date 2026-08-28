@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 use std::time::Instant;
 
 use super::super::banner::{listed_services, state_named, BannerSnapshot, DevUrls, ServiceState};
-use super::super::log::{is_error_line, LogLine};
+use super::super::log::{classify_wire_line, is_error_line, LogLine, WireKind};
 use super::devapi::{DevJob, MigrationStatus, MockEmail};
 use super::loki::LokiLine;
 use super::prom::PromSnapshot;
@@ -46,9 +47,21 @@ pub struct TuiState {
     pub migrations: MigrationStatus,
     pub wide_wire: bool,
     pub tempo_query: String,
+    /// Request / reload / error marks keyed by service, taken from child logs.
+    pub wire_ticks: HashMap<String, Vec<WireTick>>,
+    /// Last log `seq` ingested into `wire_ticks`. `None` until the first
+    /// sample, which is a baseline so historical lines are not a burst.
+    log_cursor: Option<u64>,
     /// Next draw should wipe the physical screen so a shorter log cannot leave
     /// cells from the previous service. Set on focus changes.
     pub force_redraw: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct WireTick {
+    pub at: f64,
+    pub error: bool,
+    pub reload: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -100,6 +113,8 @@ impl TuiState {
             migrations: MigrationStatus::default(),
             wide_wire: false,
             tempo_query: "{}".into(),
+            wire_ticks: HashMap::new(),
+            log_cursor: None,
             force_redraw: false,
         }
     }
@@ -123,9 +138,63 @@ impl TuiState {
     }
 
     pub fn ingest_logs(&mut self, lines: Vec<LogLine>) {
+        self.ingest_wire_ticks(&lines);
         if !self.paused {
             self.logs = lines;
         }
+    }
+
+    pub fn ticks(&self, service: &str) -> &[WireTick] {
+        self.wire_ticks
+            .get(service)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+    }
+
+    fn push_tick(&mut self, service: &str, now: f64, error: bool, reload: bool) {
+        self.wire_ticks
+            .entry(service.to_string())
+            .or_default()
+            .push(WireTick {
+                at: now,
+                error,
+                reload,
+            });
+    }
+
+    fn prune_ticks(&mut self, now: f64) {
+        for ticks in self.wire_ticks.values_mut() {
+            ticks.retain(|t| now - t.at <= 300.0);
+        }
+    }
+
+    /// Every lane is the same: new child log lines that classify as HTTP,
+    /// HMR, or error. erno's own probes never reach the ring.
+    fn ingest_wire_ticks(&mut self, lines: &[LogLine]) {
+        let Some(max) = lines.iter().map(|l| l.seq).max() else {
+            return;
+        };
+        let Some(cursor) = self.log_cursor else {
+            self.log_cursor = Some(max);
+            return;
+        };
+        let now = unix_now();
+        for line in lines {
+            if line.seq <= cursor {
+                continue;
+            }
+            match classify_wire_line(&line.line) {
+                Some(WireKind::Request { error }) => {
+                    self.push_tick(&line.label, now, error, false);
+                }
+                Some(WireKind::Reload) => {
+                    self.push_tick(&line.label, now, false, true);
+                }
+                None => {}
+            }
+        }
+        self.log_cursor = Some(max.max(cursor));
+        self.prune_ticks(now);
     }
 
     pub fn log_row_count(&self) -> usize {
@@ -213,6 +282,13 @@ pub fn service_meta(name: &str) -> (&'static str, &'static str) {
     }
 }
 
+fn unix_now() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0)
+}
+
 /// Visible `[start, end)` of a follow-the-bottom log.
 ///
 /// `offset` is how many newest rows sit below the window (`0` = follow).
@@ -295,14 +371,8 @@ mod tests {
             .expect("app");
         state.focus = Some(app);
         state.logs = vec![
-            LogLine {
-                label: "api".into(),
-                line: "api-only".into(),
-            },
-            LogLine {
-                label: "app".into(),
-                line: "app-only".into(),
-            },
+            LogLine::new("api", "api-only"),
+            LogLine::new("app", "app-only"),
         ];
         state.traces = vec![hit("erno", "GET /x"), hit("app", "HMR")];
         let logs: Vec<&str> = state
@@ -330,18 +400,9 @@ mod tests {
             .expect("app");
         state.focus = Some(app);
         state.logs = vec![
-            LogLine {
-                label: "api".into(),
-                line: "api-only".into(),
-            },
-            LogLine {
-                label: "app".into(),
-                line: "\u{1b}[31merror boom\u{1b}[0m".into(),
-            },
-            LogLine {
-                label: "app".into(),
-                line: "still going".into(),
-            },
+            LogLine::new("api", "api-only"),
+            LogLine::new("app", "\u{1b}[31merror boom\u{1b}[0m"),
+            LogLine::new("app", "still going"),
         ];
         assert_eq!(
             state.visible_log_text(),
@@ -371,10 +432,7 @@ mod tests {
     }
 
     fn log(label: &str, line: &str) -> LogLine {
-        LogLine {
-            label: label.into(),
-            line: line.into(),
-        }
+        LogLine::new(label, line)
     }
 
     #[test]
@@ -389,5 +447,48 @@ mod tests {
         state.log_offset = 99;
         state.clamp_log_offset();
         assert_eq!(state.log_offset, 12);
+    }
+
+    fn seq(n: u64, label: &str, line: &str) -> LogLine {
+        LogLine {
+            seq: n,
+            ..LogLine::new(label, line)
+        }
+    }
+
+    #[test]
+    fn wire_ticks_come_from_child_logs_on_every_service() {
+        let urls = DevUrls::defaults(true, true, true);
+        let mut state = TuiState::new("teryon", &urls);
+        state.ingest_logs(vec![seq(1, "www", "22:41:58 [200] / 2ms")]);
+        assert!(
+            state.ticks("www").is_empty(),
+            "first sample is a baseline, not a burst"
+        );
+        state.ingest_logs(vec![
+            seq(1, "www", "22:41:58 [200] / 2ms"),
+            seq(2, "www", "22:41:59 [200] / 3ms"),
+            seq(3, "www", "22:42:01 [200] HEAD / 2ms"),
+            seq(4, "www", "22:42:02 [500] /broken 12ms"),
+            seq(
+                5,
+                "api",
+                "23:17:00.03 DEBUG [200] GET /api/projects 4ms",
+            ),
+            seq(
+                6,
+                "api",
+                "request: finished processing request latency=1 ms status=200 method=GET uri=/readiness version=HTTP/1.1",
+            ),
+            seq(7, "app", "✔ Changes detected. Rebuilding..."),
+            seq(8, "www", "compiled successfully"),
+            seq(9, "api", "Worker 'default-0' received job notification"),
+        ]);
+        assert_eq!(state.ticks("www").len(), 2);
+        assert!(state.ticks("www")[1].error);
+        assert_eq!(state.ticks("api").len(), 1);
+        assert!(!state.ticks("api")[0].error);
+        assert_eq!(state.ticks("app").len(), 1);
+        assert!(state.ticks("app")[0].reload);
     }
 }

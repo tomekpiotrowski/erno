@@ -280,16 +280,19 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) -> ui::
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
+    let otel = local_otel_vars(urls.tempo.is_some(), urls.loki.is_some());
     let api = sel.api.then(|| {
         let api_dir_spawn = api_dir.clone();
         let api_sink = sink.clone();
         let cors_env = cors_env.clone();
+        let otel = otel.clone();
         Supervisor::start("api", shutdown_rx.clone(), move || {
             let mut cmd = Command::new("cargo");
             cmd.arg("run");
             if let Some(origins) = cors_env.as_deref() {
                 cmd.env("ERNO_DEV_CORS_ORIGINS", origins);
             }
+            apply_local_otel(&mut cmd, &otel);
             spawn_labeled(cmd, &api_dir_spawn, "api", api_sink.clone())
         })
     });
@@ -386,9 +389,11 @@ pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) -> ui::
     let monitoring = match monitoring_dir {
         Some(monitoring_dir) => {
             let mon_sink = sink.clone();
+            let otel = otel.clone();
             Some(Supervisor::start("mon", shutdown_rx.clone(), move || {
                 let mut cmd = Command::new("cargo");
                 cmd.arg("run");
+                apply_local_otel(&mut cmd, &otel);
                 spawn_labeled(cmd, &monitoring_dir, "mon", mon_sink.clone())
             }))
         }
@@ -575,6 +580,32 @@ fn find_admin_dir(root: &std::path::Path) -> Option<std::path::PathBuf> {
     None
 }
 
+/// Env that turns on OTEL export to the Tempo/Loki `erno dev` just started.
+///
+/// `APP_TRACING__OTEL__*` overrides `config/development.toml`, so a project
+/// that never set `[tracing.otel]` still feeds the WIRE pane.
+fn local_otel_vars(tempo: bool, loki: bool) -> Vec<(&'static str, &'static str)> {
+    let mut vars = Vec::new();
+    if tempo {
+        vars.push(("APP_TRACING__OTEL__ENDPOINT", "http://127.0.0.1:4318"));
+        vars.push(("APP_TRACING__OTEL__SAMPLE_RATIO", "1"));
+    }
+    if loki {
+        vars.push((
+            "APP_TRACING__OTEL__LOGS_ENDPOINT",
+            "http://127.0.0.1:3100/otlp",
+        ));
+        vars.push(("APP_TRACING__OTEL__LOG_LEVEL", "info"));
+    }
+    vars
+}
+
+fn apply_local_otel(cmd: &mut Command, vars: &[(&'static str, &'static str)]) {
+    for (k, v) in vars {
+        cmd.env(k, v);
+    }
+}
+
 fn ensure_npm_deps(dir: &std::path::Path, label: &str) -> Result<(), String> {
     if dir.join("node_modules").exists() {
         return Ok(());
@@ -588,5 +619,23 @@ fn ensure_npm_deps(dir: &std::path::Path, label: &str) -> Result<(), String> {
         Err(e) => Err(format!("could not run npm install in {label}/: {e}")),
         Ok(s) if !s.success() => Err(format!("npm install failed in {label}/")),
         _ => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_otel_points_at_dev_tempo_and_loki() {
+        let both = local_otel_vars(true, true);
+        assert!(both.contains(&("APP_TRACING__OTEL__ENDPOINT", "http://127.0.0.1:4318")));
+        assert!(both.contains(&("APP_TRACING__OTEL__SAMPLE_RATIO", "1")));
+        assert!(both.contains(&(
+            "APP_TRACING__OTEL__LOGS_ENDPOINT",
+            "http://127.0.0.1:3100/otlp"
+        )));
+        assert!(local_otel_vars(false, false).is_empty());
+        assert_eq!(local_otel_vars(true, false).len(), 2);
     }
 }

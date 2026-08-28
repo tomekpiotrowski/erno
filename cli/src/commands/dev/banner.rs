@@ -477,13 +477,13 @@ pub async fn probe_all(client: &Client, urls: &DevUrls) -> BannerSnapshot {
         },
         async {
             match urls.app.as_deref() {
-                Some(url) => Some(probe_http(client, url).await),
+                Some(url) => Some(probe_head(client, url).await),
                 None => None,
             }
         },
         async {
             match urls.www.as_deref() {
-                Some(url) => Some(probe_http(client, url).await),
+                Some(url) => Some(probe_head(client, url).await),
                 None => None,
             }
         },
@@ -520,13 +520,13 @@ pub async fn probe_all(client: &Client, urls: &DevUrls) -> BannerSnapshot {
         },
         async {
             match urls.console.as_deref() {
-                Some(url) => Some(probe_http(client, url).await),
+                Some(url) => Some(probe_head(client, url).await),
                 None => None,
             }
         },
         async {
             match urls.admin.as_deref() {
-                Some(url) => Some(probe_http(client, url).await),
+                Some(url) => Some(probe_head(client, url).await),
                 None => None,
             }
         },
@@ -581,10 +581,20 @@ async fn probe_erno(
 }
 
 async fn probe_http(client: &Client, url: &str) -> ServiceState {
-    if is_up(client, url).await {
-        ServiceState::Ready
-    } else {
-        ServiceState::Starting
+    probe_with(client, url, reqwest::Method::GET).await
+}
+
+/// Node dev servers log GET `/` as an access line. HEAD is logged with the
+/// method, so the WIRE pane can ignore readiness polls and still show a
+/// browser hitting `/`.
+async fn probe_head(client: &Client, url: &str) -> ServiceState {
+    probe_with(client, url, reqwest::Method::HEAD).await
+}
+
+async fn probe_with(client: &Client, url: &str, method: reqwest::Method) -> ServiceState {
+    match client.request(method, url).send().await {
+        Ok(res) if res.status().as_u16() < 500 => ServiceState::Ready,
+        _ => ServiceState::Starting,
     }
 }
 

@@ -9,6 +9,8 @@ pub struct TraceHit {
     pub name: String,
     pub service: String,
     pub duration_ms: f64,
+    /// Tempo still sends this; the WIRE pane no longer plots traces.
+    #[allow(dead_code)]
     pub start_unix_nano: String,
 }
 
@@ -36,20 +38,16 @@ pub async fn search(
     client: &Client,
     base: &str,
     query: &str,
-    window_secs: i64,
+    _window_secs: i64,
     limit: u32,
 ) -> Vec<TraceHit> {
-    let end = chrono_now();
-    let start = end - window_secs;
+    // No start/end: Tempo 3 searches the live store (recent traces). A 60s
+    // start/end window searches backend blocks that have not been flushed yet
+    // and comes back empty.
     let url = format!("{}/api/search", base.trim_end_matches('/'));
     let Ok(res) = client
         .get(url)
-        .query(&[
-            ("q", query),
-            ("start", &start.to_string()),
-            ("end", &end.to_string()),
-            ("limit", &limit.to_string()),
-        ])
+        .query(&[("q", query), ("limit", &limit.to_string())])
         .send()
         .await
     else {
@@ -82,8 +80,24 @@ pub fn to_hit(row: SearchTrace) -> TraceHit {
         trace_id: row.trace_id.or(row.trace_id_alt).unwrap_or_default(),
         name: row.root_trace_name.unwrap_or_default(),
         service: row.root_service_name.unwrap_or_default(),
-        duration_ms: row.duration_ms.unwrap_or(0.0),
-        start_unix_nano: row.start_time_unix_nano.unwrap_or_default(),
+        duration_ms: json_f64(row.duration_ms),
+        start_unix_nano: json_string(row.start_time_unix_nano),
+    }
+}
+
+fn json_string(v: Option<serde_json::Value>) -> String {
+    match v {
+        Some(serde_json::Value::String(s)) => s,
+        Some(serde_json::Value::Number(n)) => n.to_string(),
+        _ => String::new(),
+    }
+}
+
+fn json_f64(v: Option<serde_json::Value>) -> f64 {
+    match v {
+        Some(serde_json::Value::Number(n)) => n.as_f64().unwrap_or(0.0),
+        Some(serde_json::Value::String(s)) => s.parse().unwrap_or(0.0),
+        _ => 0.0,
     }
 }
 
@@ -292,13 +306,6 @@ fn otel_string(attr: &OtelAttribute) -> String {
     String::new()
 }
 
-fn chrono_now() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
-
 #[derive(Debug, Deserialize)]
 pub struct SearchResponse {
     #[serde(default)]
@@ -316,9 +323,9 @@ pub struct SearchTrace {
     #[serde(rename = "rootTraceName")]
     root_trace_name: Option<String>,
     #[serde(rename = "startTimeUnixNano")]
-    start_time_unix_nano: Option<String>,
+    start_time_unix_nano: Option<serde_json::Value>,
     #[serde(rename = "durationMs")]
-    duration_ms: Option<f64>,
+    duration_ms: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -467,5 +474,25 @@ mod tests {
             normalize_sql("SELECT * FROM t WHERE id = 12 AND name = 'x'"),
             "SELECT * FROM t WHERE id = ? AND name = ?"
         );
+    }
+
+    #[test]
+    fn search_accepts_string_or_numeric_start_time() {
+        let as_string: SearchResponse = serde_json::from_str(
+            r#"{"traces":[{"traceID":"aa","rootServiceName":"erno","rootTraceName":"GET /x","startTimeUnixNano":"1684778327699392724","durationMs":12}]}"#,
+        )
+        .unwrap();
+        let as_number: SearchResponse = serde_json::from_str(
+            r#"{"traces":[{"traceID":"bb","rootServiceName":"erno","rootTraceName":"GET /y","startTimeUnixNano":1684778327699392724,"durationMs":12}]}"#,
+        )
+        .unwrap();
+        let s = to_hit(as_string.traces.into_iter().next().unwrap());
+        let n = to_hit(as_number.traces.into_iter().next().unwrap());
+        assert_eq!(s.trace_id, "aa");
+        assert_eq!(n.trace_id, "bb");
+        assert_eq!(s.start_unix_nano, "1684778327699392724");
+        assert_eq!(n.start_unix_nano, "1684778327699392724");
+        assert_eq!(s.duration_ms, 12.0);
+        assert_eq!(n.duration_ms, 12.0);
     }
 }

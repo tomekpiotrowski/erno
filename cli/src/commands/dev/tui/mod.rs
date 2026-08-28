@@ -132,6 +132,11 @@ pub async fn run(
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| e.to_string())?;
+    let fetch_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| e.to_string())?;
     let action_client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::none())
@@ -144,7 +149,8 @@ pub async fn run(
         FetchCtl {
             urls: urls.clone(),
             opts: opts.clone(),
-            client: probe_client,
+            probe: probe_client,
+            fetch: fetch_client,
         },
         packet_tx,
         want_rx,
@@ -217,7 +223,8 @@ impl FetchWant {
 struct FetchCtl {
     urls: DevUrls,
     opts: TuiOpts,
-    client: reqwest::Client,
+    probe: reqwest::Client,
+    fetch: reqwest::Client,
 }
 
 struct FetchPacket {
@@ -291,7 +298,7 @@ async fn fetch_loop(
     let mut prev_prom = prom::PromSnapshot::default();
     loop {
         let want = want_rx.borrow().clone();
-        let snap = banner::probe_all(&ctl.client, &ctl.urls).await;
+        let snap = banner::probe_all(&ctl.probe, &ctl.urls).await;
         let mut packet = FetchPacket {
             snap,
             prom: None,
@@ -305,7 +312,7 @@ async fn fetch_loop(
         if clocks.prom.elapsed() > Duration::from_secs(2) {
             if let Some(base) = &ctl.opts.prometheus {
                 prev_prom = prom::fetch(
-                    &ctl.client,
+                    &ctl.fetch,
                     base,
                     ctl.opts.prometheus_token.as_deref(),
                     &prev_prom,
@@ -320,17 +327,17 @@ async fn fetch_loop(
                 let selected = want.selected_trace.clone();
                 let loki_base = ctl.opts.loki.clone();
                 let (traces, spans, loki_lines) = tokio::join!(
-                    tempo::search(&ctl.client, base, &want.tempo_query, 60, 40),
+                    tempo::search(&ctl.fetch, base, &want.tempo_query, 60, 40),
                     async {
                         match &selected {
-                            Some(id) => tempo::get_trace(&ctl.client, base, id).await,
+                            Some(id) => tempo::get_trace(&ctl.fetch, base, id).await,
                             None => Vec::new(),
                         }
                     },
                     async {
                         match (&selected, &loki_base) {
                             (Some(id), Some(loki_url)) => {
-                                loki::range(&ctl.client, loki_url, &loki::build_logql(id), 3600)
+                                loki::range(&ctl.fetch, loki_url, &loki::build_logql(id), 3600)
                                     .await
                             }
                             _ => Vec::new(),
@@ -346,9 +353,9 @@ async fn fetch_loop(
         if clocks.dev.elapsed() > Duration::from_secs(2) {
             if let Some(api) = &ctl.opts.api {
                 let (emails, jobs, migrations) = tokio::join!(
-                    devapi::emails(&ctl.client, api),
-                    devapi::jobs(&ctl.client, api),
-                    devapi::migrations(&ctl.client, api),
+                    devapi::emails(&ctl.fetch, api),
+                    devapi::jobs(&ctl.fetch, api),
+                    devapi::migrations(&ctl.fetch, api),
                 );
                 packet.emails = Some(emails);
                 packet.jobs = Some(jobs);

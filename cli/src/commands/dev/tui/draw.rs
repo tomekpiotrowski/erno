@@ -5,7 +5,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
 use super::prom::spark;
-use super::state::{log_window, trace_belongs_to, LensMode, ServiceRow, TuiState};
+use super::state::{log_window, LensMode, ServiceRow, TuiState};
 use super::tempo::{flatten, n1_insight};
 
 const ACCENT: Color = Color::Rgb(145, 132, 217);
@@ -14,8 +14,10 @@ const OK: Color = Color::Rgb(94, 184, 158);
 const WARN: Color = Color::Rgb(201, 168, 92);
 const ERR: Color = Color::Rgb(196, 92, 78);
 
+/// The wire is a footer strip of request lanes. It does not need the wide
+/// three-column layout — only enough rows, which the TUI already requires.
 fn show_wire(area: Rect) -> bool {
-    area.width >= 152 && area.height >= 24
+    area.height >= 24
 }
 
 fn split_layout(area: Rect) -> (Rect, Rect, Option<Rect>, Rect) {
@@ -496,35 +498,7 @@ fn wire_lane(svc: &ServiceRow, state: &TuiState, width: usize) -> String {
         .map(|d| d.as_secs_f64())
         .unwrap_or(0.0);
     let window = if state.wide_wire { 300.0 } else { 30.0 };
-    for hit in &state.traces {
-        if !trace_belongs_to(&hit.service, &svc.name) {
-            continue;
-        }
-        let start = hit.start_unix_nano.parse::<f64>().unwrap_or(0.0) / 1e9;
-        let age = now - start;
-        if age < 0.0 || age > window {
-            continue;
-        }
-        let x = ((1.0 - age / window) * (width.saturating_sub(1) as f64)).round() as usize;
-        if x < cells.len() {
-            cells[x] = if hit.duration_ms > 500.0 {
-                '✗'
-            } else {
-                '▪'
-            };
-        }
-    }
-    for l in &state.logs {
-        if l.label != svc.name {
-            continue;
-        }
-        let lower = l.line.to_ascii_lowercase();
-        if lower.contains("hmr") || lower.contains("reload") || lower.contains("rebuilt") {
-            if let Some(c) = cells.last_mut() {
-                *c = '◆';
-            }
-        }
-    }
+    mark_wire_ticks(&mut cells, state.ticks(&svc.name), now, window);
     cells.into_iter().collect()
 }
 
@@ -552,6 +526,33 @@ fn fact_owned(k: &str, v: String) -> Line<'static> {
     ])
 }
 
+fn mark_wire_ticks(cells: &mut [char], ticks: &[super::state::WireTick], now: f64, window: f64) {
+    if cells.is_empty() || window <= 0.0 {
+        return;
+    }
+    let last = cells.len() - 1;
+    for tick in ticks {
+        let age = now - tick.at;
+        if age < 0.0 || age > window {
+            continue;
+        }
+        let x = ((1.0 - age / window) * last as f64).round() as usize;
+        if x > last {
+            continue;
+        }
+        let mark = if tick.error {
+            '✗'
+        } else if tick.reload {
+            '◆'
+        } else {
+            '▪'
+        };
+        if cells[x] == '·' || mark == '✗' || (mark == '◆' && cells[x] == '▪') {
+            cells[x] = mark;
+        }
+    }
+}
+
 fn truncate(s: &str, n: usize) -> String {
     if s.chars().count() <= n {
         return s.to_string();
@@ -567,6 +568,7 @@ mod tests {
     use super::*;
     use crate::commands::dev::banner::DevUrls;
     use crate::commands::dev::log::LogLine;
+    use crate::commands::dev::tui::state::WireTick;
     use crate::commands::dev::tui::tempo::TraceHit;
 
     fn buffer_text(backend: &TestBackend) -> String {
@@ -586,10 +588,7 @@ mod tests {
     fn wide_dashboard_names_the_started_services() {
         let urls = DevUrls::defaults(true, true, true);
         let mut state = TuiState::new("teryon", &urls);
-        state.logs = vec![LogLine {
-            label: "api".into(),
-            line: "listening".into(),
-        }];
+        state.logs = vec![LogLine::new("api", "listening")];
         let backend = TestBackend::new(160, 40);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|f| render(f, &state)).unwrap();
@@ -632,14 +631,8 @@ mod tests {
             .expect("app");
         state.focus = Some(app);
         state.logs = vec![
-            LogLine {
-                label: "api".into(),
-                line: "api-only-line".into(),
-            },
-            LogLine {
-                label: "app".into(),
-                line: "app-only-line".into(),
-            },
+            LogLine::new("api", "api-only-line"),
+            LogLine::new("app", "app-only-line"),
         ];
         state.traces = vec![hit("erno", "GET /secret"), hit("app", "vite-hmr")];
         let backend = TestBackend::new(160, 40);
@@ -666,9 +659,11 @@ mod tests {
         let mut state = TuiState::new("teryon", &urls);
         state.focus = Some(service_index(&state, "api"));
         state.logs = (0..40)
-            .map(|i| LogLine {
-                label: "api".into(),
-                line: format!("\x1b[31mUNIQUE-API-LINE-{i:02}\x1b[0m compiling leftover"),
+            .map(|i| {
+                LogLine::new(
+                    "api",
+                    format!("\x1b[31mUNIQUE-API-LINE-{i:02}\x1b[0m compiling leftover"),
+                )
             })
             .collect();
         state.traces = vec![hit("erno", "UNIQUE-API-TRACE")];
@@ -679,10 +674,9 @@ mod tests {
         assert!(first.contains("UNIQUE-API-LINE"), "{first}");
 
         state.focus = Some(service_index(&state, "app"));
-        state.logs.push(LogLine {
-            label: "app".into(),
-            line: "app-only-after-switch".into(),
-        });
+        state
+            .logs
+            .push(LogLine::new("app", "app-only-after-switch"));
         terminal.draw(|f| render(f, &state)).unwrap();
         let second = buffer_text(terminal.backend());
         assert!(second.contains("app-only-after-switch"), "{second}");
@@ -702,18 +696,9 @@ mod tests {
         let urls = DevUrls::defaults(true, true, true);
         let mut state = TuiState::new("teryon", &urls);
         state.logs = vec![
-            LogLine {
-                label: "api".into(),
-                line: "UNIQUE-FIRST".into(),
-            },
-            LogLine {
-                label: "api".into(),
-                line: "UNIQUE-MIDDLE".into(),
-            },
-            LogLine {
-                label: "api".into(),
-                line: "UNIQUE-LAST".into(),
-            },
+            LogLine::new("api", "UNIQUE-FIRST"),
+            LogLine::new("api", "UNIQUE-MIDDLE"),
+            LogLine::new("api", "UNIQUE-LAST"),
         ];
         state.log_offset = 2;
         let backend = TestBackend::new(160, 40);
@@ -736,10 +721,7 @@ mod tests {
         assert!(h > 4, "expected a tall log pane, got {h}");
         let n = h + 3;
         state.logs = (0..n)
-            .map(|i| LogLine {
-                label: "api".into(),
-                line: format!("OVERFLOW-LINE-{i:02}"),
-            })
+            .map(|i| LogLine::new("api", format!("OVERFLOW-LINE-{i:02}")))
             .collect();
         let newest = format!("OVERFLOW-LINE-{:02}", n - 1);
         let backend = TestBackend::new(160, 40);
@@ -762,6 +744,73 @@ mod tests {
         assert!(
             scrolled.contains("OVERFLOW-LINE-02"),
             "older lines should enter from the top:\n{scrolled}"
+        );
+    }
+
+    #[test]
+    fn wire_is_drawn_on_a_standard_tty() {
+        let urls = DevUrls::defaults(true, true, true);
+        let state = TuiState::new("teryon", &urls);
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, &state)).unwrap();
+        let text = buffer_text(terminal.backend());
+        assert!(text.contains("WIRE"), "wire missing on 100×24:\n{text}");
+        assert!(text.contains("30s"), "{text}");
+        assert!(text.contains('·') || text.contains("·"), "{text}");
+    }
+
+    #[test]
+    fn api_wire_ticks_mark_the_lane() {
+        let urls = DevUrls::defaults(true, true, true);
+        let mut state = TuiState::new("teryon", &urls);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        state
+            .wire_ticks
+            .entry("api".into())
+            .or_default()
+            .push(WireTick {
+                at: now,
+                error: false,
+                reload: false,
+            });
+        let backend = TestBackend::new(160, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, &state)).unwrap();
+        let text = buffer_text(terminal.backend());
+        assert!(
+            text.contains('▪'),
+            "api log tick should mark the wire:\n{text}"
+        );
+    }
+
+    #[test]
+    fn www_access_ticks_mark_the_lane() {
+        let urls = DevUrls::defaults(true, true, true);
+        let mut state = TuiState::new("teryon", &urls);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        state
+            .wire_ticks
+            .entry("www".into())
+            .or_default()
+            .push(WireTick {
+                at: now,
+                error: false,
+                reload: false,
+            });
+        let backend = TestBackend::new(160, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| render(f, &state)).unwrap();
+        let text = buffer_text(terminal.backend());
+        assert!(
+            text.contains('▪'),
+            "www access log should mark the wire:\n{text}"
         );
     }
 }

@@ -221,10 +221,7 @@ mod tests {
     }
 
     fn log(i: usize) -> crate::commands::dev::log::LogLine {
-        crate::commands::dev::log::LogLine {
-            label: "api".into(),
-            line: format!("line-{i}"),
-        }
+        crate::commands::dev::log::LogLine::new("api", format!("line-{i}"))
     }
 
     #[test]

@@ -50,6 +50,11 @@ pub async fn metrics_middleware(req: Request, next: Next) -> Response {
             if status_code >= 500 { "ERROR" } else { "OK" },
         );
 
+        // One access line for `erno dev`'s WIRE pane. Health routes never
+        // pass through this middleware, so readiness polls stay quiet.
+        let ms = duration * 1000.0;
+        tracing::debug!("[{status_code}] {method} {path} {ms:.0}ms");
+
         metrics::counter!("http_requests_total",
             "method" => method.clone(),
             "path" => path.clone(),
