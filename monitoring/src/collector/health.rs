@@ -9,7 +9,7 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::health::snapshot::{HealthSnapshot, HealthState, HealthThresholds, SubsystemStatus};
+use erno::health::snapshot::{HealthSnapshot, HealthState, HealthThresholds, SubsystemStatus};
 
 use super::models::app_health;
 
@@ -116,7 +116,7 @@ pub async fn list(
                     state: HealthState::Down,
                     detail: format!(
                         "no reading for {}",
-                        crate::health::snapshot::humanize(age_seconds)
+                        erno::health::snapshot::humanize(age_seconds)
                     ),
                 }],
             ),

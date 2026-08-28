@@ -20,11 +20,11 @@ use sea_orm::DatabaseConnection;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::{
-    email_templates::{render_or_fallback, EmailTemplate},
-    error_reporting::{config::AlertsConfig, Level},
-    mailer::{Mailer, MockEmailRecord},
-};
+use erno::email_templates::{render_or_fallback, EmailTemplate};
+use erno::error_reporting::Level;
+use erno::mailer::{Mailer, MockEmailRecord};
+
+use super::config::AlertsConfig;
 
 use super::ingest::{mark_alerted, NewIssue};
 
@@ -148,7 +148,7 @@ pub async fn alert_loop(
 
         let mut alerted: Vec<Uuid> = Vec::new();
         for issue in issues {
-            if issue.level.rank() < minimum.rank() {
+            if !meets_minimum(issue.level, minimum) {
                 continue;
             }
             match throttle.decide(Instant::now()) {
@@ -260,7 +260,7 @@ async fn deliver(mailer: &Mailer, context: &AlertContext, subject: &str, body: S
     // Also timed through the shared helper, so every outbound email shows up in
     // one place regardless of which path sent it — this one cannot use
     // `emails::send_html_email_with_meta`, which needs an `App`.
-    let timer = crate::metrics::OperationTimer::start(
+    let timer = erno::metrics::OperationTimer::start(
         "erno_email_send_duration_seconds",
         "erno_email_send_total",
         "template",
@@ -327,7 +327,7 @@ fn truncate(input: &str, max: usize) -> String {
     input.chars().take(max).collect()
 }
 
-/// Level ordering helper used by the loop, exposed for tests.
+/// Whether a report is severe enough to alert on.
 #[must_use]
 pub fn meets_minimum(level: Level, minimum: Level) -> bool {
     level.rank() >= minimum.rank()
@@ -448,7 +448,7 @@ mod tests {
             id: Uuid::nil(),
             fingerprint: "f".to_string(),
             level: Level::Error,
-            source: crate::error_reporting::Source::App,
+            source: erno::error_reporting::Source::App,
             error_type: "TypeError".to_string(),
             title: "<script>alert('xss')</script>".to_string(),
             culprit: None,

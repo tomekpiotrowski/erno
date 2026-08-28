@@ -5,7 +5,7 @@ sidebar:
   order: 4
 ---
 
-> **Source**: `api/src/error_reporting/collector/uptime/`
+> **Source**: `monitoring/src/collector/uptime/`
 
 Without probes, a status page is a manual claim. With them it is an observation.
 

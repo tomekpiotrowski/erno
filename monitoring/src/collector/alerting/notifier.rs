@@ -6,8 +6,8 @@ use lettre::{message::header::ContentType, Message};
 use uuid::Uuid;
 
 use super::rules::Notify;
-use crate::error_reporting::collector::models::alert_rule;
-use crate::mailer::{Mailer, MockEmailRecord};
+use crate::collector::models::alert_rule;
+use erno::mailer::{Mailer, MockEmailRecord};
 
 /// What a notifier needs beyond the rule itself.
 #[derive(Debug, Clone)]
@@ -100,7 +100,7 @@ async fn send_email(
         return;
     };
 
-    let timer = crate::metrics::OperationTimer::start(
+    let timer = erno::metrics::OperationTimer::start(
         "erno_email_send_duration_seconds",
         "erno_email_send_total",
         "template",

@@ -17,7 +17,7 @@ use regex::Regex;
 
 use uuid::Uuid;
 
-use super::{Frame, Source};
+use erno::error_reporting::{is_in_app, Frame, Source};
 
 /// How many stack frames participate in the grouping key.
 const FRAME_DEPTH: usize = 5;
@@ -53,7 +53,7 @@ pub struct FingerprintInput<'a> {
 /// Compute the 64-character hex grouping key.
 #[must_use]
 pub fn fingerprint(input: &FingerprintInput<'_>) -> String {
-    crate::token::hash_token(&fingerprint_parts(input).join("\n"))
+    erno::token::hash_token(&fingerprint_parts(input).join("\n"))
 }
 
 /// The parts that feed the hash. Exposed so tests can assert on the *reason*
@@ -123,27 +123,6 @@ pub fn select_frames(frames: &[Frame]) -> Vec<&Frame> {
     };
 
     pool.into_iter().take(FRAME_DEPTH).collect()
-}
-
-/// Whether a file path looks like first-party code rather than a dependency or
-/// runtime. Used both for grouping and to dim vendor frames in the UI.
-#[must_use]
-pub fn is_in_app(file: Option<&str>) -> bool {
-    let Some(file) = file else {
-        return false;
-    };
-    const VENDOR_MARKERS: [&str; 9] = [
-        "node_modules/",
-        "/.cargo/registry",
-        "/rustc/",
-        "zone.js",
-        "/rxjs/",
-        "core.mjs",
-        "/@angular/",
-        "polyfills",
-        "/std/src/",
-    ];
-    !VENDOR_MARKERS.iter().any(|m| file.contains(m))
 }
 
 /// Normalize an exception type or tracing target.
@@ -653,15 +632,5 @@ mod tests {
         let long = "日本語".repeat(200);
         let out = normalize_message(&long);
         assert_eq!(out.chars().count(), MAX_MESSAGE_KEY_LEN);
-    }
-
-    #[test]
-    fn in_app_classification() {
-        assert!(is_in_app(Some("/src/app/foo.ts")));
-        assert!(!is_in_app(Some("/app/node_modules/x/y.js")));
-        assert!(!is_in_app(Some(
-            "/home/u/.cargo/registry/src/i/x-1.0/src/a.rs"
-        )));
-        assert!(!is_in_app(None));
     }
 }

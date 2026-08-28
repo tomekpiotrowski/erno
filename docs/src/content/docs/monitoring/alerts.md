@@ -5,7 +5,7 @@ sidebar:
   order: 5
 ---
 
-> **Source**: `api/src/error_reporting/collector/alerting/`
+> **Source**: `monitoring/src/collector/alerting/`
 
 ## Why this is not Alertmanager
 

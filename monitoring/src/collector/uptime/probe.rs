@@ -5,7 +5,7 @@
 use std::time::{Duration, Instant};
 
 use super::state::ProbeOutcome;
-use crate::error_reporting::collector::models::uptime_check;
+use crate::collector::models::uptime_check;
 
 /// Longest body read when a content assertion is configured.
 ///

@@ -23,8 +23,8 @@ use axum::http::HeaderMap;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use uuid::Uuid;
 
-use crate::error_reporting::Source;
-use crate::token::hash_token;
+use erno::error_reporting::Source;
+use erno::token::hash_token;
 
 use super::dto::IngestOrigin;
 use super::models::project;

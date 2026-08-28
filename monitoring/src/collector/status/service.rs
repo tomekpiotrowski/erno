@@ -14,7 +14,7 @@ use super::snapshot::{
     overall_state, DayUptime, PublicComponent, PublicIncident, PublicIncidentUpdate, PublicState,
     StatusSnapshot,
 };
-use crate::error_reporting::collector::{
+use crate::collector::{
     models::{project, status_component, status_incident, status_incident_update, uptime_check},
     uptime::state::CheckState,
 };

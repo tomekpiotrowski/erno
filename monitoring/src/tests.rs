@@ -13,10 +13,7 @@ use erno::{
     app::App,
     app_info::AppInfo,
     boot::BootConfig,
-    error_reporting::{
-        collector::{collector_router, models::project, projects},
-        CollectorConfig, ErrorReportingConfig,
-    },
+    error_reporting::ErrorReportingConfig,
     jobs::job_registry::JobRegistry,
     tests::{no_fixtures, require_single_test_thread, setup_test, TestUtils},
     token::hash_token,
@@ -27,6 +24,8 @@ use sea_orm::{
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+use crate::collector::config::CollectorConfig;
+use crate::collector::{collector_router, models::project, projects};
 use crate::{MonitorConfig, MonitorMigrator};
 
 const BROWSER_TOKEN: &str = "dev-browser-token";
@@ -115,19 +114,19 @@ fn the_monitoring_suite_must_run_single_threaded() {
 /// testing the unavailable path by accident.
 async fn observe_rule(
     t: &TestUtils,
-    rule: &erno::error_reporting::collector::models::alert_rule::Model,
-) -> Result<erno::error_reporting::collector::alerting::evaluator::Observation, sea_orm::DbErr> {
+    rule: &crate::collector::models::alert_rule::Model,
+) -> Result<crate::collector::alerting::evaluator::Observation, sea_orm::DbErr> {
     observe_rule_with(t, rule, None).await
 }
 
 /// Evaluate a rule with a Prometheus base URL, for the PromQL source.
 async fn observe_rule_with(
     t: &TestUtils,
-    rule: &erno::error_reporting::collector::models::alert_rule::Model,
+    rule: &crate::collector::models::alert_rule::Model,
     prometheus_url: Option<&str>,
-) -> Result<erno::error_reporting::collector::alerting::evaluator::Observation, sea_orm::DbErr> {
-    use erno::error_reporting::collector::alerting::evaluator::{observe, ObserveContext};
-    use erno::error_reporting::collector::models::project;
+) -> Result<crate::collector::alerting::evaluator::Observation, sea_orm::DbErr> {
+    use crate::collector::alerting::evaluator::{observe, ObserveContext};
+    use crate::collector::models::project;
     use sea_orm::EntityTrait;
 
     let http = reqwest::Client::new();
@@ -850,7 +849,7 @@ async fn anonymisation_requires_the_trusted_token() {
 // Retention
 // ---------------------------------------------------------------------------
 
-use erno::error_reporting::collector::retention;
+use crate::collector::retention;
 
 #[tokio::test]
 async fn retention_removes_aged_events_but_keeps_the_lifetime_count() {
@@ -865,11 +864,11 @@ async fn retention_removes_aged_events_but_keeps_the_lifetime_count() {
     .await
     .expect("age the event");
 
-    let config = erno::error_reporting::CollectorConfig {
+    let config = crate::collector::config::CollectorConfig {
         event_retention_days: 30,
         // Keep the issue, so this test isolates event ageing.
         issue_retention_days: 3650,
-        ..erno::error_reporting::CollectorConfig::default()
+        ..crate::collector::config::CollectorConfig::default()
     };
     let outcome = retention::sweep(&t.db, &config).await.expect("sweep");
 
@@ -895,9 +894,9 @@ async fn retention_trims_an_issue_past_its_event_cap() {
     }
     assert_eq!(event_count(&t).await, 30);
 
-    let config = erno::error_reporting::CollectorConfig {
+    let config = crate::collector::config::CollectorConfig {
         max_events_per_issue: 5,
-        ..erno::error_reporting::CollectorConfig::default()
+        ..crate::collector::config::CollectorConfig::default()
     };
     let outcome = retention::sweep(&t.db, &config).await.expect("sweep");
 
@@ -922,11 +921,11 @@ async fn retention_removes_stale_issues_and_cascades_their_events() {
     .await
     .expect("age the issue");
 
-    let config = erno::error_reporting::CollectorConfig {
+    let config = crate::collector::config::CollectorConfig {
         // Leave events alone so the cascade is what removes them.
         event_retention_days: 3650,
         issue_retention_days: 90,
-        ..erno::error_reporting::CollectorConfig::default()
+        ..crate::collector::config::CollectorConfig::default()
     };
     let outcome = retention::sweep(&t.db, &config).await.expect("sweep");
 
@@ -940,7 +939,7 @@ async fn retention_is_a_no_op_when_nothing_is_old() {
     let t = setup().await;
     seed(&t, "TypeError", "boom").await;
 
-    let outcome = retention::sweep(&t.db, &erno::error_reporting::CollectorConfig::default())
+    let outcome = retention::sweep(&t.db, &crate::collector::config::CollectorConfig::default())
         .await
         .expect("sweep");
 
@@ -1300,7 +1299,7 @@ async fn retired_replicas_are_forgotten() {
     .await
     .expect("age the heartbeat");
 
-    let removed = erno::error_reporting::collector::health::forget_stale(&t.db, 24 * 60 * 60)
+    let removed = crate::collector::health::forget_stale(&t.db, 24 * 60 * 60)
         .await
         .expect("forget");
     assert_eq!(removed, 1);
@@ -1532,7 +1531,7 @@ async fn managing_checks_requires_operator_credentials() {
 
 #[tokio::test]
 async fn only_due_checks_are_selected_for_probing() {
-    use erno::error_reporting::collector::uptime::service;
+    use crate::collector::uptime::service;
 
     let t = setup().await;
     create_check(&t, "never probed", "https://example.com/a").await;
@@ -1567,7 +1566,7 @@ async fn only_due_checks_are_selected_for_probing() {
 
 #[tokio::test]
 async fn a_disabled_check_is_never_due() {
-    use erno::error_reporting::collector::uptime::service;
+    use crate::collector::uptime::service;
 
     let t = setup().await;
     create_check(&t, "off", "https://example.com").await;
@@ -1584,7 +1583,7 @@ async fn a_disabled_check_is_never_due() {
 /// Two failures take it down; one success brings it straight back.
 #[tokio::test]
 async fn probes_move_the_check_state_with_flap_damping() {
-    use erno::error_reporting::collector::uptime::{service, ProbeOutcome};
+    use crate::collector::uptime::{service, ProbeOutcome};
 
     let t = setup().await;
     create_check(&t, "flappy", "https://example.com").await;
@@ -1605,7 +1604,7 @@ async fn probes_move_the_check_state_with_flap_damping() {
     assert_eq!(state, "unknown");
 
     // Second failure crosses the threshold.
-    let check = erno::error_reporting::collector::models::uptime_check::Entity::find()
+    let check = crate::collector::models::uptime_check::Entity::find()
         .one(&t.db)
         .await
         .expect("query")
@@ -1621,7 +1620,7 @@ async fn probes_move_the_check_state_with_flap_damping() {
     );
 
     // A single success is believed immediately.
-    let check = erno::error_reporting::collector::models::uptime_check::Entity::find()
+    let check = crate::collector::models::uptime_check::Entity::find()
         .one(&t.db)
         .await
         .expect("query")
@@ -1642,7 +1641,7 @@ async fn probes_move_the_check_state_with_flap_damping() {
 
 #[tokio::test]
 async fn old_probe_results_are_pruned() {
-    use erno::error_reporting::collector::uptime::service;
+    use crate::collector::uptime::service;
 
     let t = setup().await;
     create_check(&t, "prunable", "https://example.com").await;
@@ -1925,8 +1924,8 @@ async fn deleting_a_component_removes_it_from_the_page() {
 
 #[tokio::test]
 async fn the_publisher_writes_a_document_that_the_page_can_read() {
-    use erno::error_reporting::collector::status::publisher;
-    use erno::error_reporting::StatusConfig;
+    use crate::collector::config::StatusConfig;
+    use crate::collector::status::publisher;
 
     let t = setup().await;
     create_component(&t, "API", None).await;
@@ -1964,8 +1963,8 @@ async fn the_publisher_writes_a_document_that_the_page_can_read() {
 
 #[tokio::test]
 async fn the_publisher_writes_nothing_when_no_project_has_status_enabled() {
-    use erno::error_reporting::collector::status::publisher;
-    use erno::error_reporting::StatusConfig;
+    use crate::collector::config::StatusConfig;
+    use crate::collector::status::publisher;
 
     let t = setup().await;
     let dir = std::env::temp_dir().join(format!("erno-status-skip-{}", uuid::Uuid::new_v4()));
@@ -2059,7 +2058,7 @@ async fn a_rule_needs_a_name() {
 /// The alert Alertmanager structurally cannot express.
 #[tokio::test]
 async fn an_errors_rule_fires_on_new_issue_types() {
-    use erno::error_reporting::collector::alerting::service;
+    use crate::collector::alerting::service;
 
     let t = setup().await;
     create_rule(
@@ -2089,7 +2088,7 @@ async fn an_errors_rule_fires_on_new_issue_types() {
 
 #[tokio::test]
 async fn an_errors_rule_can_count_event_volume_by_source() {
-    use erno::error_reporting::collector::alerting::service;
+    use crate::collector::alerting::service;
 
     let t = setup().await;
     create_rule(
@@ -2119,7 +2118,7 @@ async fn an_errors_rule_can_count_event_volume_by_source() {
 
 #[tokio::test]
 async fn an_uptime_rule_counts_checks_that_are_down() {
-    use erno::error_reporting::collector::alerting::service;
+    use crate::collector::alerting::service;
 
     let t = setup().await;
     create_check(&t, "API", "https://api.example.com/liveness").await;
@@ -2144,7 +2143,7 @@ async fn an_uptime_rule_counts_checks_that_are_down() {
 
 #[tokio::test]
 async fn a_subsystem_rule_counts_unhealthy_instances() {
-    use erno::error_reporting::collector::alerting::service;
+    use crate::collector::alerting::service;
 
     let t = setup().await;
     create_rule(
@@ -2166,7 +2165,7 @@ async fn a_subsystem_rule_counts_unhealthy_instances() {
 
 #[tokio::test]
 async fn an_unknown_source_reads_as_nothing_wrong_rather_than_firing() {
-    use erno::error_reporting::collector::alerting::service;
+    use crate::collector::alerting::service;
 
     let t = setup().await;
     create_rule(
@@ -2242,7 +2241,7 @@ async fn a_rule_can_be_disabled_silenced_and_deleted() {
 /// The whole loop: breach, hold, fire, recover — with a real mailer.
 #[tokio::test]
 async fn the_evaluator_moves_a_rule_through_its_lifecycle_and_notifies() {
-    use erno::error_reporting::collector::alerting::{notifier::NotifyContext, runner};
+    use crate::collector::alerting::{notifier::NotifyContext, runner};
     use erno::health::HealthThresholds;
 
     let t = setup().await;
@@ -2318,7 +2317,7 @@ async fn the_evaluator_moves_a_rule_through_its_lifecycle_and_notifies() {
 
 #[tokio::test]
 async fn a_silenced_rule_still_tracks_state_but_sends_nothing() {
-    use erno::error_reporting::collector::alerting::{notifier::NotifyContext, runner};
+    use crate::collector::alerting::{notifier::NotifyContext, runner};
     use erno::health::HealthThresholds;
 
     let t = setup().await;
@@ -3070,11 +3069,8 @@ async fn deleting_an_unknown_project_is_a_404_even_with_force() {
 
 /// A rule belonging to `cubeast`, so an unscoped query would count the seeded
 /// `monitoring` project's rows instead of its own.
-async fn cubeast_rule(
-    t: &TestUtils,
-    body: Value,
-) -> erno::error_reporting::collector::models::alert_rule::Model {
-    use erno::error_reporting::collector::alerting::service;
+async fn cubeast_rule(t: &TestUtils, body: Value) -> crate::collector::models::alert_rule::Model {
+    use crate::collector::alerting::service;
 
     insert_project(t, "cubeast", "cubeast-server", "cubeast-browser", &[]).await;
     let input = serde_json::from_value(body).expect("rule body");
@@ -3179,7 +3175,7 @@ async fn a_subsystem_rule_does_not_count_another_projects_instances() {
 
 #[tokio::test]
 async fn an_uptime_rule_does_not_count_another_projects_checks() {
-    use erno::error_reporting::collector::uptime::service as uptime_service;
+    use crate::collector::uptime::service as uptime_service;
 
     let t = setup().await;
     let rule = cubeast_rule(
@@ -3265,10 +3261,10 @@ async fn a_promql_rule_without_its_project_matcher_does_not_fire() {
 
 async fn cubeast_rule_replacing_selector(
     t: &TestUtils,
-    rule: &erno::error_reporting::collector::models::alert_rule::Model,
+    rule: &crate::collector::models::alert_rule::Model,
     selector: &str,
-) -> erno::error_reporting::collector::models::alert_rule::Model {
-    use erno::error_reporting::collector::models::alert_rule;
+) -> crate::collector::models::alert_rule::Model {
+    use crate::collector::models::alert_rule;
     use sea_orm::ActiveModelTrait;
 
     let mut active: alert_rule::ActiveModel = rule.clone().into();

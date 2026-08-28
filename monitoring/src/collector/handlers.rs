@@ -13,7 +13,8 @@ use axum::{
 use bytes::Bytes;
 use serde_json::json;
 
-use crate::{error_reporting::CapturedError, rate_limiting::action::RateLimitAction};
+use erno::error_reporting::CapturedError;
+use erno::rate_limiting::action::RateLimitAction;
 
 use super::{
     auth::{authenticate, authenticate_server_bearer, resolve_client_ip},

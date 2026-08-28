@@ -6,8 +6,8 @@
 //! framework's own tables — the job queue it schedules cleanup on, the email
 //! outbox its alerts go through — chained ahead of the collector's.
 
+use crate::collector::collector_migrations;
 use erno::database::migrations::erno_migrations;
-use erno::error_reporting::collector::collector_migrations;
 use sea_orm_migration::{MigrationTrait, MigratorTrait};
 
 /// Framework migrations followed by the collector's own.

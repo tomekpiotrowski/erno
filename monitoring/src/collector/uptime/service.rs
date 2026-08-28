@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::state::{apply_probe, CheckState, ProbeOutcome};
-use crate::error_reporting::collector::models::{uptime_check, uptime_result};
+use crate::collector::models::{uptime_check, uptime_result};
 
 /// A check as the console shows it.
 #[derive(Debug, Clone, Serialize, Deserialize)]

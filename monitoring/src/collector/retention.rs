@@ -14,10 +14,9 @@ use std::time::Duration;
 
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, DbErr, Statement, Value};
 
-use crate::{
-    error_reporting::config::CollectorConfig,
-    jobs::advisory_lock::{lock_keys, run_with_advisory_lock},
-};
+use erno::jobs::advisory_lock::{lock_keys, run_with_advisory_lock};
+
+use super::config::CollectorConfig;
 
 /// Rows removed per statement.
 const BATCH_SIZE: u64 = 1_000;
@@ -51,7 +50,7 @@ pub fn spawn(db: DatabaseConnection, config: CollectorConfig, interval: Duration
                                 // Safe to log: this module's target is ignored
                                 // by the capture layer.
                                 tracing::info!(
-                                    target: "erno::error_reporting::collector",
+                                    target: erno::error_reporting::COLLECTOR_TARGET,
                                     "🧹 Retention removed {} aged events, {} over-cap events, {} stale issues, {} retired instances",
                                     outcome.aged_events,
                                     outcome.capped_events,

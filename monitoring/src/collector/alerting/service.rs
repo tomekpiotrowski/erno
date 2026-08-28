@@ -11,7 +11,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use super::rules::{Comparator, RuleSource, RuleState};
-use crate::error_reporting::collector::models::alert_rule;
+use crate::collector::models::alert_rule;
 
 /// Creating a rule.
 #[derive(Debug, Clone, Deserialize)]

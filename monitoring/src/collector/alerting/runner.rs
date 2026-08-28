@@ -13,7 +13,7 @@ use chrono::Utc;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection, EntityTrait};
 use uuid::Uuid;
 
-use crate::error_reporting::collector::models::project;
+use crate::collector::models::project;
 
 use super::{
     evaluator::{observe, ObserveContext},
@@ -21,12 +21,11 @@ use super::{
     rules::{advance, Comparator, Notify, RuleState, RuleStatus, RuleTiming},
     service,
 };
-use crate::{
-    error_reporting::collector::models::alert_rule,
-    health::HealthThresholds,
-    jobs::advisory_lock::{lock_keys, run_with_advisory_lock},
-    mailer::Mailer,
-};
+use erno::health::HealthThresholds;
+use erno::jobs::advisory_lock::{lock_keys, run_with_advisory_lock};
+use erno::mailer::Mailer;
+
+use crate::collector::models::alert_rule;
 
 /// How often rules are evaluated. Individual rules express patience through
 /// `for_seconds` rather than through this.
@@ -163,7 +162,7 @@ pub async fn evaluate_all(
             .increment(1);
 
             tracing::info!(
-                target: "erno::error_reporting::collector",
+                target: erno::error_reporting::COLLECTOR_TARGET,
                 "🔔 Alert {} — {}: {}",
                 match transition.notify {
                     Notify::Firing => "firing",

@@ -48,7 +48,7 @@ The library is split along the deployment seam:
 
 | Half | Contents | Mounted by |
 |---|---|---|
-| `error_reporting::collector` | Ingest, grouping, storage, operator queries | The monitoring binary only |
+| `erno-monitoring` | Ingest, grouping, storage, operator queries | The monitoring binary only |
 | `error_reporting::reporter` | The handle applications hold, the HTTP sender, the capture hooks | Every Erno application |
 
 Collector migrations are deliberately **absent** from `erno_migrations()`. They

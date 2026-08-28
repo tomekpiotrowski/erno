@@ -21,9 +21,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
-use crate::api::unique_constraint::is_unique_violation;
-use crate::error_reporting::config::{CollectorConfig, ErrorReportingConfig};
-use crate::token::{generate_secure_token, hash_token};
+use erno::api::unique_constraint::is_unique_violation;
+use erno::error_reporting::ErrorReportingConfig;
+
+use super::config::CollectorConfig;
+use erno::token::{generate_secure_token, hash_token};
 
 use super::auth::TokenCache;
 use super::cors::{origins_from_json, refresh_origins};
@@ -493,7 +495,7 @@ fn project_error(err: ProjectError) -> Response {
         )
             .into_response(),
         ProjectError::Db(e) => {
-            tracing::error!(target: "erno::error_reporting::collector", "project write failed: {e}");
+            tracing::error!(target: erno::error_reporting::COLLECTOR_TARGET, "project write failed: {e}");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "error": "internal_error" })),
@@ -504,7 +506,7 @@ fn project_error(err: ProjectError) -> Response {
 }
 
 fn db_error(e: DbErr) -> Response {
-    tracing::error!(target: "erno::error_reporting::collector", "project query failed: {e}");
+    tracing::error!(target: erno::error_reporting::COLLECTOR_TARGET, "project query failed: {e}");
     (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({ "error": "internal_error" })),
@@ -548,7 +550,7 @@ where
             .await
             {
                 tracing::error!(
-                    target: "erno::error_reporting::collector",
+                    target: erno::error_reporting::COLLECTOR_TARGET,
                     "could not reload CORS origins after create: {e}"
                 );
             }
@@ -590,7 +592,7 @@ where
             .await
             {
                 tracing::error!(
-                    target: "erno::error_reporting::collector",
+                    target: erno::error_reporting::COLLECTOR_TARGET,
                     "could not reload CORS origins after patch: {e}"
                 );
             }
@@ -644,7 +646,7 @@ where
             .await
             {
                 tracing::error!(
-                    target: "erno::error_reporting::collector",
+                    target: erno::error_reporting::COLLECTOR_TARGET,
                     "could not reload CORS origins after delete: {e}"
                 );
             }

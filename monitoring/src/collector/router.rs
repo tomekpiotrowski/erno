@@ -10,7 +10,9 @@ use axum::{
     Router,
 };
 
-use crate::{app::App, error_reporting::config::CollectorConfig};
+use erno::app::App;
+
+use super::config::CollectorConfig;
 
 use super::{
     auth::TokenCache,
@@ -27,7 +29,7 @@ const RETENTION_INTERVAL_SECONDS: u64 = 3_600;
 /// Build the collector's routes, or `None` when the collector is switched off.
 ///
 /// Returning `None` rather than an empty router follows the same idiom as
-/// [`crate::admin::admin_router`]: a disabled feature mounts nothing at all, so
+/// [`erno::admin::admin_router`]: a disabled feature mounts nothing at all, so
 /// its endpoints 404 rather than existing in a half-working state.
 ///
 /// The monitoring binary merges this into its `app_router`, which the framework
@@ -49,8 +51,8 @@ where
     // Alerting needs the mailer and the envelope sender, which only the host
     // application knows.
     let alert_sender = match &app.config.email {
-        crate::config::EmailConfig::Smtp { sender, .. } => sender.to_string(),
-        crate::config::EmailConfig::Mock => "noreply@example.com".to_string(),
+        erno::config::EmailConfig::Smtp { sender, .. } => sender.to_string(),
+        erno::config::EmailConfig::Mock => "noreply@example.com".to_string(),
     };
     // Where an operator should land: the console, not the API.
     let console_url = app

@@ -11,8 +11,8 @@ use sea_orm::{
 };
 
 use super::rules::RuleSource;
-use crate::error_reporting::collector::models::{alert_rule, app_health, uptime_check};
-use crate::health::{HealthSnapshot, HealthState, HealthThresholds};
+use crate::collector::models::{alert_rule, app_health, uptime_check};
+use erno::health::{HealthSnapshot, HealthState, HealthThresholds};
 use uuid::Uuid;
 
 /// What a rule observed, plus how to say it.
@@ -191,15 +191,9 @@ async fn observe_errors(
     // `new_issues` is the alert Alertmanager cannot express at all: it needs to
     // know that a fingerprint has never been seen before.
     if rule.selector == "new_issues" {
-        let count = crate::error_reporting::collector::models::error_issue::Entity::find()
-            .filter(
-                crate::error_reporting::collector::models::error_issue::Column::ProjectId
-                    .eq(rule.project_id),
-            )
-            .filter(
-                crate::error_reporting::collector::models::error_issue::Column::FirstSeen
-                    .gte(since),
-            )
+        let count = crate::collector::models::error_issue::Entity::find()
+            .filter(crate::collector::models::error_issue::Column::ProjectId.eq(rule.project_id))
+            .filter(crate::collector::models::error_issue::Column::FirstSeen.gte(since))
             .count(db)
             .await?;
         return Ok(Observation {
@@ -373,7 +367,7 @@ mod tests {
 
     #[test]
     fn promql_is_a_recognised_source_and_round_trips() {
-        use crate::error_reporting::collector::alerting::rules::RuleSource;
+        use crate::collector::alerting::rules::RuleSource;
         assert_eq!(RuleSource::from_str_opt("promql"), Some(RuleSource::Promql));
         assert_eq!(RuleSource::Promql.as_str(), "promql");
     }

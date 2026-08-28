@@ -5,7 +5,7 @@ sidebar:
   order: 2
 ---
 
-> **Source**: `api/src/error_reporting/collector/releases.rs`
+> **Source**: `monitoring/src/collector/releases.rs`
 
 A deploy is the most common explanation for a change in behaviour, so recording
 deploys is what turns "issues appeared at 14:02" into "that deploy introduced

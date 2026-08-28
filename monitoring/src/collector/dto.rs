@@ -12,7 +12,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use uuid::Uuid;
 
-use crate::error_reporting::{scrub, CapturedError, Frame, Level, Source};
+use erno::error_reporting::{CapturedError, Frame, Level, Source};
+
+use crate::scrub;
 
 /// Longest stored message.
 pub const MAX_MESSAGE_LEN: usize = 4096;
@@ -185,7 +187,7 @@ pub fn sanitize(
 fn normalize_frames(mut frames: Vec<Frame>) -> Vec<Frame> {
     frames.truncate(MAX_FRAMES);
     for frame in &mut frames {
-        frame.in_app = super::super::fingerprint::is_in_app(frame.file.as_deref());
+        frame.in_app = erno::error_reporting::is_in_app(frame.file.as_deref());
         if let Some(file) = &mut frame.file {
             *file = scrub::scrub_url(file);
         }

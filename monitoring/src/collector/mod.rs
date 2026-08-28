@@ -9,6 +9,7 @@
 pub mod alerting;
 pub mod alerts;
 pub mod auth;
+pub mod config;
 pub mod cors;
 pub mod dto;
 pub mod handlers;

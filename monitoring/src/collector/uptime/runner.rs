@@ -11,7 +11,7 @@ use std::time::Duration;
 use sea_orm::DatabaseConnection;
 
 use super::{probe, service};
-use crate::jobs::advisory_lock::{lock_keys, run_with_advisory_lock};
+use erno::jobs::advisory_lock::{lock_keys, run_with_advisory_lock};
 
 /// How often the runner looks for due checks. Individual checks have their own
 /// intervals; this is just the polling granularity.
@@ -54,7 +54,7 @@ pub fn spawn(db: DatabaseConnection) {
                                         // A transition is the only moment worth
                                         // telling anyone about.
                                         tracing::info!(
-                                            target: "erno::error_reporting::collector",
+                                            target: erno::error_reporting::COLLECTOR_TARGET,
                                             "🔔 Uptime check '{}' is now {}",
                                             check.name,
                                             if outcome.ok { "up" } else { "down" }

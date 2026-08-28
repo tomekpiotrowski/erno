@@ -24,11 +24,11 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use super::models::{error_event, error_issue};
-use crate::error_reporting::{
-    config::CollectorConfig,
-    fingerprint::{self, FingerprintInput},
-    CapturedError, Level, Source,
-};
+use erno::error_reporting::{CapturedError, Level, Source};
+
+use crate::fingerprint::{self, FingerprintInput};
+
+use super::config::CollectorConfig;
 
 /// Longest stored issue title.
 const MAX_TITLE_LEN: usize = 500;
@@ -532,7 +532,7 @@ impl CollectorSink {
     pub fn start(
         db: DatabaseConnection,
         config: Arc<CollectorConfig>,
-        alerts: Option<(crate::mailer::Mailer, super::alerts::AlertContext)>,
+        alerts: Option<(erno::mailer::Mailer, super::alerts::AlertContext)>,
     ) -> Self {
         let alert_tx = alerts.map(|(mailer, context)| {
             let (tx, rx) = mpsc::channel::<Vec<NewIssue>>(64);

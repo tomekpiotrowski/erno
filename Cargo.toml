@@ -11,7 +11,7 @@
 # `cli/templates/` is excluded because it holds scaffold templates whose
 # Cargo.toml carries `{{name}}` placeholders and is not valid to cargo.
 [workspace]
-members  = ["api", "cli", "monitoring"]
+members  = ["api", "cli", "error-reporting-types", "monitoring"]
 exclude  = ["cli/templates", "target"]
 resolver = "2"
 
@@ -20,6 +20,9 @@ edition      = "2021"
 rust-version = "1.88.0"
 
 [workspace.dependencies]
+# The error-reporting contract. `api/` (the reporter) and `monitoring/` (the
+# collector) are deployed separately and must agree on these shapes.
+erno-error-reporting-types = { path = "error-reporting-types" }
 # Shared by all three crates.
 reqwest    = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde      = { version = "1.0.219", features = ["derive"] }

@@ -3,7 +3,7 @@
 //! Docs: docs/src/content/docs/monitoring/error-reporting.md
 //!
 //! These migrations are **deliberately absent** from
-//! [`crate::database::migrations::erno_migrations`]. They belong to the
+//! [`erno::database::migrations::erno_migrations`]. They belong to the
 //! monitoring deployment's own database; adding them to the framework list
 //! would give every application deployment two large tables it never writes to.
 

@@ -2,7 +2,7 @@
 //!
 //! Docs: docs/src/content/docs/monitoring/error-reporting.md
 //!
-//! Guarded by HTTP Basic auth via [`crate::admin::auth::verify_admin_basic_auth`]
+//! Guarded by HTTP Basic auth via [`erno::admin::auth::verify_admin_basic_auth`]
 //! — the same check the admin console uses, called through a middleware rather
 //! than the `AdminAuth` extractor because collector handlers carry a composite
 //! state. Deliberately independent of the application's auth service, which may
@@ -18,7 +18,7 @@ use axum::{
 use serde_json::json;
 use uuid::Uuid;
 
-use crate::admin::auth::verify_admin_basic_auth;
+use erno::admin::auth::verify_admin_basic_auth;
 
 use super::{
     models::IssueStatus,
@@ -60,7 +60,7 @@ where
 fn db_error(e: sea_orm::DbErr) -> Response {
     // `tracing::error!` here is intentional and safe: the capture layer ignores
     // this module's target, so a failing console query cannot feed itself.
-    tracing::error!(target: "erno::error_reporting::collector", "operator query failed: {e}");
+    tracing::error!(target: erno::error_reporting::COLLECTOR_TARGET, "operator query failed: {e}");
     (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({ "error": "internal_error" })),
@@ -283,7 +283,7 @@ where
     match service::set_status(&state.app.db, project_id, id, status).await {
         Ok(Some(body)) => {
             // Triage decisions belong in the operator audit log.
-            crate::admin_events::emit_ok(
+            erno::admin_events::emit_ok(
                 &state.app.db,
                 &format!("error_issue.{status}"),
                 None,
@@ -476,7 +476,7 @@ where
 pub async fn record_health<ExtraConfig>(
     State(state): State<CollectorState<ExtraConfig>>,
     headers: axum::http::HeaderMap,
-    Json(snapshot): Json<crate::health::HealthSnapshot>,
+    Json(snapshot): Json<erno::health::HealthSnapshot>,
 ) -> Response
 where
     ExtraConfig: Clone + Send + Sync + 'static,

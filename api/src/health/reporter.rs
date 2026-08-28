@@ -87,10 +87,7 @@ pub fn spawn_health_reporter(
 async fn send(client: &reqwest::Client, config: &HealthReporterConfig, snapshot: &HealthSnapshot) {
     let result = client
         .post(&config.endpoint)
-        .header(
-            crate::error_reporting::collector::auth::INGEST_KEY_HEADER,
-            &config.token,
-        )
+        .header(crate::error_reporting::INGEST_KEY_HEADER, &config.token)
         .json(snapshot)
         .send()
         .await;

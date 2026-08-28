@@ -5,7 +5,7 @@ sidebar:
   order: 6
 ---
 
-> **Source**: `api/src/error_reporting/collector/status/`, `monitoring/status/`
+> **Source**: `monitoring/src/collector/status/`, `monitoring/status/`
 
 ## The constraint everything follows from
 

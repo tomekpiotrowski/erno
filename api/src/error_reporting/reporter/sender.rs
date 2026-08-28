@@ -250,10 +250,7 @@ async fn deliver(
     for attempt in 1..=MAX_ATTEMPTS {
         let result = client
             .post(&config.endpoint)
-            .header(
-                super::super::collector::auth::INGEST_KEY_HEADER,
-                &config.token,
-            )
+            .header(super::super::INGEST_KEY_HEADER, &config.token)
             .json(&envelope)
             .send()
             .await;

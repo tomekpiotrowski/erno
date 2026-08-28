@@ -7,8 +7,9 @@
 #   ./build.sh test           run the Rust test suites
 #   ./build.sh help           list every target
 #
-# api/, cli/ and monitoring/ are members of one cargo workspace (see the root
-# Cargo.toml); app/, admin/, monitoring/ui and docs/ are npm projects. This
+# api/, cli/, error-reporting-types/ and monitoring/ are members of one cargo
+# workspace (see the root Cargo.toml); app/, admin/, monitoring/ui and docs/ are
+# npm projects. This
 # script is the one entry point across all of them.
 
 set -euo pipefail
@@ -64,6 +65,9 @@ build_docs() {
 }
 
 run_test() {
+    # No database, no I/O: the contract both halves of error reporting agree on.
+    step "Testing error-reporting-types"
+    cargo test -p erno-error-reporting-types
     # api tests need PostgreSQL at postgres://erno:erno@localhost/erno
     # (api/config/test.toml). cli has no tests yet.
     step "Testing api"

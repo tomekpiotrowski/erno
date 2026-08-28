@@ -12,9 +12,9 @@ use std::time::Duration;
 use sea_orm::{DatabaseConnection, EntityTrait};
 
 use super::service::build_snapshot;
-use crate::error_reporting::collector::models::project;
-use crate::error_reporting::config::StatusConfig;
-use crate::jobs::advisory_lock::{lock_keys, run_with_advisory_lock};
+use crate::collector::config::StatusConfig;
+use crate::collector::models::project;
+use erno::jobs::advisory_lock::{lock_keys, run_with_advisory_lock};
 
 /// Start publishing.
 pub fn spawn(db: DatabaseConnection, config: StatusConfig) {

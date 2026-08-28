@@ -4,7 +4,9 @@
 
 use std::sync::Arc;
 
-use crate::{app::App, error_reporting::config::CollectorConfig};
+use erno::app::App;
+
+use super::config::CollectorConfig;
 
 use super::auth::TokenCache;
 use super::cors::OriginSet;
@@ -14,9 +16,9 @@ use super::ingest::CollectorSink;
 ///
 /// A composite rather than plain [`App`] because handlers need the sink and the
 /// collector configuration alongside the database. Operator routes therefore
-/// cannot use the [`crate::admin::auth::AdminAuth`] extractor, which is bound to
+/// cannot use the [`erno::admin::auth::AdminAuth`] extractor, which is bound to
 /// `App` as its state type; they call
-/// [`crate::admin::auth::verify_admin_basic_auth`] through a middleware instead,
+/// [`erno::admin::auth::verify_admin_basic_auth`] through a middleware instead,
 /// so there is still only one implementation of the check.
 pub struct CollectorState<ExtraConfig: Clone + Send + Sync + 'static> {
     /// The host application: database, mailer, rate limiter, config.

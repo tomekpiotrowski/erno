@@ -6,7 +6,7 @@
 //! this into the same file as `[database]`, `[jobs]`, `[admin]`, and the rest,
 //! so a monitoring deployment is configured exactly like any other Erno app.
 
-use erno::error_reporting::CollectorConfig;
+use crate::collector::config::CollectorConfig;
 use serde::{Deserialize, Serialize};
 
 /// The `[collector]` section of a monitoring deployment's config file.

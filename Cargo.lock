@@ -1751,6 +1751,7 @@ dependencies = [
  "config",
  "cron",
  "dashmap",
+ "erno-error-reporting-types",
  "fastrand 2.3.0",
  "futures-util",
  "jsonwebtoken",
@@ -1813,20 +1814,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "erno-error-reporting-types"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "uuid 1.19.0",
+]
+
+[[package]]
 name = "erno-monitoring"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
  "axum-test",
+ "bytes",
  "chrono",
  "erno",
+ "erno-error-reporting-types",
+ "lettre",
+ "metrics",
+ "regex",
  "reqwest",
  "sea-orm",
  "sea-orm-migration",
  "serde",
  "serde_json",
+ "thiserror 2.0.17",
  "tokio",
+ "toml 0.8.23",
+ "tower-http",
  "tracing",
  "uuid 1.19.0",
 ]

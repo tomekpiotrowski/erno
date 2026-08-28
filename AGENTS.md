@@ -11,11 +11,14 @@ Rust/Axum SaaS infrastructure: auth, jobs, billing, sync, storage.
 | `admin/` | Operator Angular app |
 | `cli/` | `erno` CLI |
 | `docs/` | Astro docs (`cd docs && npm run dev`) |
-| `monitoring/` | Separate collector deployment |
+| `error-reporting-types/` | The error-reporting contract `api/` and `monitoring/` share |
+| `monitoring/` | The collector: its own crate, its own deployment |
 
 ## Build
 
-`api/`, `cli/` and `monitoring/` share one cargo workspace. `app/`, `admin/`, `monitoring/ui` and `docs/` are npm projects.
+`api/`, `cli/`, `error-reporting-types/` and `monitoring/` share one cargo workspace. `app/`, `admin/`, `monitoring/ui` and `docs/` are npm projects.
+
+`monitoring/` depends on `api/`, never the other way round. The collector watches applications and must not ship with them, so nothing in `api/` may reach into it — the only thing both sides share is `error-reporting-types/`.
 
 ```sh
 ./build.sh              # build everything

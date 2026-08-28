@@ -22,15 +22,13 @@ use tracing::{
 };
 use tracing_subscriber::{layer::Context, Layer};
 
-use crate::error_reporting::{
-    config::ErrorReportingConfig, fingerprint, CapturedError, Frame, Level, Source,
-};
+use crate::error_reporting::{config::ErrorReportingConfig, CapturedError, Frame, Level, Source};
 
 use super::handle::ErrorReporter;
 
 /// Tracing target prefix for the reporting subsystem itself. Events under it
 /// are never captured.
-pub const SELF_TARGET: &str = "erno::error_reporting";
+pub use erno_error_reporting_types::SELF_TARGET;
 
 /// Targets that structurally duplicate a report we already produce.
 ///
@@ -288,7 +286,7 @@ fn parse_backtrace(backtrace: &str) -> Vec<Frame> {
             if is_unwind_machinery(function.as_deref(), &file) {
                 continue;
             }
-            let in_app = fingerprint::is_in_app(Some(&file));
+            let in_app = super::super::is_in_app(Some(&file));
             frames.push(Frame {
                 function,
                 file: Some(file),
@@ -425,17 +423,18 @@ mod tests {
         );
         assert_eq!(
             frames[0].function.as_deref(),
-            Some("erno::sync::delta::pull")
+            Some("erno::sync::delta::pull"),
+            "the surviving frame must be the panicking code, not the reporter"
         );
-        assert_eq!(
-            fingerprint::culprit(&frames).as_deref(),
-            Some("erno::sync::delta::pull (src/sync/delta.rs)"),
-            "the culprit must name the panicking code, not the reporter"
-        );
+        assert!(frames[0].in_app, "application code is not a vendor frame");
     }
 
+    /// Grouping itself is the collector's, and is pinned by its own fingerprint
+    /// tests. What the reporter has to guarantee is the input: two panics in
+    /// different places must not parse to the same frames, or no grouping rule
+    /// downstream can tell them apart.
     #[test]
-    fn two_different_panics_get_different_fingerprints() {
+    fn two_different_panics_parse_to_different_frames() {
         let make = |site: &str, file: &str| {
             format!(
                 "   0: erno::error_reporting::reporter::capture::report_panic\n                             at /home/u/proj/api/src/error_reporting/reporter/capture.rs:250:20\n                    1: {site}\n             at {file}:42:9"
@@ -450,18 +449,9 @@ mod tests {
             "/proj/api/src/jobs/worker.rs",
         ));
 
-        let fp = |frames: &[Frame]| {
-            fingerprint::fingerprint(&fingerprint::FingerprintInput {
-                project_id: uuid::Uuid::from_u128(1),
-                source: Source::Api,
-                error_type: "panic",
-                message: "attempt to divide by zero",
-                frames,
-                client_fingerprint: None,
-                call_site: None,
-            })
-        };
-        assert_ne!(fp(&a), fp(&b), "distinct panic sites must not merge");
+        assert_ne!(a, b, "distinct panic sites must not parse alike");
+        assert_eq!(a[0].function.as_deref(), Some("erno::sync::delta::pull"));
+        assert_eq!(b[0].function.as_deref(), Some("erno::jobs::worker::run"));
     }
 
     #[test]
