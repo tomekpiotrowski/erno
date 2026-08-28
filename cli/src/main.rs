@@ -71,6 +71,14 @@ enum Commands {
     Upgrade(commands::upgrade::UpgradeArgs),
     /// Set up and manage production deployment
     Deploy(DeployArgs),
+    /// Register this application with a monitoring collector
+    Monitoring(MonitoringArgs),
+}
+
+#[derive(Args)]
+struct MonitoringArgs {
+    #[command(subcommand)]
+    command: commands::monitoring::MonitoringCommands,
 }
 
 #[derive(Args)]
@@ -171,6 +179,7 @@ async fn dispatch(command: Commands) -> ui::Cmd {
         Commands::Lint(args) => commands::lint::handle_lint(args).await,
         Commands::Test(args) => commands::test::handle_test(args).await,
         Commands::Upgrade(args) => commands::upgrade::handle_upgrade(args).await,
+        Commands::Monitoring(args) => commands::monitoring::handle(args.command).await,
         Commands::Deploy(args) => match args.command {
             DeployCommands::Init {} => {
                 commands::deploy::handle_deploy_init(deploy::Target::detect()).await

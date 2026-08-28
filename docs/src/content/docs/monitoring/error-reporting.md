@@ -96,9 +96,50 @@ API, and a leaked public token can never impersonate a server. A Teryon token
 cannot ingest as Cubeast. **TLS is mandatory** — user emails cross the internet
 on this path.
 
-Create a project with `POST /api/collector/projects` (operator Basic) or the
-boot seed: if `project` is empty, the collector inserts slug `monitoring` from
-`[error_reporting] ingest_token` (and optional `[collector.seed]`).
+## Registering an application
+
+```sh
+erno monitoring add --url https://monitoring.example.com
+```
+
+Run from an application root. The slug defaults to the crate name in
+`api/Cargo.toml`. It creates the project, then writes the two tokens where the
+application reads them:
+
+| File | Gets |
+|---|---|
+| `app/src/environments/environment.ts` and `.prod.ts` | `errorReporting: { endpoint, key }` — the public browser token |
+| `deploy/secrets.example.yaml` | `api.ingest_token` — the trusted server token |
+
+Neither is ever overwritten once it holds a value: those tokens are in shipped
+builds and running deployments, and replacing one stops its reports arriving
+with nothing to say so.
+
+It deliberately does **not** touch `api/config/development.toml`. Fingerprints
+ignore `environment`, so a laptop pointed at the shared collector files its
+local panics against production's issues. That is a line a developer adds on
+purpose, not a side effect of registering.
+
+CORS origins default to `hosts.app`, `hosts.admin` and `hosts.www` from
+`deploy/config.toml` plus the development ports, and add `capacitor://localhost`
+and `ionic://localhost` when the app has a `capacitor.config.ts`. Pass
+`--scrape-target host:port` to have Prometheus scrape the application's
+`/metrics`; without it errors, uptime and alerts still work and metrics do not.
+
+Companions:
+
+```sh
+erno monitoring list --url …                      # what this collector knows about
+erno monitoring rotate-token --browser --url …    # or --server
+```
+
+Operator credentials come from `--user`, then `$ERNO_OPERATOR_USER` and
+`$ERNO_OPERATOR_PASSWORD`, then a prompt.
+
+The API underneath is `POST /api/collector/projects` (operator Basic), and there
+is one more way in: if `project` is empty at boot, the collector seeds slug
+`monitoring` from `[error_reporting] ingest_token` (and optional
+`[collector.seed]`), so a fresh deployment can accept its own reports.
 
 ## The operator API is per project
 

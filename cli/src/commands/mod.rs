@@ -3,6 +3,7 @@ pub mod deploy;
 pub mod dev;
 pub mod doctor;
 pub mod lint;
+pub mod monitoring;
 pub mod new;
 pub mod packages;
 pub mod setup;
