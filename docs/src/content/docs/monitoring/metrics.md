@@ -21,20 +21,53 @@ Two consequences:
 - **The collector is scraped too.** An operator needs to know when the thing
   doing the watching is itself struggling.
 
+## One Prometheus, a job per project
+
+Projects are registered while Prometheus is running, so its scrape list cannot
+live in the chart. The collector renders one job per project — each with that
+project's own target, scheme and bearer, labelled `erno_project` — and writes
+them into the `{release}-prometheus-jobs` ConfigMap, which the Prometheus pod
+mounts and loads through `scrape_config_files`. It publishes on boot and after
+every project create, edit or delete.
+
+A project with no `scrape_target` is skipped rather than rendered empty:
+Prometheus refuses a job with no targets, and one unconfigured project would
+otherwise stop every other project being scraped.
+
+Two things it deliberately does not do:
+
+- **No HTTP service discovery.** The console's nginx proxies all of `/api/` to
+  the collector with no `auth_request`, because ingest has to stay ungated. An
+  SD endpoint there would hand every application's metrics bearer to anyone who
+  asked. There is no such route to forget to protect.
+- **No `POST /-/reload` from the collector.** kubelet can take a minute to
+  project a ConfigMap write, so a reload fired at write time returns 200 against
+  the file Prometheus already had — success, with nothing reloaded. A
+  config-reloader sidecar in the Prometheus pod watches the mount and reloads
+  once the change is really on disk.
+
+The collector's RBAC names that one ConfigMap: `get`, `update` and `patch`, in
+its own namespace, on nothing else.
+
+`erno_prometheus_jobs_patch_total{result="failed"}` is worth an alert. While it
+is failing, a newly registered project is never scraped and nothing else says so.
+
+### A fixed target
+
+`[production.scrape]` still exists for something that is not a project — a
+service outside Erno worth watching from the same Prometheus. It is optional,
+and empty by default.
+
 ```toml
 # erno-monitoring: deploy/config.toml
 [production.scrape]
-target = "api.example.com:443"
+target = ""
 scheme = "https"
 ```
 
-`api.metrics_auth_token` in the collector's `deploy/secrets.<env>.yaml` must equal
-the application's `[metrics] auth_token`.
-
-In development `erno dev` writes a config that scrapes the application, and the
-collector as well when the project has a `monitoring/` directory. A project
-without one does not get a target pointed at a port nothing is listening on —
-a permanently red scrape target teaches people to ignore the scrape health page.
+In development `erno dev` writes a config that scrapes the application it
+started. The collector is its own deployment and is scraped by the Prometheus in
+its own release.
 
 ## What is instrumented
 

@@ -442,12 +442,10 @@ impl EnvConfig {
             }
             Target::Monitoring => {
                 require_host("hosts.monitoring", &self.hosts.monitoring)?;
-                if self.prometheus.enabled && self.scrape.target.trim().is_empty() {
-                    return Err(
-                        "prometheus is enabled but scrape.target is empty (host:port to scrape)"
-                            .into(),
-                    );
-                }
+                // `scrape.target` is no longer required: the collector writes a
+                // job per project, which is the only thing that scales past one
+                // application. It stays supported for a fixed target that is not
+                // a project — something outside Erno worth watching.
             }
         }
         Ok(())
@@ -600,7 +598,9 @@ admin = "admin.example.com"
     }
 
     #[test]
-    fn monitoring_requires_scrape_target_when_prometheus_is_on() {
+    /// A collector with no static scrape target is the normal case now: it
+    /// writes a job per project instead, and there may be no projects yet.
+    fn monitoring_needs_no_static_scrape_target() {
         let toml = r#"
 github_repo = "acme/acme"
 [production]
@@ -610,8 +610,7 @@ monitoring = "monitoring.example.com"
 "#;
         let file = parse_deploy_file(toml).unwrap();
         let env = env(&file, "production").unwrap();
-        let err = env.validate(Target::Monitoring).unwrap_err();
-        assert!(err.contains("scrape.target"), "{err}");
+        env.validate(Target::Monitoring).expect("valid");
     }
 
     #[test]

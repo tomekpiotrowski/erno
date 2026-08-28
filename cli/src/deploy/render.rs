@@ -435,6 +435,13 @@ fn collector_deployment(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> 
             "APP__COLLECTOR__PROMETHEUS__URL",
             format!("http://{}-prometheus:{PROMETHEUS_PORT}", plan.release),
         ));
+        // Which ConfigMap to write the per-project scrape jobs into. Set only
+        // when Prometheus is part of this release: there is nothing to
+        // reconfigure otherwise.
+        env_vars.push(env(
+            "APP__COLLECTOR__PROMETHEUS__JOBS_CONFIGMAP",
+            format!("{}-prometheus-jobs", plan.release),
+        ));
     }
     if plan.env.tempo.enabled {
         env_vars.push(env(
@@ -491,6 +498,7 @@ fn collector_deployment(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> 
                     config_map: None,
                     pvc: None,
                     mount: "/app/status",
+                    sub_path: None,
                 }],
                 args: None,
             },
@@ -534,8 +542,18 @@ fn console_deployment(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> Ma
     )
 }
 
+/// Reloads Prometheus when the generated jobs file actually changes on disk.
+///
+/// In the Prometheus pod, not the collector: kubelet can take a minute to
+/// project a ConfigMap write, and a `/-/reload` fired by the writer would
+/// return 200 against the *previous* file and look like success. Watching the
+/// mount is the only signal that the new jobs are really there.
+const CONFIG_RELOADER_IMAGE: &str =
+    "quay.io/prometheus-operator/prometheus-config-reloader:v0.78.1";
+
 fn prometheus(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> Vec<Manifest> {
     let cm_name = format!("{}-prometheus", plan.release);
+    let jobs_name = format!("{}-prometheus-jobs", plan.release);
     let yml = prometheus_yml(plan);
     let cm = Manifest::namespaced(
         "ConfigMap",
@@ -588,7 +606,18 @@ fn prometheus(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> Vec<Manife
                     empty_dir: false,
                     config_map: Some(cm_name.as_str()),
                     pvc: None,
-                    mount: "/etc/prometheus",
+                    mount: "/etc/prometheus/prometheus.yml",
+                    // As a file, so the generated/ mount below survives a
+                    // kubelet remount of this ConfigMap.
+                    sub_path: Some("prometheus.yml"),
+                },
+                Volume {
+                    name: "generated",
+                    empty_dir: false,
+                    config_map: Some(jobs_name.as_str()),
+                    pvc: None,
+                    mount: "/etc/prometheus/generated",
+                    sub_path: None,
                 },
                 Volume {
                     name: "data",
@@ -596,11 +625,15 @@ fn prometheus(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> Vec<Manife
                     config_map: None,
                     pvc: Some(pvc_name.as_str()),
                     mount: "/prometheus",
+                    sub_path: None,
                 },
             ],
             args: Some(vec![
                 "--config.file=/etc/prometheus/prometheus.yml".into(),
                 "--storage.tsdb.path=/prometheus".into(),
+                // The collector patches the jobs ConfigMap; the sidecar below
+                // asks Prometheus to re-read it, which needs lifecycle on.
+                "--web.enable-lifecycle".into(),
                 format!(
                     "--storage.tsdb.retention.time={}",
                     plan.env.prometheus.retention
@@ -616,10 +649,101 @@ fn prometheus(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> Vec<Manife
         .as_object_mut()
         .unwrap()
         .remove("imagePullSecrets");
+    // A second container in the same pod, so it shares the generated volume.
+    dep["spec"]["template"]["spec"]["containers"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
+            "name": "config-reloader",
+            "image": CONFIG_RELOADER_IMAGE,
+            "args": [
+                "--listen-address=:8080",
+                "--reload-url=http://127.0.0.1:9090/-/reload",
+                "--watched-dir=/etc/prometheus/generated",
+            ],
+            "volumeMounts": [
+                { "name": "generated", "mountPath": "/etc/prometheus/generated" }
+            ],
+        }));
+
     let deployment =
         Manifest::namespaced("Deployment", dep_name.clone(), ns, "prometheus", ctx, dep);
+
+    // Ships empty so Prometheus can start before any project exists; the
+    // collector owns the contents from then on.
+    let jobs = Manifest::namespaced(
+        "ConfigMap",
+        jobs_name.clone(),
+        ns,
+        "prometheus",
+        ctx,
+        json!({
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "metadata": { "name": jobs_name },
+            "data": { "jobs.yml": "scrape_configs: []\n" },
+        }),
+    );
     let svc = service(ctx, ns, "prometheus", PROMETHEUS_PORT, PROMETHEUS_PORT);
-    vec![cm, pvc, deployment, svc]
+    let mut out = vec![cm, jobs, pvc, deployment, svc];
+    out.extend(prometheus_jobs_rbac(plan, ctx, ns, &jobs_name));
+    out
+}
+
+/// Lets the collector write the jobs ConfigMap, and nothing else.
+///
+/// Named on that one resource rather than granted over ConfigMaps in the
+/// namespace: the collector holds every application's ingest tokens already,
+/// and does not also need to be able to read the deployment's secrets-adjacent
+/// config.
+fn prometheus_jobs_rbac(
+    plan: &MonitoringPlan<'_>,
+    ctx: &LabelCtx,
+    ns: &str,
+    jobs_name: &str,
+) -> Vec<Manifest> {
+    let name = format!("{}-prometheus-jobs", plan.release);
+    let role = Manifest::namespaced(
+        "Role",
+        name.clone(),
+        ns,
+        "collector",
+        ctx,
+        json!({
+            "apiVersion": "rbac.authorization.k8s.io/v1",
+            "kind": "Role",
+            "metadata": { "name": name },
+            "rules": [{
+                "apiGroups": [""],
+                "resources": ["configmaps"],
+                "resourceNames": [jobs_name],
+                "verbs": ["get", "update", "patch"],
+            }],
+        }),
+    );
+    let binding = Manifest::namespaced(
+        "RoleBinding",
+        name.clone(),
+        ns,
+        "collector",
+        ctx,
+        json!({
+            "apiVersion": "rbac.authorization.k8s.io/v1",
+            "kind": "RoleBinding",
+            "metadata": { "name": name },
+            "roleRef": {
+                "apiGroup": "rbac.authorization.k8s.io",
+                "kind": "Role",
+                "name": name,
+            },
+            "subjects": [{
+                "kind": "ServiceAccount",
+                "name": "default",
+                "namespace": ns,
+            }],
+        }),
+    );
+    vec![role, binding]
 }
 
 fn tempo(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> Vec<Manifest> {
@@ -677,6 +801,7 @@ fn tempo(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> Vec<Manifest> {
                     config_map: Some(cm_name.as_str()),
                     pvc: None,
                     mount: "/etc/tempo",
+                    sub_path: None,
                 },
                 Volume {
                     name: "data",
@@ -684,6 +809,7 @@ fn tempo(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> Vec<Manifest> {
                     config_map: None,
                     pvc: Some(pvc_name.as_str()),
                     mount: "/var/tempo",
+                    sub_path: None,
                 },
             ],
             args: Some(vec!["-config.file=/etc/tempo/tempo.yaml".into()]),
@@ -799,6 +925,7 @@ fn loki(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> Vec<Manifest> {
                     config_map: Some(cm_name.as_str()),
                     pvc: None,
                     mount: "/etc/loki",
+                    sub_path: None,
                 },
                 Volume {
                     name: "data",
@@ -806,6 +933,7 @@ fn loki(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> Vec<Manifest> {
                     config_map: None,
                     pvc: Some(pvc_name.as_str()),
                     mount: "/var/loki",
+                    sub_path: None,
                 },
             ],
             args: Some(vec!["-config.file=/etc/loki/loki.yaml".into()]),
@@ -839,21 +967,31 @@ compactor:\n  working_directory: /var/loki/compactor\n  retention_enabled: true\
 }
 
 fn prometheus_yml(plan: &MonitoringPlan<'_>) -> String {
-    let mut s = String::from("global:\n  scrape_interval: 15s\nscrape_configs:\n");
-    s.push_str("  - job_name: erno-api\n    metrics_path: /metrics\n");
-    if !plan.env.scrape.scheme.is_empty() {
-        s.push_str(&format!("    scheme: {}\n", plan.env.scrape.scheme));
-    }
-    if !plan.secrets.api.metrics_auth_token.is_empty() {
+    // The static jobs below are the two this chart owns. Everything else is a
+    // project, and projects come and go while Prometheus is running, so the
+    // collector writes those into `generated/` instead.
+    let mut s = String::from(
+        "global:\n  scrape_interval: 15s\n\
+scrape_config_files:\n  - /etc/prometheus/generated/*.yml\nscrape_configs:\n",
+    );
+    // Optional now, and not how applications are scraped: each project gets a
+    // generated job. This is for a fixed target that is not a project.
+    if !plan.env.scrape.target.trim().is_empty() {
+        s.push_str("  - job_name: erno-api\n    metrics_path: /metrics\n");
+        if !plan.env.scrape.scheme.is_empty() {
+            s.push_str(&format!("    scheme: {}\n", plan.env.scrape.scheme));
+        }
+        if !plan.secrets.api.metrics_auth_token.is_empty() {
+            s.push_str(&format!(
+                "    bearer_token: \"{}\"\n",
+                plan.secrets.api.metrics_auth_token
+            ));
+        }
         s.push_str(&format!(
-            "    bearer_token: \"{}\"\n",
-            plan.secrets.api.metrics_auth_token
+            "    static_configs:\n      - targets: [\"{}\"]\n",
+            plan.env.scrape.target
         ));
     }
-    s.push_str(&format!(
-        "    static_configs:\n      - targets: [\"{}\"]\n",
-        plan.env.scrape.target
-    ));
     s.push_str("  - job_name: erno-monitoring\n    metrics_path: /metrics\n");
     if !plan.secrets.collector.metrics_auth_token.is_empty() {
         s.push_str(&format!(
@@ -1065,6 +1203,12 @@ struct Volume<'a> {
     config_map: Option<&'a str>,
     pvc: Option<&'a str>,
     mount: &'a str,
+    /// Mount one key as a file rather than the whole ConfigMap as a directory.
+    ///
+    /// Needed wherever something else mounts *inside* that directory: kubelet
+    /// remounts a ConfigMap volume wholesale, and a nested mount under it
+    /// disappears when it does.
+    sub_path: Option<&'a str>,
 }
 
 struct WorkloadOpts<'a> {
@@ -1115,7 +1259,12 @@ fn workload(
         container["volumeMounts"] = Value::Array(
             opts.volumes
                 .iter()
-                .map(|v| json!({ "name": v.name, "mountPath": v.mount }))
+                .map(|v| match v.sub_path {
+                    Some(sub) => {
+                        json!({ "name": v.name, "mountPath": v.mount, "subPath": sub })
+                    }
+                    None => json!({ "name": v.name, "mountPath": v.mount }),
+                })
                 .collect(),
         );
     }
@@ -1468,6 +1617,48 @@ api:
         assert!(!yaml.contains("TRACING__OTEL"));
     }
 
+    /// Projects are created while Prometheus is running, so its scrape list
+    /// cannot live in the chart. The collector writes it into a ConfigMap this
+    /// pod mounts, and a sidecar asks Prometheus to re-read it.
+    #[test]
+    fn prometheus_loads_the_jobs_the_collector_writes() {
+        let (repo, env, secrets) = mon_env();
+        let plan = MonitoringPlan {
+            release: "acme-monitoring",
+            github_repo: &repo,
+            version: "v0.1.0",
+            env: &env,
+            secrets: &secrets,
+        };
+        let yaml = encode_yaml(&render_monitoring(&plan)).unwrap();
+
+        assert!(yaml.contains("scrape_config_files"));
+        assert!(yaml.contains("/etc/prometheus/generated/*.yml"));
+        // Valid on a collector with no projects, or Prometheus will not start.
+        assert!(yaml.contains("scrape_configs: []"));
+
+        // The base config mounts as a file. As a directory it would take the
+        // generated mount with it every time kubelet remounted the ConfigMap.
+        assert!(yaml.contains("subPath: prometheus.yml"));
+        // Prometheus refuses /-/reload without this.
+        assert!(yaml.contains("--web.enable-lifecycle"));
+        // The reloader watches the mount rather than trusting the writer: a
+        // reload fired at write time would hit the file kubelet has not
+        // projected yet and report success.
+        assert!(yaml.contains("config-reloader"));
+        assert!(yaml.contains("--watched-dir=/etc/prometheus/generated"));
+
+        // The collector may write that one ConfigMap and nothing else.
+        // The collector is told which ConfigMap is its to write.
+        assert!(yaml.contains("APP__COLLECTOR__PROMETHEUS__JOBS_CONFIGMAP"));
+        assert!(yaml.contains("resourceNames"));
+        assert!(yaml.contains("acme-monitoring-prometheus-jobs"));
+        assert!(
+            !yaml.contains("ClusterRole"),
+            "namespace Role only; nothing here needs cluster-wide reach"
+        );
+    }
+
     /// One collector holds every application's telemetry, and the tenant header
     /// is the only thing keeping them apart. If either store came up
     /// single-tenant, every project would read every other project's traces.
@@ -1514,9 +1705,12 @@ api:
                 ("Deployment", "acme-monitoring-console"),
                 ("Service", "acme-monitoring-console"),
                 ("ConfigMap", "acme-monitoring-prometheus"),
+                ("ConfigMap", "acme-monitoring-prometheus-jobs"),
                 ("PersistentVolumeClaim", "acme-monitoring-prometheus"),
                 ("Deployment", "acme-monitoring-prometheus"),
                 ("Service", "acme-monitoring-prometheus"),
+                ("Role", "acme-monitoring-prometheus-jobs"),
+                ("RoleBinding", "acme-monitoring-prometheus-jobs"),
                 ("ConfigMap", "acme-monitoring-tempo"),
                 ("PersistentVolumeClaim", "acme-monitoring-tempo"),
                 ("Deployment", "acme-monitoring-tempo"),
