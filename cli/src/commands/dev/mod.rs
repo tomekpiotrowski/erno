@@ -16,6 +16,7 @@ mod tempo;
 mod tui;
 mod watch;
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clap::Args;
@@ -83,8 +84,11 @@ pub struct DevArgs {
     pub no_ui: bool,
 }
 
-pub async fn handle_dev(root: Option<std::path::PathBuf>, args: DevArgs) -> ui::Cmd {
+pub async fn handle_dev(root: Option<PathBuf>, args: DevArgs) -> ui::Cmd {
     let root = resolve_project_root(root)?;
+    let root = root
+        .canonicalize()
+        .map_err(|e| format!("cannot resolve project root: {e}"))?;
     // Held for the lifetime of the command; its `Drop` removes .erno/dev.lock,
     // which is why everything below returns rather than calling `exit`.
     let _lock = lock::DevLock::acquire(&root)?;
@@ -553,12 +557,12 @@ pub fn monitoring_url() -> String {
 /// database and its own config, so falling back to the framework's `monitoring/`
 /// would run erno's own collector against `erno_monitoring` while you develop a
 /// different project — silently mixing two projects' error data.
-fn find_monitoring_dir(root: &std::path::Path) -> Option<std::path::PathBuf> {
+fn find_monitoring_dir(root: &Path) -> Option<PathBuf> {
     let local = root.join("monitoring");
     local.join("Cargo.toml").is_file().then_some(local)
 }
 
-fn find_admin_dir(root: &std::path::Path) -> Option<std::path::PathBuf> {
+fn find_admin_dir(root: &Path) -> Option<PathBuf> {
     let local = root.join("admin");
     if local.join("package.json").is_file() {
         return Some(local);
@@ -606,7 +610,7 @@ fn apply_local_otel(cmd: &mut Command, vars: &[(&'static str, &'static str)]) {
     }
 }
 
-fn ensure_npm_deps(dir: &std::path::Path, label: &str) -> Result<(), String> {
+fn ensure_npm_deps(dir: &Path, label: &str) -> Result<(), String> {
     if dir.join("node_modules").exists() {
         return Ok(());
     }
@@ -637,5 +641,40 @@ mod tests {
         )));
         assert!(local_otel_vars(false, false).is_empty());
         assert_eq!(local_otel_vars(true, false).len(), 2);
+    }
+
+    #[test]
+    fn telemetry_argv_is_absolute_when_the_project_root_is_a_relative_name() {
+        use std::path::absolute;
+
+        let root = PathBuf::from("teryon");
+        let prom = prometheus::spawn_args(&root.join(".erno/prometheus"));
+        let loki = loki::spawn_args(&root.join(".erno/loki"));
+        let tempo = tempo::spawn_args(&root.join(".erno/tempo"));
+
+        assert_eq!(
+            flag_path(&prom, "--config.file="),
+            absolute(root.join(".erno/prometheus/prometheus.yml")).unwrap()
+        );
+        assert_eq!(
+            flag_path(&prom, "--storage.tsdb.path="),
+            absolute(root.join(".erno/prometheus/data")).unwrap()
+        );
+        assert_eq!(
+            flag_path(&loki, "-config.file="),
+            absolute(root.join(".erno/loki/loki.yaml")).unwrap()
+        );
+        assert_eq!(
+            flag_path(&tempo, "-config.file="),
+            absolute(root.join(".erno/tempo/tempo.yaml")).unwrap()
+        );
+    }
+
+    fn flag_path(args: &[String], prefix: &str) -> PathBuf {
+        let arg = args
+            .iter()
+            .find(|a| a.starts_with(prefix))
+            .unwrap_or_else(|| panic!("missing {prefix} in {args:?}"));
+        PathBuf::from(arg.strip_prefix(prefix).unwrap())
     }
 }

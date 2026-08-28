@@ -1,6 +1,7 @@
 use std::io::IsTerminal;
 use std::process::Command;
 
+use super::loki::Binary;
 use crate::ui;
 
 const FRIENDLY_COMMANDS: &[&str] = &[
@@ -78,12 +79,12 @@ fn check_tempo_binary() -> Result<(), String> {
 
 fn check_loki_binary() -> Result<(), String> {
     match super::loki::probe() {
-        super::loki::Binary::Grafana { .. } => Ok(()),
-        super::loki::Binary::Missing => Err("loki not found on PATH\n\
+        Binary::Grafana { .. } => Ok(()),
+        Binary::Missing => Err("loki not found on PATH\n\
              Install Grafana Loki: https://grafana.com/docs/loki/latest/setup/install/\n\
              Or pass --no-loki to start without the log store."
             .into()),
-        super::loki::Binary::Other { summary } => Err(format!(
+        Binary::Other { summary } => Err(format!(
             "`loki` on PATH is not Grafana Loki (got {summary})\n\
              Debian/Ubuntu ships a different program named loki (MCMC linkage analysis).\n\
              Install Grafana Loki: https://grafana.com/docs/loki/latest/setup/install/\n\

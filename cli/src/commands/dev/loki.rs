@@ -1,10 +1,13 @@
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
+use std::sync::Arc;
 
-use tokio::process::Command;
+use tokio::process::{Child, Command};
 
 use super::log::LogSink;
 use super::process::spawn_labeled;
+use super::project::absolute_dir;
 
 const LOKI_YML: &str = include_str!("../../../templates/loki/loki.yaml");
 
@@ -30,7 +33,7 @@ pub(crate) fn probe() -> Binary {
 fn version_output() -> Option<String> {
     for arg in ["-version", "--version"] {
         match StdCommand::new("loki").arg(arg).output() {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+            Err(e) if e.kind() == ErrorKind::NotFound => return None,
             Err(_) => continue,
             Ok(out) => {
                 let text = format!(
@@ -80,19 +83,27 @@ pub fn render_config(data: &Path) -> String {
 pub fn prepare_dir(root: &Path) -> std::io::Result<PathBuf> {
     let dir = root.join(".erno").join("loki");
     std::fs::create_dir_all(&dir)?;
+    let dir = dir.canonicalize()?;
     std::fs::write(dir.join("loki.yaml"), render_config(&dir))?;
     Ok(dir)
 }
 
-pub fn spawn(dir: &Path, sink: std::sync::Arc<LogSink>) -> tokio::process::Child {
+pub(crate) fn spawn_args(dir: &Path) -> Vec<String> {
+    let dir = absolute_dir(dir);
+    vec![format!("-config.file={}", dir.join("loki.yaml").display())]
+}
+
+pub fn spawn(dir: &Path, sink: Arc<LogSink>) -> Child {
+    let dir = absolute_dir(dir);
     let mut cmd = Command::new("loki");
-    cmd.arg(format!("-config.file={}", dir.join("loki.yaml").display()));
-    spawn_labeled(cmd, dir, "loki", sink)
+    cmd.args(spawn_args(&dir));
+    spawn_labeled(cmd, &dir, "loki", sink)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::absolute;
 
     #[test]
     fn rendered_config_is_single_tenant_filesystem() {
@@ -100,7 +111,7 @@ mod tests {
         assert!(config.contains("auth_enabled: false"));
         assert!(config.contains("allow_structured_metadata: true"));
         assert!(config.contains("http_listen_port: 3100"));
-        assert!(config.contains("grpc_listen_port: 9096"));
+        assert!(config.contains(&format!("grpc_listen_port: {GRPC_PORT}")));
         assert!(config.contains("/tmp/erno-loki/chunks"));
         assert!(!config.contains("__DATA__"));
     }
@@ -138,5 +149,49 @@ mod tests {
     #[test]
     fn missing_loki_is_missing() {
         assert_eq!(classify(None), Binary::Missing);
+    }
+
+    #[test]
+    fn spawn_args_are_absolute_when_the_data_dir_is_a_relative_project_path() {
+        let dir = PathBuf::from("teryon").join(".erno").join("loki");
+        let args = spawn_args(&dir);
+        let config = flag_path(&args, "-config.file=");
+        assert_eq!(config, absolute(dir.join("loki.yaml")).unwrap());
+    }
+
+    #[test]
+    fn a_relative_data_dir_is_absolute_in_the_rendered_config() {
+        let dir = absolute_dir(Path::new("teryon/.erno/loki"));
+        let config = render_config(&dir);
+        assert_eq!(dir, absolute(Path::new("teryon/.erno/loki")).unwrap());
+        assert!(config.contains(&format!("{}/chunks", dir.display())));
+        assert!(!config.contains("__DATA__"));
+    }
+
+    #[test]
+    fn prepare_dir_writes_absolute_paths_into_the_config() {
+        let tmp = std::env::temp_dir().join(format!(
+            "erno-loki-abs-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let dir = prepare_dir(&tmp).unwrap();
+        let yaml = std::fs::read_to_string(dir.join("loki.yaml")).unwrap();
+        assert!(dir.is_absolute(), "{}", dir.display());
+        assert!(yaml.contains(&format!("{}/chunks", dir.display())));
+        assert!(!yaml.contains("__DATA__"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    fn flag_path(args: &[String], prefix: &str) -> PathBuf {
+        let arg = args
+            .iter()
+            .find(|a| a.starts_with(prefix))
+            .unwrap_or_else(|| panic!("missing {prefix} in {args:?}"));
+        PathBuf::from(arg.strip_prefix(prefix).unwrap())
     }
 }

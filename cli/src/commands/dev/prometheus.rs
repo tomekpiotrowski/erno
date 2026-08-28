@@ -1,10 +1,12 @@
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
+use std::sync::Arc;
 
-use tokio::process::Command;
+use tokio::process::{Child, Command};
 
 use super::log::LogSink;
 use super::process::spawn_labeled;
+use super::project::absolute_dir;
 
 const PROMETHEUS_YML: &str = include_str!("../../../templates/prometheus/prometheus.yml");
 
@@ -97,24 +99,27 @@ pub fn render_config(targets: &[ScrapeTarget<'_>]) -> String {
     yml
 }
 
-pub fn spawn(dir: &Path, sink: std::sync::Arc<LogSink>) -> tokio::process::Child {
+pub(crate) fn spawn_args(dir: &Path) -> Vec<String> {
+    let dir = absolute_dir(dir);
+    vec![
+        format!("--config.file={}", dir.join("prometheus.yml").display()),
+        format!("--storage.tsdb.path={}", dir.join("data").display()),
+        format!("--web.listen-address={LISTEN_ADDR}"),
+        "--storage.tsdb.retention.time=15d".to_string(),
+    ]
+}
+
+pub fn spawn(dir: &Path, sink: Arc<LogSink>) -> Child {
+    let dir = absolute_dir(dir);
     let mut cmd = Command::new("prometheus");
-    cmd.arg(format!(
-        "--config.file={}",
-        dir.join("prometheus.yml").display()
-    ));
-    cmd.arg(format!(
-        "--storage.tsdb.path={}",
-        dir.join("data").display()
-    ));
-    cmd.arg(format!("--web.listen-address={LISTEN_ADDR}"));
-    cmd.arg("--storage.tsdb.retention.time=15d");
-    spawn_labeled(cmd, dir, "prom", sink)
+    cmd.args(spawn_args(&dir));
+    spawn_labeled(cmd, &dir, "prom", sink)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::absolute;
 
     #[test]
     fn a_single_target_is_rendered() {
@@ -180,5 +185,27 @@ mod tests {
         let config = render_config(&[]);
         assert!(config.contains("scrape_configs:"));
         assert!(config.contains("global:"));
+    }
+
+    #[test]
+    fn spawn_args_are_absolute_when_the_data_dir_is_a_relative_project_path() {
+        let dir = PathBuf::from("teryon").join(".erno").join("prometheus");
+        let args = spawn_args(&dir);
+        assert_eq!(
+            flag_path(&args, "--config.file="),
+            absolute(dir.join("prometheus.yml")).unwrap()
+        );
+        assert_eq!(
+            flag_path(&args, "--storage.tsdb.path="),
+            absolute(dir.join("data")).unwrap()
+        );
+    }
+
+    fn flag_path(args: &[String], prefix: &str) -> PathBuf {
+        let arg = args
+            .iter()
+            .find(|a| a.starts_with(prefix))
+            .unwrap_or_else(|| panic!("missing {prefix} in {args:?}"));
+        PathBuf::from(arg.strip_prefix(prefix).unwrap())
     }
 }
