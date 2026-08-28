@@ -281,6 +281,15 @@ pub struct OtelConfig {
     /// Empty disables log export.
     #[serde(default)]
     pub log_level: String,
+    /// Tempo/Loki tenant, sent as `X-Scope-OrgID`.
+    ///
+    /// Only for a process that pushes to a multi-tenant store *directly*.
+    /// Applications go through the collector's nginx, which sets the tenant
+    /// from their ingest token — they must leave this empty, or they would be
+    /// naming a tenant for themselves. The collector's own in-cluster push does
+    /// not pass through nginx, which is what this exists for.
+    #[serde(default)]
+    pub tenant: String,
 }
 
 impl OtelConfig {
@@ -322,6 +331,7 @@ impl Default for OtelConfig {
             sample_ratio: default_otel_sample_ratio(),
             service_name: String::new(),
             log_level: String::new(),
+            tenant: String::new(),
         }
     }
 }

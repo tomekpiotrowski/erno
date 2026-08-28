@@ -92,8 +92,9 @@ fn build_provider(
     let mut exporter = SpanExporter::builder()
         .with_http()
         .with_endpoint(signal_endpoint(config.endpoint.trim(), "/v1/traces"));
-    if !config.token.trim().is_empty() {
-        exporter = exporter.with_headers(auth_headers(config));
+    let headers = auth_headers(config);
+    if !headers.is_empty() {
+        exporter = exporter.with_headers(headers);
     }
     let exporter = exporter.build()?;
 
@@ -141,8 +142,9 @@ fn build_logger_provider(
     let mut exporter = LogExporter::builder()
         .with_http()
         .with_endpoint(signal_endpoint(endpoint, "/v1/logs"));
-    if !config.token.trim().is_empty() {
-        exporter = exporter.with_headers(auth_headers(config));
+    let headers = auth_headers(config);
+    if !headers.is_empty() {
+        exporter = exporter.with_headers(headers);
     }
     let exporter = exporter.build()?;
     Ok(SdkLoggerProvider::builder()
@@ -153,10 +155,14 @@ fn build_logger_provider(
 
 fn auth_headers(config: &OtelConfig) -> HashMap<String, String> {
     let mut headers = HashMap::new();
-    headers.insert(
-        "Authorization".to_string(),
-        format!("Bearer {}", config.token.trim()),
-    );
+    let token = config.token.trim();
+    if !token.is_empty() {
+        headers.insert("Authorization".to_string(), format!("Bearer {token}"));
+    }
+    let tenant = config.tenant.trim();
+    if !tenant.is_empty() {
+        headers.insert("X-Scope-OrgID".to_string(), tenant.to_string());
+    }
     headers
 }
 

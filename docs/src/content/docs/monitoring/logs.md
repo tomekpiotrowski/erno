@@ -53,7 +53,12 @@ process pushes OTLP, the same way it pushes traces.
 Debian/Ubuntu's `loki` package is a different program (MCMC linkage analysis)
 and will be rejected.
 
-**Production.** Loki lives in the monitoring release. Applications push to
+**Production.** Loki lives in the monitoring release with `auth_enabled` — its
+name for tenancy, not for authentication — so each project's logs sit under its
+own slug as the `X-Scope-OrgID` tenant, set the same way
+[traces](/monitoring/tracing/#one-tempo-many-applications) are. Existing
+single-tenant chunks are not readable afterwards; delete the volume rather than
+migrating it. Applications push to
 `https://<monitoring_host>/otlp/v1/logs` with the trusted server ingest
 token. The console queries through `/loki/`, gated by operator Basic.
 `auth_enabled` is false — single tenant, the app being watched. Do not turn

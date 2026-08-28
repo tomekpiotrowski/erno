@@ -443,6 +443,13 @@ fn collector_deployment(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> 
         ));
         env_vars.push(env("APP__TRACING__OTEL__SAMPLE_RATIO", "0.1"));
     }
+    if plan.env.tempo.enabled || plan.env.loki.enabled {
+        // The collector pushes straight to Tempo and Loki rather than through
+        // its own ingress, so nothing sets a tenant for it. Without this its
+        // self-telemetry is rejected the moment multi-tenancy is on. The slug
+        // is the one the boot seed inserts.
+        env_vars.push(env("APP__TRACING__OTEL__TENANT", SEED_PROJECT_SLUG));
+    }
     if plan.env.loki.enabled {
         env_vars.push(env(
             "APP__TRACING__OTEL__LOGS_ENDPOINT",
@@ -715,9 +722,20 @@ fn tempo(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> Vec<Manifest> {
     vec![cm, pvc, deployment, svc]
 }
 
+/// Tempo's config, multi-tenant.
+///
+/// One collector holds every application's traces, and `X-Scope-OrgID` is what
+/// keeps them apart — nginx sets it from the ingest token. Turning this on
+/// makes existing single-tenant blocks unreadable; pre-1.0, the volume is
+/// wiped rather than migrated.
+/// The project the collector seeds itself as, and so the tenant its own traces
+/// and logs are written under.
+const SEED_PROJECT_SLUG: &str = "monitoring";
+
 fn tempo_yml(plan: &MonitoringPlan<'_>) -> String {
     format!(
-        "server:\n  http_listen_port: {TEMPO_PORT}\n  log_level: error\n\
+        "multitenancy_enabled: true\n\
+server:\n  http_listen_port: {TEMPO_PORT}\n  log_level: error\n\
 distributor:\n  receivers:\n    otlp:\n      protocols:\n        http:\n          endpoint: 0.0.0.0:{TEMPO_OTLP_PORT}\n\
 live_store:\n  max_block_duration: 5m\n  wal:\n    path: /var/tempo/live-store/traces\n  shutdown_marker_dir: /var/tempo/live-store/shutdown-marker\n\
 backend_scheduler:\n  local_work_path: /var/tempo/work\n  provider:\n    compaction:\n      compaction:\n        block_retention: {}\n\
@@ -803,9 +821,14 @@ fn loki(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> Vec<Manifest> {
     vec![cm, pvc, deployment, svc]
 }
 
+/// Loki's config, multi-tenant.
+///
+/// `auth_enabled` is Loki's name for tenancy, not for authentication: on, it
+/// requires `X-Scope-OrgID` and keeps each project's logs to itself. The
+/// credentials are still nginx's job.
 fn loki_yml(plan: &MonitoringPlan<'_>) -> String {
     format!(
-        "auth_enabled: false\n\
+        "auth_enabled: true\n\
 server:\n  http_listen_port: {LOKI_PORT}\n  log_level: error\n\
 common:\n  path_prefix: /var/loki\n  storage:\n    filesystem:\n      chunks_directory: /var/loki/chunks\n      rules_directory: /var/loki/rules\n  replication_factor: 1\n  ring:\n    kvstore:\n      store: inmemory\n\
 schema_config:\n  configs:\n    - from: 2020-10-24\n      store: tsdb\n      object_store: filesystem\n      schema: v13\n      index:\n        prefix: index_\n        period: 24h\n\
@@ -1443,6 +1466,32 @@ api:
         let yaml = encode_yaml(&render_app(&plan)).unwrap();
         assert!(!yaml.contains("ERROR_REPORTING"));
         assert!(!yaml.contains("TRACING__OTEL"));
+    }
+
+    /// One collector holds every application's telemetry, and the tenant header
+    /// is the only thing keeping them apart. If either store came up
+    /// single-tenant, every project would read every other project's traces.
+    #[test]
+    fn tempo_and_loki_are_multi_tenant_and_the_collector_names_its_tenant() {
+        let (repo, env, secrets) = mon_env();
+        let plan = MonitoringPlan {
+            release: "acme-monitoring",
+            github_repo: &repo,
+            version: "v0.1.0",
+            env: &env,
+            secrets: &secrets,
+        };
+        let yaml = encode_yaml(&render_monitoring(&plan)).unwrap();
+        assert!(yaml.contains("multitenancy_enabled: true"));
+        assert!(yaml.contains("auth_enabled: true"));
+        assert!(
+            !yaml.contains("auth_enabled: false"),
+            "a single-tenant Loki accepts pushes with no tenant and mixes them"
+        );
+        // The collector pushes straight to both, not through its own ingress,
+        // so nothing else can set a tenant on its behalf.
+        assert!(yaml.contains("APP__TRACING__OTEL__TENANT"));
+        assert!(yaml.contains("monitoring"));
     }
 
     #[test]
