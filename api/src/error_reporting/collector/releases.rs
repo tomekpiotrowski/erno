@@ -69,13 +69,14 @@ pub struct ReleaseQuery {
 /// re-posted.
 ///
 /// Re-running a pipeline must not create a second row, so this upserts on
-/// `(version, environment)`.
+/// `(project_id, version, environment)`.
 ///
 /// # Errors
 ///
 /// Returns the underlying [`DbErr`] when the write fails.
 pub async fn record(
     db: &DatabaseConnection,
+    project_id: Uuid,
     input: RecordRelease,
 ) -> Result<release::Model, DbErr> {
     use sea_orm::sea_query::OnConflict;
@@ -86,6 +87,7 @@ pub async fn record(
 
     let model = release::ActiveModel {
         id: Set(Uuid::new_v4()),
+        project_id: Set(project_id),
         version: Set(truncate(input.version.trim(), 200)),
         environment: Set(truncate(input.environment.trim(), 100)),
         commit_sha: Set(input.commit_sha.map(|s| truncate(&s, 64))),
@@ -96,13 +98,17 @@ pub async fn record(
 
     release::Entity::insert(model)
         .on_conflict(
-            OnConflict::columns([release::Column::Version, release::Column::Environment])
-                .update_columns([
-                    release::Column::CommitSha,
-                    release::Column::Source,
-                    release::Column::DeployedAt,
-                ])
-                .to_owned(),
+            OnConflict::columns([
+                release::Column::ProjectId,
+                release::Column::Version,
+                release::Column::Environment,
+            ])
+            .update_columns([
+                release::Column::CommitSha,
+                release::Column::Source,
+                release::Column::DeployedAt,
+            ])
+            .to_owned(),
         )
         .exec_with_returning(db)
         .await

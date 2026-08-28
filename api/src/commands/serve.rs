@@ -39,6 +39,7 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait + 'static, ExtraCon
     user_data_deleter: Option<Arc<dyn crate::account::UserDataDeleter>>,
     metrics_collectors: crate::metrics::collector::CollectorRegistry,
     app_info: crate::app_info::AppInfo,
+    skip_default_cors: bool,
 ) where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
@@ -198,6 +199,7 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait + 'static, ExtraCon
         job_failure_handler,
         user_data_deleter,
         error_reporter,
+        skip_default_cors,
     };
 
     // Spawn workers in the background. The handle is retained: this is the one

@@ -71,7 +71,7 @@ backoff_multiplier = 2.0
 
 # A list — must be set here.
 [metrics]
-table_counts = ["error_issue", "error_event"]
+table_counts = ["project", "error_issue", "error_event"]
 
 # A list, and the one most likely to be wrong on first deploy. Browsers post
 # error reports from the app and admin origins, which are different hosts from
@@ -92,14 +92,11 @@ allowed_origins = [
 
 [collector]
 enabled = true
-# APP__COLLECTOR__SERVER_TOKEN / __BROWSER_TOKEN come from the chart.
-server_token = ""
-browser_token = ""
 
 [collector.status]
 enabled = true
 name = "Example status"
-output_path = "/app/status/status.json"
+output_path = "/app/status"
 refresh_seconds = 30
 
 # Set by the chart to the in-cluster Service; never through the ingress.
@@ -113,9 +110,13 @@ recipient = ""
 # The monitoring deployment reports its own errors. Pointing this at itself
 # means a total collector outage reports nothing — which is the honest tradeoff
 # unless you run a second collector elsewhere.
+#
+# Both stay empty here. The chart injects collector_url and ingest_token only
+# when the self-report secret is set; `is_active` is URL-only, so a leftover
+# localhost URL would keep reporting on and 401.
 [error_reporting]
 enabled = true
-collector_url = "http://localhost:3001"
+collector_url = ""
 ingest_token = ""
 capture_tracing_errors = true
 capture_panics = true

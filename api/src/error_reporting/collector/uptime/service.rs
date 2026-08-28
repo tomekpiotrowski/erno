@@ -82,6 +82,7 @@ pub enum CheckError {
 /// [`CheckError::Invalid`] when the input is unusable, otherwise the database error.
 pub async fn create(
     db: &DatabaseConnection,
+    project_id: Uuid,
     input: UpsertCheck,
 ) -> Result<uptime_check::Model, CheckError> {
     let name = input.name.trim();
@@ -100,6 +101,7 @@ pub async fn create(
 
     let model = uptime_check::ActiveModel {
         id: Set(Uuid::new_v4()),
+        project_id: Set(project_id),
         name: Set(truncate(name, 200)),
         url: Set(truncate(url, 2_000)),
         method: Set(input

@@ -37,6 +37,8 @@ const MAX_TITLE_LEN: usize = 500;
 /// fingerprint, collapsed into a single statement row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IssueAggregate {
+    /// Owning project.
+    pub project_id: Uuid,
     /// Grouping key.
     pub fingerprint: String,
     /// Reporting component.
@@ -67,6 +69,8 @@ pub struct IssueAggregate {
 /// A report that survived the burst cap and will become a row.
 #[derive(Debug, Clone)]
 pub struct PreparedEvent {
+    /// Owning project.
+    pub project_id: Uuid,
     /// Which issue it belongs to.
     pub fingerprint: String,
     /// The report itself.
@@ -107,20 +111,34 @@ pub struct NewIssue {
     pub environment: Option<String>,
 }
 
-/// Group a batch by fingerprint and apply the burst cap.
+/// A captured report tagged with the project it authenticates as.
+#[derive(Debug, Clone)]
+pub struct QueuedReport {
+    /// Owning project.
+    pub project_id: Uuid,
+    /// Project slug, for metrics.
+    pub project_slug: String,
+    /// The report itself.
+    pub report: CapturedError,
+}
+
+/// Group a batch by (project, fingerprint) and apply the burst cap.
 ///
 /// Pure: no database, no clock, no configuration beyond the cap itself.
 #[must_use]
-pub fn prepare_batch(reports: Vec<CapturedError>, config: &CollectorConfig) -> PreparedBatch {
-    let mut aggregates: HashMap<String, IssueAggregate> = HashMap::new();
+pub fn prepare_batch(reports: Vec<QueuedReport>, config: &CollectorConfig) -> PreparedBatch {
+    let mut aggregates: HashMap<(Uuid, String), IssueAggregate> = HashMap::new();
     // Preserves arrival order of first sighting, so output is deterministic.
-    let mut order: Vec<String> = Vec::new();
-    let mut stored_per_fingerprint: HashMap<String, usize> = HashMap::new();
+    let mut order: Vec<(Uuid, String)> = Vec::new();
+    let mut stored_per_fingerprint: HashMap<(Uuid, String), usize> = HashMap::new();
     let mut events: Vec<PreparedEvent> = Vec::new();
     let mut dropped_burst = 0usize;
 
-    for report in reports {
+    for queued in reports {
+        let project_id = queued.project_id;
+        let report = queued.report;
         let key = fingerprint::fingerprint(&FingerprintInput {
+            project_id,
             source: report.source,
             error_type: &report.error_type,
             message: &report.message,
@@ -128,21 +146,26 @@ pub fn prepare_batch(reports: Vec<CapturedError>, config: &CollectorConfig) -> P
             client_fingerprint: report.client_fingerprint.as_deref(),
             call_site: report.call_site(),
         });
+        let map_key = (project_id, key.clone());
 
-        match aggregates.get_mut(&key) {
+        match aggregates.get_mut(&map_key) {
             Some(existing) => existing.absorb(&report),
             None => {
-                order.push(key.clone());
-                aggregates.insert(key.clone(), IssueAggregate::from_report(&key, &report));
+                order.push(map_key.clone());
+                aggregates.insert(
+                    map_key.clone(),
+                    IssueAggregate::from_report(project_id, &key, &report),
+                );
             }
         }
 
         // The burst cap bounds stored rows while counts still accumulate in
         // full, so a render loop costs a fixed number of writes per flush.
-        let stored = stored_per_fingerprint.entry(key.clone()).or_insert(0);
+        let stored = stored_per_fingerprint.entry(map_key).or_insert(0);
         if *stored < config.max_events_per_flush_per_issue {
             *stored += 1;
             events.push(PreparedEvent {
+                project_id,
                 fingerprint: key,
                 report,
             });
@@ -164,8 +187,9 @@ pub fn prepare_batch(reports: Vec<CapturedError>, config: &CollectorConfig) -> P
 }
 
 impl IssueAggregate {
-    fn from_report(key: &str, report: &CapturedError) -> Self {
+    fn from_report(project_id: Uuid, key: &str, report: &CapturedError) -> Self {
         Self {
+            project_id,
             fingerprint: key.to_string(),
             source: report.source,
             level: report.level,
@@ -221,7 +245,7 @@ fn title_from(message: &str) -> String {
 }
 
 /// Number of columns in the issue upsert's `VALUES` rows.
-const ISSUE_COLUMNS: usize = 12;
+const ISSUE_COLUMNS: usize = 13;
 
 /// Write one prepared batch: the issue upsert, then the event insert. Returns
 /// the issues that were created for the first time.
@@ -305,12 +329,15 @@ async fn upsert_issues<C: ConnectionTrait>(
     db: &C,
     issues: &[IssueAggregate],
 ) -> Result<HashMap<String, UpsertOutcome>, DbErr> {
-    // Sorted by fingerprint so every writer takes the unique index's row locks
-    // in the same order. Without this, two concurrent batches that share
-    // fingerprints in different orders deadlock — which is not hypothetical:
-    // two collector replicas writing overlapping errors will do exactly that.
+    // Sorted by the conflict target so every writer takes the unique index's
+    // row locks in the same order. Mixing fingerprint-only sort with the
+    // composite conflict target deadlocks under multi-replica ingest.
     let mut ordered: Vec<&IssueAggregate> = issues.iter().collect();
-    ordered.sort_unstable_by(|a, b| a.fingerprint.cmp(&b.fingerprint));
+    ordered.sort_unstable_by(|a, b| {
+        a.project_id
+            .cmp(&b.project_id)
+            .then_with(|| a.fingerprint.cmp(&b.fingerprint))
+    });
 
     let mut placeholders = Vec::with_capacity(ordered.len());
     let mut values: Vec<Value> = Vec::with_capacity(ordered.len() * ISSUE_COLUMNS);
@@ -322,6 +349,7 @@ async fn upsert_issues<C: ConnectionTrait>(
             .collect();
         placeholders.push(format!("({})", row_placeholders.join(", ")));
 
+        values.push(issue.project_id.into());
         values.push(issue.fingerprint.clone().into());
         values.push(issue.source.as_str().into());
         values.push(issue.error_type.clone().into());
@@ -343,10 +371,10 @@ async fn upsert_issues<C: ConnectionTrait>(
     // stay the release the issue was born in.
     let sql = format!(
         "INSERT INTO error_issue \
-         (fingerprint, source, error_type, title, culprit, level, times_seen, \
+         (project_id, fingerprint, source, error_type, title, culprit, level, times_seen, \
           first_seen, last_seen, first_release, last_release, environment) \
          VALUES {} \
-         ON CONFLICT (fingerprint) DO UPDATE SET \
+         ON CONFLICT (project_id, fingerprint) DO UPDATE SET \
            times_seen   = error_issue.times_seen + EXCLUDED.times_seen, \
            last_seen    = GREATEST(error_issue.last_seen, EXCLUDED.last_seen), \
            first_seen   = LEAST(error_issue.first_seen, EXCLUDED.first_seen), \
@@ -414,6 +442,7 @@ async fn insert_events<C: ConnectionTrait>(
             let report = &event.report;
             Some(error_event::ActiveModel {
                 id: Set(Uuid::new_v4()),
+                project_id: Set(event.project_id),
                 issue_id: Set(issue.id),
                 source: Set(report.source.as_str().to_string()),
                 level: Set(report.level.as_str().to_string()),
@@ -481,7 +510,7 @@ pub enum CollectorSink {
     /// Write inline, on the request's connection.
     Sync,
     /// Hand off to the background writer.
-    Channel(mpsc::Sender<CapturedError>),
+    Channel(mpsc::Sender<QueuedReport>),
 }
 
 impl std::fmt::Debug for CollectorSink {
@@ -528,12 +557,22 @@ impl CollectorSink {
         &self,
         db: &DatabaseConnection,
         config: &CollectorConfig,
+        project_id: Uuid,
+        project_slug: &str,
         reports: Vec<CapturedError>,
     ) -> (usize, usize) {
+        let queued: Vec<QueuedReport> = reports
+            .into_iter()
+            .map(|report| QueuedReport {
+                project_id,
+                project_slug: project_slug.to_string(),
+                report,
+            })
+            .collect();
         match self {
             Self::Sync => {
-                let count = reports.len();
-                let batch = prepare_batch(reports, config);
+                let count = queued.len();
+                let batch = prepare_batch(queued, config);
                 match write_batch(db, config, batch).await {
                     Ok(_) => (count, 0),
                     Err(e) => {
@@ -548,7 +587,7 @@ impl CollectorSink {
             Self::Channel(tx) => {
                 let mut accepted = 0;
                 let mut dropped = 0;
-                for report in reports {
+                for report in queued {
                     match tx.try_send(report) {
                         Ok(()) => accepted += 1,
                         Err(mpsc::error::TrySendError::Full(_)) => {
@@ -580,7 +619,7 @@ impl CollectorSink {
 async fn writer_loop(
     db: DatabaseConnection,
     config: Arc<CollectorConfig>,
-    mut rx: mpsc::Receiver<CapturedError>,
+    mut rx: mpsc::Receiver<QueuedReport>,
     alert_tx: Option<mpsc::Sender<Vec<NewIssue>>>,
 ) {
     let flush_interval = std::time::Duration::from_millis(config.flush_interval_ms.max(1));
@@ -658,15 +697,19 @@ mod tests {
         }
     }
 
-    fn report(message: &str, at: NaiveDateTime) -> CapturedError {
-        let mut report = CapturedError::new(
+    fn report(message: &str, at: NaiveDateTime) -> QueuedReport {
+        let mut captured = CapturedError::new(
             Source::App,
             Level::Error,
             "TypeError".to_string(),
             message.to_string(),
         );
-        report.timestamp = at;
-        report
+        captured.timestamp = at;
+        QueuedReport {
+            project_id: Uuid::from_u128(1),
+            project_slug: "test".to_string(),
+            report: captured,
+        }
     }
 
     #[test]
@@ -727,9 +770,9 @@ mod tests {
     fn first_release_tracks_the_earliest_occurrence_and_last_the_newest() {
         let now = Utc::now().naive_utc();
         let mut old = report("boom", now - Duration::minutes(5));
-        old.release = Some("1.0.0".to_string());
+        old.report.release = Some("1.0.0".to_string());
         let mut new = report("boom", now);
-        new.release = Some("2.0.0".to_string());
+        new.report.release = Some("2.0.0".to_string());
 
         let batch = prepare_batch(vec![new, old], &config(10));
         assert_eq!(batch.issues[0].first_release.as_deref(), Some("1.0.0"));
@@ -740,11 +783,11 @@ mod tests {
     fn severity_only_climbs() {
         let now = Utc::now().naive_utc();
         let mut warning = report("boom", now);
-        warning.level = Level::Warning;
+        warning.report.level = Level::Warning;
         let mut fatal = report("boom", now + Duration::seconds(1));
-        fatal.level = Level::Fatal;
+        fatal.report.level = Level::Fatal;
         let mut later_warning = report("boom", now + Duration::seconds(2));
-        later_warning.level = Level::Warning;
+        later_warning.report.level = Level::Warning;
 
         let batch = prepare_batch(vec![warning, fatal, later_warning], &config(10));
         assert_eq!(
@@ -804,7 +847,7 @@ mod tests {
     fn different_sources_never_merge() {
         let now = Utc::now().naive_utc();
         let mut api = report("boom", now);
-        api.source = Source::Api;
+        api.report.source = Source::Api;
         let app = report("boom", now);
         let batch = prepare_batch(vec![api, app], &config(10));
         assert_eq!(batch.issues.len(), 2);

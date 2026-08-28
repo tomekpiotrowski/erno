@@ -206,9 +206,7 @@ fn link_ingest_token(token: &str) {
     // Only fill an empty field: never overwrite a token already in use.
     let Some(updated) = fill_empty_ingest_token(&content, token) else {
         ui::info("deploy/secrets.example.yaml already has an ingest_token — left as is");
-        ui::detail(
-            "It must equal collector.server_token in\n             monitoring/deploy/secrets.<env>.yaml.",
-        );
+        ui::detail("It must be a project's server ingest token on the collector.");
         return;
     };
     if std::fs::write(path, updated).is_ok() {
@@ -450,9 +448,15 @@ fn print_monitoring_next_steps(name: &str) {
     ui::blank();
     ui::info("Two values must match across the two deployments:");
     ui::detail(
-        "collector.server_token  ==  api.ingest_token\n\
+        "api.ingest_token        ==  this app's project server token on the collector\n\
          api.metrics_auth_token  ==  the application's api.metrics_auth_token\n\
          A mismatch fails silently — reports are rejected and nothing says so.",
+    );
+    ui::blank();
+    ui::info("Ingest tokens live on the collector's project rows, not in its config.");
+    ui::detail(
+        "The collector mints one per project. error_reporting.ingest_token in the\n\
+         monitoring secrets seeds the first project on an empty database.",
     );
     ui::blank();
     ui::info("Point monitoring.example.com at the monitoring cluster's LoadBalancer,");
@@ -649,6 +653,31 @@ fn print_next_steps(name: &str, github_repo: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn init_writes_the_generated_ingest_token_to_both_sides_of_the_link() {
+        let token = "a-generated-token";
+        let vars: &[(&str, &str)] = &[
+            ("{{admin_password_hash}}", "hash"),
+            ("{{ingest_token}}", token),
+        ];
+        let rendered = render(TEMPLATE_MON_SECRETS_EXAMPLE, vars);
+        assert!(!rendered.contains("{{ingest_token}}"));
+
+        // The collector hashes this into the seeded `monitoring` project, so it
+        // has to be the same string the application sends. Writing only the
+        // application's half leaves every report 401ing with nothing to say so.
+        let parsed: serde_yaml::Value =
+            serde_yaml::from_str(&rendered).expect("rendered monitoring secrets parse");
+        assert_eq!(
+            parsed["error_reporting"]["ingest_token"].as_str(),
+            Some(token)
+        );
+
+        let app_side = fill_empty_ingest_token(TEMPLATE_SECRETS_EXAMPLE, token)
+            .expect("the app template ships an empty ingest_token");
+        assert!(app_side.contains(token));
+    }
 
     #[test]
     fn each_target_gets_its_own_release_and_paths() {

@@ -424,7 +424,11 @@ pub async fn delete_issue(db: &DatabaseConnection, id: Uuid) -> Result<bool, DbE
 /// # Errors
 ///
 /// Returns the underlying [`DbErr`] when the update fails.
-pub async fn anonymize_user(db: &DatabaseConnection, user_id: Uuid) -> Result<u64, DbErr> {
+pub async fn anonymize_user(
+    db: &DatabaseConnection,
+    project_id: Uuid,
+    user_id: Uuid,
+) -> Result<u64, DbErr> {
     use sea_orm::sea_query::Expr;
 
     let result = error_event::Entity::update_many()
@@ -436,6 +440,7 @@ pub async fn anonymize_user(db: &DatabaseConnection, user_id: Uuid) -> Result<u6
             error_event::Column::UserEmail,
             Expr::value(Option::<String>::None),
         )
+        .filter(error_event::Column::ProjectId.eq(project_id))
         .filter(error_event::Column::UserId.eq(user_id))
         .exec(db)
         .await?;

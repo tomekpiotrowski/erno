@@ -46,6 +46,10 @@ pub struct BootConfig<ExtraConfig = ()> {
     pub job_failure_handler: Option<Arc<dyn JobFailureHandler>>,
     pub user_data_deleter: Option<Arc<dyn UserDataDeleter>>,
     pub metrics_collectors: crate::metrics::collector::CollectorRegistry,
+    /// When true, [`crate::router::router`] does not attach its static CORS
+    /// layer so the caller can attach one of its own. Monitoring uses this so
+    /// the collector has a single origin-set layer.
+    pub skip_default_cors: bool,
 }
 
 impl<ExtraConfig> BootConfig<ExtraConfig> {
@@ -65,7 +69,16 @@ impl<ExtraConfig> BootConfig<ExtraConfig> {
             job_failure_handler: None,
             user_data_deleter: None,
             metrics_collectors: crate::metrics::collector::CollectorRegistry::default(),
+            skip_default_cors: false,
         }
+    }
+
+    /// Skip the framework `CorsLayer`. Monitoring sets this so it can attach
+    /// one origin-set layer of its own.
+    #[must_use]
+    pub fn skip_default_cors(mut self) -> Self {
+        self.skip_default_cors = true;
+        self
     }
 
     /// Replace the sync registry (tests that build a registry by hand).
@@ -166,6 +179,7 @@ pub async fn boot<AppMigrator: MigratorTrait + 'static, ExtraConfig>(
         config.job_failure_handler,
         config.user_data_deleter,
         config.metrics_collectors,
+        config.skip_default_cors,
     )
     .await;
 }
@@ -242,6 +256,7 @@ pub async fn handle_command<AppMigrator: MigratorTrait + 'static, ExtraConfig>(
     job_failure_handler: Option<Arc<dyn JobFailureHandler>>,
     user_data_deleter: Option<Arc<dyn UserDataDeleter>>,
     metrics_collectors: crate::metrics::collector::CollectorRegistry,
+    skip_default_cors: bool,
 ) where
     ExtraConfig: Clone + Default + DeserializeOwned + Send + Sync + 'static,
 {
@@ -278,6 +293,7 @@ pub async fn handle_command<AppMigrator: MigratorTrait + 'static, ExtraConfig>(
                 user_data_deleter,
                 metrics_collectors,
                 app_info,
+                skip_default_cors,
             )
             .await;
         }

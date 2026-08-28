@@ -19,7 +19,9 @@ pub mod fingerprint;
 pub mod reporter;
 pub mod scrub;
 
-pub use config::{AlertsConfig, CollectorConfig, ErrorReportingConfig, StatusConfig};
+pub use config::{
+    AlertsConfig, CollectorConfig, CollectorSeedConfig, ErrorReportingConfig, StatusConfig,
+};
 
 use serde::{Deserialize, Serialize};
 

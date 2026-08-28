@@ -260,6 +260,7 @@ where
         // Tests never reach out to a collector; the reporting paths are
         // covered by unit tests and by the monitoring crate's request tests.
         error_reporter: crate::error_reporting::reporter::ErrorReporter::disabled(),
+        skip_default_cors: boot.skip_default_cors,
     };
 
     let test_router = router(app, boot.app_router);
@@ -399,6 +400,7 @@ impl TestUtils {
             job_failure_handler: None,
             user_data_deleter: None,
             error_reporter: crate::error_reporting::reporter::ErrorReporter::disabled(),
+            skip_default_cors: false,
         };
 
         J::execute(&app, args).await

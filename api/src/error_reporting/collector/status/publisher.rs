@@ -9,9 +9,10 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use sea_orm::DatabaseConnection;
+use sea_orm::{DatabaseConnection, EntityTrait};
 
 use super::service::build_snapshot;
+use crate::error_reporting::collector::models::project;
 use crate::error_reporting::config::StatusConfig;
 use crate::jobs::advisory_lock::{lock_keys, run_with_advisory_lock};
 
@@ -52,21 +53,51 @@ pub fn spawn(db: DatabaseConnection, config: StatusConfig) {
 
 /// Build and write one snapshot.
 ///
+/// `output_path` is a directory. Until snapshots are project-scoped, this
+/// writes a single `{dir}/status.json`. Per-slug files would currently mix
+/// every project's components under one name.
+///
 /// # Errors
 ///
 /// Returns a message describing what failed — a database error, a serialisation
 /// error, or a filesystem error.
 pub async fn publish_once(db: &DatabaseConnection, config: &StatusConfig) -> Result<(), String> {
+    let output = Path::new(config.output_path.trim());
+    let enabled = project::Entity::find()
+        .all(db)
+        .await
+        .map_err(|e| format!("listing projects: {e}"))?
+        .into_iter()
+        .any(|p| p.status_enabled);
+    if !enabled {
+        // `[collector.status] enabled` only turns the publisher on; a project
+        // still has to opt in. Say so once, or an operator who set the config
+        // key is left wondering why no document ever appears.
+        static WARNED: std::sync::Once = std::sync::Once::new();
+        WARNED.call_once(|| {
+            eprintln!(
+                "status: publishing is on, but no project has status_enabled set — \
+                 nothing to publish"
+            );
+        });
+        return Ok(());
+    }
+
     let snapshot = build_snapshot(db, &config.name, config.refresh_seconds)
         .await
         .map_err(|e| format!("building snapshot: {e}"))?;
+    write_snapshot(&output.join("status.json"), &snapshot).await
+}
 
+async fn write_snapshot(
+    path: &Path,
+    snapshot: &super::snapshot::StatusSnapshot,
+) -> Result<(), String> {
     let json =
-        serde_json::to_vec_pretty(&snapshot).map_err(|e| format!("serialising snapshot: {e}"))?;
-
-    write_atomically(Path::new(&config.output_path), &json)
+        serde_json::to_vec_pretty(snapshot).map_err(|e| format!("serialising snapshot: {e}"))?;
+    write_atomically(path, &json)
         .await
-        .map_err(|e| format!("writing {}: {e}", config.output_path))
+        .map_err(|e| format!("writing {}: {e}", path.display()))
 }
 
 /// Write via a temporary file and rename.

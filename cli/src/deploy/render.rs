@@ -410,8 +410,16 @@ fn collector_deployment(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> 
         env_vars.push(env("APP__METRICS__AUTH_TOKEN", &c.metrics_auth_token));
     }
     env_vars.push(env("APP__COLLECTOR__ENABLED", "true"));
-    env_vars.push(env("APP__COLLECTOR__SERVER_TOKEN", &c.server_token));
-    env_vars.push(env("APP__COLLECTOR__BROWSER_TOKEN", &c.browser_token));
+    if !plan.secrets.error_reporting.ingest_token.is_empty() {
+        env_vars.push(env(
+            "APP__ERROR_REPORTING__INGEST_TOKEN",
+            &plan.secrets.error_reporting.ingest_token,
+        ));
+        env_vars.push(env(
+            "APP__ERROR_REPORTING__COLLECTOR_URL",
+            format!("http://{}-collector:{COLLECTOR_PORT}", plan.release),
+        ));
+    }
     if !c.alerts_recipient.is_empty() {
         env_vars.push(env("APP__COLLECTOR__ALERTS__ENABLED", "true"));
         env_vars.push(env(
@@ -421,10 +429,7 @@ fn collector_deployment(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> 
     }
     env_vars.push(env("APP__COLLECTOR__STATUS__ENABLED", "true"));
     env_vars.push(env("APP__COLLECTOR__STATUS__NAME", &c.status_name));
-    env_vars.push(env(
-        "APP__COLLECTOR__STATUS__OUTPUT_PATH",
-        "/app/status/status.json",
-    ));
+    env_vars.push(env("APP__COLLECTOR__STATUS__OUTPUT_PATH", "/app/status"));
     if plan.env.prometheus.enabled {
         env_vars.push(env(
             "APP__COLLECTOR__PROMETHEUS__URL",
@@ -1305,8 +1310,6 @@ collector:
   database_url: postgres://u:p@db/mon
   jwt_secret: jwt
   admin_password_hash: $argon2id$hash
-  server_token: server
-  browser_token: browser
   metrics_auth_token: cmetrics
   alerts_recipient: ops@example.com
   status_name: Acme
@@ -1485,7 +1488,13 @@ api:
         assert!(yaml.contains("/readiness"));
         assert!(yaml.contains("/liveness"));
         assert!(yaml.contains("emptyDir"));
-        assert!(yaml.contains("APP__COLLECTOR__SERVER_TOKEN"));
+        assert!(!yaml.contains("APP__COLLECTOR__SERVER_TOKEN"));
+        assert!(!yaml.contains("APP__COLLECTOR__BROWSER_TOKEN"));
+        assert!(!yaml.contains("APP__ERROR_REPORTING__INGEST_TOKEN"));
+        assert!(!yaml.contains("APP__ERROR_REPORTING__COLLECTOR_URL"));
+        assert!(yaml.contains("APP__COLLECTOR__STATUS__OUTPUT_PATH"));
+        assert!(yaml.contains("/app/status"));
+        assert!(!yaml.contains("/app/status/status.json"));
         assert!(yaml.contains("bearer_token: \"ametrics\""));
         assert!(yaml.contains("TEMPO_HOST"));
         assert!(yaml.contains("LOKI_HOST"));
@@ -1509,6 +1518,26 @@ api:
             .doc
             .pointer("/spec/template/spec/imagePullSecrets")
             .is_none());
+    }
+
+    #[test]
+    fn monitoring_chart_injects_self_report_env_only_when_the_secret_is_set() {
+        let (repo, env, mut secrets) = mon_env();
+        secrets.error_reporting.ingest_token = "erns_secret".to_string();
+        let plan = MonitoringPlan {
+            release: "acme-monitoring",
+            github_repo: &repo,
+            version: "v0.1.0",
+            env: &env,
+            secrets: &secrets,
+        };
+        let yaml = encode_yaml(&render_monitoring(&plan)).unwrap();
+        assert!(yaml.contains("APP__ERROR_REPORTING__INGEST_TOKEN"));
+        assert!(yaml.contains("erns_secret"));
+        assert!(yaml.contains("APP__ERROR_REPORTING__COLLECTOR_URL"));
+        assert!(yaml.contains("http://acme-monitoring-collector:3001"));
+        assert!(!yaml.contains("APP__COLLECTOR__SERVER_TOKEN"));
+        assert!(!yaml.contains("APP__COLLECTOR__BROWSER_TOKEN"));
     }
 
     #[test]

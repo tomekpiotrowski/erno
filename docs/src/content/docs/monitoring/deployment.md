@@ -71,10 +71,10 @@ mismatched token means reports are rejected with a 401 and nothing says so.
 
 | Value | Application | Monitoring |
 |---|---|---|
-| Trusted ingest token | `api.ingest_token` | `collector.server_token` |
+| Trusted ingest token | `api.ingest_token` | the project's server token (minted by the collector) |
 | Collector URL | `monitoring_url` in `deploy/config.toml` | `hosts.monitoring` |
 | Scrape token | `api.metrics_auth_token` | `api.metrics_auth_token` |
-| OTLP token | `api.ingest_token` (same as errors) | `collector.server_token` |
+| OTLP token | `api.ingest_token` (same as errors) | the same project server token |
 
 `erno deploy init --target monitoring` generates the ingest token and writes it
 into **both** `secrets.example.yaml` files, filling the application's only if it

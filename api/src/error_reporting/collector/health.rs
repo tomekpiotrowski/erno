@@ -41,7 +41,11 @@ pub struct HealthResponse {
 /// # Errors
 ///
 /// Returns the underlying [`DbErr`] when the write fails.
-pub async fn record(db: &DatabaseConnection, snapshot: &HealthSnapshot) -> Result<(), DbErr> {
+pub async fn record(
+    db: &DatabaseConnection,
+    project_id: Uuid,
+    snapshot: &HealthSnapshot,
+) -> Result<(), DbErr> {
     use sea_orm::sea_query::OnConflict;
 
     let payload = serde_json::to_value(snapshot)
@@ -49,6 +53,7 @@ pub async fn record(db: &DatabaseConnection, snapshot: &HealthSnapshot) -> Resul
 
     let model = app_health::ActiveModel {
         id: Set(Uuid::new_v4()),
+        project_id: Set(project_id),
         instance: Set(truncate(&snapshot.instance, 200)),
         environment: Set(truncate(&snapshot.environment, 100)),
         release: Set(snapshot.release.as_deref().map(|r| truncate(r, 200))),
@@ -58,7 +63,7 @@ pub async fn record(db: &DatabaseConnection, snapshot: &HealthSnapshot) -> Resul
 
     app_health::Entity::insert(model)
         .on_conflict(
-            OnConflict::column(app_health::Column::Instance)
+            OnConflict::columns([app_health::Column::ProjectId, app_health::Column::Instance])
                 .update_columns([
                     app_health::Column::Environment,
                     app_health::Column::Release,

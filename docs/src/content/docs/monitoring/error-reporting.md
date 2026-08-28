@@ -77,12 +77,14 @@ collector. Only JSON that will not deserialise at all is refused, with `422`.
 
 ## Authentication
 
-Two tokens, deliberately not one.
+Two tokens **per project**, stored as SHA-256 hex on the project row. Lookup is
+by hash (server column first, then browser). Empty stored hashes never match.
+Plaintext is shown once at create and rotate.
 
 | Caller | Header | Trust |
 |---|---|---|
-| Server-to-server | `X-Erno-Ingest-Key: <server_token>` | Trusted — may attribute a user, and is the `api` source |
-| Browsers | `X-Erno-Ingest-Key: <browser_token>` | Untrusted — attribution discarded, source forced to `app` or `admin` |
+| Server-to-server | `X-Erno-Ingest-Key: <project server token>` | Trusted — may attribute a user, and is the `api` source |
+| Browsers | `X-Erno-Ingest-Key: <project browser token>` | Untrusted — attribution discarded, source forced to `app` or `admin` |
 
 **The browser token is public.** It ships inside the JavaScript bundle, and
 anyone who opens devtools can read it. It is a speed bump against drive-by
@@ -90,12 +92,17 @@ scanners and misdirected traffic, not a security control. What actually bounds
 abuse is the rate limiting, the bounded queue, the burst cap and retention.
 
 Two separate tokens mean the public one can be rotated without redeploying the
-API, and a leaked public token can never impersonate a server. **TLS is
-mandatory** — user emails cross the internet on this path.
+API, and a leaked public token can never impersonate a server. A Teryon token
+cannot ingest as Cubeast. **TLS is mandatory** — user emails cross the internet
+on this path.
 
-Browsers are cross-origin, so the collector's `[cors] allowed_origins` must
-list the application and admin hosts. A missing origin fails *silently*:
-reports simply stop.
+Create a project with `POST /api/collector/projects` (operator Basic) or the
+boot seed: if `project` is empty, the collector inserts slug `monitoring` from
+`[error_reporting] ingest_token` (and optional `[collector.seed]`).
+
+Browsers are cross-origin. The collector CORS layer is the union of
+`project.cors_origins` and `[cors] allowed_origins` (the extras: console
+origin). A missing origin fails *silently*: reports simply stop.
 
 ## Rate limiting
 
@@ -104,14 +111,15 @@ and so can only ever limit by IP.
 
 | Action | Applies to | Tiers |
 |---|---|---|
-| `error_ingest` | Per IP, identity-blind ceiling | 60/10s · 300/60s · 3000/h |
-| `error_ingest_server` | The trusted sender | 100/10s · 600/60s · 10000/h |
-| `error_ingest_browser` | Per IP | 10/10s · 30/60s · 200/h |
+| `error_ingest` | Per IP, identity-blind ceiling | 300/10s · 1500/60s · 15000/h |
+| `error_ingest_server` | `token:server:{project_id}` | 100/10s · 600/60s · 10000/h |
+| `error_ingest_browser` | `ip:{ip}:{project_id}` | 10/10s · 30/60s · 200/h |
 | `otlp_auth` | nginx `auth_request` for Tempo/Loki ingest | **exempt** — all pushes share the console pod's IP |
 
 The browser tier is loose on purpose. A corporate NAT or a university campus
 puts hundreds of real users behind one IPv4, so a tight limit would blackhole a
-whole office's crash reports rather than stop an abuser.
+whole office's crash reports rather than stop an abuser. Including `project_id`
+in the bucket so a leaked Teryon browser token cannot spend Cubeast's quota.
 
 The limiter is an in-memory map **per process**: with *N* collector replicas the
 effective quota is *N ×* the configured number, and a rolling deploy resets
@@ -124,12 +132,13 @@ grouping, so clients are never trusted with it.
 
 The key is `sha256` over, in order:
 
-1. **Source**, always. A browser `TypeError` and a Rust panic can never merge.
-2. A client-supplied `fingerprint`, if present — then stop.
-3. The normalised exception type.
-4. The top 5 stack frames as `function@file`, preferring frames that are not
+1. **Project id**, always. Two apps with the same stack cannot merge.
+2. **Source**, always. A browser `TypeError` and a Rust panic can never merge.
+3. A client-supplied `fingerprint`, if present — then stop.
+4. The normalised exception type.
+5. The top 5 stack frames as `function@file`, preferring frames that are not
    in `node_modules`, the cargo registry, or the standard library.
-5. If there is no stack at all: the call site plus a normalised message, with
+6. If there is no stack at all: the call site plus a normalised message, with
    UUIDs, numbers, quoted strings, URLs and emails replaced by placeholders.
 
 ### Line numbers are excluded
@@ -354,8 +363,6 @@ ignore_targets = []
 ```toml
 [collector]
 enabled = true
-server_token = ""          # trusted server-to-server
-browser_token = ""         # PUBLIC — ships in the JS bundle
 sync_writes = false        # true in tests
 queue_capacity = 1024
 batch_size = 200
@@ -368,9 +375,17 @@ event_retention_days = 30
 issue_retention_days = 90
 max_events_per_issue = 500
 
+# Used only when the project table is empty. Ignored after that.
+[collector.seed]
+server_token = ""
+browser_token = ""
+
+[collector.status]
+output_path = "status/"    # a directory; `{dir}/status.json` until snapshots are project-scoped
+
 [collector.alerts]
 enabled = true
-recipient = ""             # empty leaves alerting inert
+recipient = ""             # empty leaves alerting inert; org-level only
 min_level = "error"
 max_per_window = 10
 window_minutes = 60

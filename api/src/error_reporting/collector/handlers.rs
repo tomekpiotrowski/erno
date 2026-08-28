@@ -57,7 +57,8 @@ where
     let trust_proxy = state.app.config.rate_limiting.trust_proxy;
     let client_ip = resolve_client_ip(&headers, socket_ip, trust_proxy);
 
-    let Some(identity) = authenticate(&state.config, &headers, client_ip) else {
+    let Some(identity) = authenticate(&state.app.db, &state.token_cache, &headers, client_ip).await
+    else {
         return (
             StatusCode::UNAUTHORIZED,
             Json(json!({ "error": "invalid_ingest_key" })),
@@ -123,13 +124,20 @@ where
 
     metrics::counter!(
         "erno_error_reports_received_total",
-        "source" => identity.origin.source.as_str()
+        "source" => identity.origin.source.as_str(),
+        "project" => identity.project_slug.clone()
     )
     .increment(reports.len() as u64);
 
     let (accepted, sink_dropped) = state
         .sink
-        .accept(&state.app.db, &state.config, reports)
+        .accept(
+            &state.app.db,
+            &state.config,
+            identity.project_id,
+            &identity.project_slug,
+            reports,
+        )
         .await;
 
     (
@@ -153,7 +161,10 @@ pub async fn otlp_auth<ExtraConfig>(
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    if authenticate_server_bearer(&state.config, &headers) {
+    if authenticate_server_bearer(&state.app.db, &state.token_cache, &headers)
+        .await
+        .is_some()
+    {
         StatusCode::OK
     } else {
         StatusCode::UNAUTHORIZED

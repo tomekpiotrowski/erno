@@ -12,6 +12,7 @@ use sea_orm::entity::prelude::*;
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
+    pub project_id: Uuid,
     pub issue_id: Uuid,
     pub source: String,
     pub level: String,
@@ -46,6 +47,14 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     ErrorIssue,
+    #[sea_orm(
+        belongs_to = "super::project::Entity",
+        from = "Column::ProjectId",
+        to = "super::project::Column::Id",
+        on_update = "Cascade",
+        on_delete = "Cascade"
+    )]
+    Project,
 }
 
 impl Related<super::error_issue::Entity> for Entity {

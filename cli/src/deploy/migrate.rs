@@ -260,10 +260,29 @@ pub fn convert_secrets(target: Target, yaml: &str) -> Result<String, String> {
         }
         Target::Monitoring => {
             map.remove(serde_yaml::Value::from("console"));
+            // Ingest tokens live on the project row now, not in config. The old
+            // collector.server_token is exactly what the boot seed hashes for the
+            // seeded `monitoring` project, so carrying it to error_reporting keeps
+            // already-deployed apps ingesting. browser_token is reissued per
+            // project and has nowhere to go.
+            let mut server_token = None;
             if let Some(c) = map.get_mut(serde_yaml::Value::from("collector")) {
                 if let Some(c) = c.as_mapping_mut() {
                     c.remove(serde_yaml::Value::from("imageTag"));
                     c.remove(serde_yaml::Value::from("api_url"));
+                    server_token = c.remove(serde_yaml::Value::from("server_token"));
+                    c.remove(serde_yaml::Value::from("browser_token"));
+                }
+            }
+            if let Some(token) = server_token.filter(is_non_empty_scalar) {
+                let er = map
+                    .entry(serde_yaml::Value::from("error_reporting"))
+                    .or_insert_with(|| serde_yaml::Value::Mapping(Default::default()));
+                if let Some(er) = er.as_mapping_mut() {
+                    let key = serde_yaml::Value::from("ingest_token");
+                    if !er.get(&key).is_some_and(is_non_empty_scalar) {
+                        er.insert(key, token);
+                    }
                 }
             }
             if let Some(api) = map.get_mut(serde_yaml::Value::from("api")) {
@@ -275,6 +294,11 @@ pub fn convert_secrets(target: Target, yaml: &str) -> Result<String, String> {
         }
     }
     serde_yaml::to_string(&v).map_err(|e| e.to_string())
+}
+
+/// A YAML value that carries an actual secret, rather than `""` or `null`.
+fn is_non_empty_scalar(v: &serde_yaml::Value) -> bool {
+    v.as_str().is_some_and(|s| !s.trim().is_empty())
 }
 
 fn toml_value(src: &str, key: &str) -> Option<String> {
@@ -454,6 +478,45 @@ ingress:
         assert!(!new.contains("api_url"));
         assert!(!new.contains("ingress:"));
         assert!(!new.contains("target:"));
-        crate::deploy::config::parse_monitoring_secrets(&new).unwrap();
+        // Ingest tokens are per project now; the old server token becomes the
+        // boot seed so already-deployed apps keep reporting.
+        assert!(!new.contains("server_token"));
+        assert!(!new.contains("browser_token"));
+        let parsed = crate::deploy::config::parse_monitoring_secrets(&new).unwrap();
+        assert_eq!(parsed.error_reporting.ingest_token, "t");
+    }
+
+    #[test]
+    fn monitoring_secrets_keep_an_ingest_token_that_is_already_set() {
+        let old = r#"
+registry:
+  server: ghcr.io
+collector:
+  database_url: postgres://x
+  jwt_secret: s
+  server_token: old
+  browser_token: pub
+error_reporting:
+  ingest_token: kept
+"#;
+        let new = convert_secrets(Target::Monitoring, old).unwrap();
+        let parsed = crate::deploy::config::parse_monitoring_secrets(&new).unwrap();
+        assert_eq!(parsed.error_reporting.ingest_token, "kept");
+        assert!(!new.contains("browser_token"));
+    }
+
+    #[test]
+    fn monitoring_secrets_without_a_server_token_gain_no_ingest_token() {
+        let old = r#"
+registry:
+  server: ghcr.io
+collector:
+  database_url: postgres://x
+  jwt_secret: s
+  server_token: ""
+"#;
+        let new = convert_secrets(Target::Monitoring, old).unwrap();
+        let parsed = crate::deploy::config::parse_monitoring_secrets(&new).unwrap();
+        assert_eq!(parsed.error_reporting.ingest_token, "");
     }
 }

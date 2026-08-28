@@ -6,6 +6,8 @@ use std::sync::Arc;
 
 use crate::{app::App, error_reporting::config::CollectorConfig};
 
+use super::auth::TokenCache;
+use super::cors::OriginSet;
 use super::ingest::CollectorSink;
 
 /// What collector handlers are given.
@@ -23,6 +25,10 @@ pub struct CollectorState<ExtraConfig: Clone + Send + Sync + 'static> {
     pub config: Arc<CollectorConfig>,
     /// Where accepted reports go.
     pub sink: CollectorSink,
+    /// Hash → identity cache. Invalidated on rotate.
+    pub token_cache: TokenCache,
+    /// Warmed CORS origin set. Distinct from the token cache.
+    pub origin_set: OriginSet,
 }
 
 // Derived `Clone` would demand `ExtraConfig: Clone` on the struct itself, which
@@ -34,6 +40,8 @@ impl<ExtraConfig: Clone + Send + Sync + 'static> Clone for CollectorState<ExtraC
             app: self.app.clone(),
             config: Arc::clone(&self.config),
             sink: self.sink.clone(),
+            token_cache: self.token_cache.clone(),
+            origin_set: self.origin_set.clone(),
         }
     }
 }

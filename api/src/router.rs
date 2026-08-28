@@ -64,6 +64,7 @@ where
     let metrics_enabled = app.config.metrics.enabled;
     let traces_enabled = app.config.tracing.otel.traces_enabled();
     let cors_origins: Vec<HeaderValue> = cors_origin_list(&app.config.cors.allowed_origins);
+    let skip_default_cors = app.skip_default_cors;
     let metrics_state = MetricsEndpointState {
         handle: app.prometheus_handle.clone(),
         auth_token: app.config.metrics.auth_token.clone(),
@@ -132,7 +133,7 @@ where
         base = base.merge(dev::router::email_router(app_for_dev));
     }
 
-    if !cors_origins.is_empty() {
+    if !skip_default_cors && !cors_origins.is_empty() {
         base = base.layer(
             CorsLayer::new()
                 .allow_origin(cors_origins)
@@ -325,6 +326,7 @@ mod dev_inbox_tests {
             job_failure_handler: None,
             user_data_deleter: None,
             error_reporter: crate::error_reporting::reporter::ErrorReporter::disabled(),
+            skip_default_cors: false,
         };
         let server = TestServer::new(router(app, empty_router)).expect("test server");
         assert_eq!(server.get("/dev/emails").await.status_code(), 404);
@@ -360,6 +362,7 @@ mod dev_inbox_tests {
             job_failure_handler: None,
             user_data_deleter: None,
             error_reporter: crate::error_reporting::reporter::ErrorReporter::disabled(),
+            skip_default_cors: false,
         };
         let server = TestServer::new(router(app, empty_router)).expect("test server");
         assert_eq!(server.get("/dev/jobs").await.status_code(), 200);

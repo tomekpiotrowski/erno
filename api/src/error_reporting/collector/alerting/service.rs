@@ -55,6 +55,7 @@ pub enum RuleError {
 /// [`RuleError::Invalid`] when the input is unusable, otherwise the database error.
 pub async fn create(
     db: &DatabaseConnection,
+    project_id: Uuid,
     input: CreateRule,
 ) -> Result<alert_rule::Model, RuleError> {
     let name = input.name.trim();
@@ -70,6 +71,7 @@ pub async fn create(
 
     let model = alert_rule::ActiveModel {
         id: Set(Uuid::new_v4()),
+        project_id: Set(project_id),
         name: Set(truncate(name, 200)),
         enabled: Set(true),
         source: Set(source.as_str().to_string()),

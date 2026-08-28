@@ -265,6 +265,8 @@ pub struct MonitoringSecrets {
     pub collector: CollectorSecrets,
     #[serde(default)]
     pub api: MonitoringApiSecrets,
+    #[serde(default)]
+    pub error_reporting: MonitoringErrorReportingSecrets,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -276,10 +278,6 @@ pub struct CollectorSecrets {
     pub admin_username: String,
     #[serde(default)]
     pub admin_password_hash: String,
-    #[serde(default)]
-    pub server_token: String,
-    #[serde(default)]
-    pub browser_token: String,
     #[serde(default)]
     pub metrics_auth_token: String,
     #[serde(default)]
@@ -304,6 +302,12 @@ pub struct CollectorSecrets {
 #[serde(deny_unknown_fields, default)]
 pub struct MonitoringApiSecrets {
     pub metrics_auth_token: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields, default)]
+pub struct MonitoringErrorReportingSecrets {
+    pub ingest_token: String,
 }
 
 fn default_true() -> bool {
@@ -478,7 +482,9 @@ pub fn looks_like_helm_values(yaml: &str) -> bool {
         t.starts_with("imageTag:")
             || t.starts_with("ingress:")
             || t.starts_with("collector_url:")
-            || t.starts_with("error_reporting:")
+            // Nested leftover from Helm `api.error_reporting`. A top-level
+            // `error_reporting:` key is the monitoring self-report secret.
+            || (line != t && t.starts_with("error_reporting:"))
     })
 }
 
@@ -661,6 +667,24 @@ api:
     fn leftover_error_reporting_block_is_helm_shaped() {
         let yaml = "api:\n  error_reporting:\n    ingest_token: x\n";
         assert!(looks_like_helm_values(yaml));
+    }
+
+    #[test]
+    fn top_level_error_reporting_is_the_monitoring_self_report_secret() {
+        let yaml = r#"
+registry:
+  server: ghcr.io
+  username: u
+  password: p
+collector:
+  database_url: postgres://u:p@h/db
+  jwt_secret: s
+error_reporting:
+  ingest_token: tok
+"#;
+        assert!(!looks_like_helm_values(yaml));
+        let s = parse_monitoring_secrets(yaml).unwrap();
+        assert_eq!(s.error_reporting.ingest_token, "tok");
     }
 
     #[test]

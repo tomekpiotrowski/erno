@@ -185,14 +185,10 @@ pub struct CollectorConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
 
-    /// Trusted server-to-server token. Empty means the server path is refused.
+    /// Optional plaintext used only when seeding the empty `project` table.
+    /// Ignored once any project exists.
     #[serde(default)]
-    pub server_token: String,
-
-    /// Browser token. **Public** — it ships inside the JS bundle. A speed bump
-    /// against drive-by scanners, not a security control.
-    #[serde(default)]
-    pub browser_token: String,
+    pub seed: CollectorSeedConfig,
 
     /// Bounded ingest queue depth.
     #[serde(default = "default_queue_capacity")]
@@ -271,8 +267,7 @@ impl Default for CollectorConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            server_token: String::new(),
-            browser_token: String::new(),
+            seed: CollectorSeedConfig::default(),
             queue_capacity: default_queue_capacity(),
             batch_size: default_batch_size(),
             flush_interval_ms: default_flush_interval_ms(),
@@ -343,7 +338,21 @@ fn default_status_name() -> String {
 }
 
 fn default_status_output_path() -> String {
-    "status/status.json".to_string()
+    "status/".to_string()
+}
+
+/// Plaintext ingest tokens used only to seed the first `monitoring` project.
+///
+/// Ignored when the `project` table is already non-empty. Not a fallback for
+/// ingest — lookup is always by stored hash.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CollectorSeedConfig {
+    /// Overrides the server token hashed into the seed row.
+    #[serde(default)]
+    pub server_token: String,
+    /// Overrides the browser token hashed into the seed row.
+    #[serde(default)]
+    pub browser_token: String,
 }
 
 const fn default_status_refresh_seconds() -> u64 {
@@ -509,9 +518,23 @@ mod tests {
         assert!(!config.store_client_ip);
         assert!(!config.sync_writes);
         assert_eq!(config.max_events_per_flush_per_issue, 10);
+        assert_eq!(config.status.output_path, "status/");
         // Alerts are configured on but inert without a recipient.
         assert!(config.alerts.enabled);
         assert!(!config.alerts.is_active());
+    }
+
+    #[test]
+    fn leftover_collector_tokens_are_ignored() {
+        let config: CollectorConfig = toml::from_str(
+            r#"
+            server_token = "old-server"
+            browser_token = "old-browser"
+            "#,
+        )
+        .expect("unknown keys are ignored");
+        assert!(config.seed.server_token.is_empty());
+        assert!(config.seed.browser_token.is_empty());
     }
 
     #[test]
@@ -526,6 +549,7 @@ mod tests {
     fn nested_alerts_table_parses() {
         let config: CollectorConfig = toml::from_str(
             r#"
+            [seed]
             server_token = "s"
             [alerts]
             recipient = "ops@example.com"
@@ -533,7 +557,7 @@ mod tests {
         "#,
         )
         .expect("valid");
-        assert_eq!(config.server_token, "s");
+        assert_eq!(config.seed.server_token, "s");
         assert!(config.alerts.is_active());
         assert_eq!(config.alerts.max_per_window, 3);
         assert_eq!(config.alerts.window_minutes, 60);

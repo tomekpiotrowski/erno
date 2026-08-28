@@ -9,6 +9,7 @@ use serde::Serialize;
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
+    pub project_id: Uuid,
     pub title: String,
     /// `investigating` | `identified` | `monitoring` | `resolved`.
     pub status: String,
@@ -26,6 +27,14 @@ pub struct Model {
 pub enum Relation {
     #[sea_orm(has_many = "super::status_incident_update::Entity")]
     Updates,
+    #[sea_orm(
+        belongs_to = "super::project::Entity",
+        from = "Column::ProjectId",
+        to = "super::project::Column::Id",
+        on_update = "Cascade",
+        on_delete = "Cascade"
+    )]
+    Project,
 }
 
 impl Related<super::status_incident_update::Entity> for Entity {

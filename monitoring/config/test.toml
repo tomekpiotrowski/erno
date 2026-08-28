@@ -62,7 +62,7 @@ default_max_requests = 1000
 backoff_multiplier = 2.0
 
 [metrics]
-table_counts = ["error_issue", "error_event"]
+table_counts = ["project", "error_issue", "error_event"]
 
 # Browsers post from the app and admin origins, which are different hosts.
 [cors]
@@ -79,10 +79,9 @@ enabled = true
 # afterwards. A background writer on a second connection would both deadlock
 # the single-connection pool and never see the test's data.
 sync_writes = true
-# Trusted server-to-server path. A real secret; belongs in SOPS in production.
+
+[collector.seed]
 server_token = "dev-server-token"
-# PUBLIC — this ships inside the JS bundle. A speed bump against drive-by
-# scanners, not a security control.
 browser_token = "dev-browser-token"
 
 [collector.alerts]

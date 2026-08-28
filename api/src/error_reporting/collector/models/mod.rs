@@ -9,6 +9,7 @@ pub mod alert_rule;
 pub mod app_health;
 pub mod error_event;
 pub mod error_issue;
+pub mod project;
 pub mod release;
 pub mod status_component;
 pub mod status_incident;

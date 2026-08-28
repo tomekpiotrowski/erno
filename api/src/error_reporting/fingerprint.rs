@@ -15,6 +15,8 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
+use uuid::Uuid;
+
 use super::{Frame, Source};
 
 /// How many stack frames participate in the grouping key.
@@ -29,7 +31,10 @@ const MAX_MESSAGE_KEY_LEN: usize = 200;
 /// Everything the grouping key is derived from.
 #[derive(Debug, Clone)]
 pub struct FingerprintInput<'a> {
-    /// Which component reported. Always the first part, so a browser
+    /// Which application reported. Prepended before source so two projects
+    /// with identical stacks cannot collide.
+    pub project_id: Uuid,
+    /// Which component reported. Always after `project_id`, so a browser
     /// `TypeError` and a Rust panic can never collide.
     pub source: Source,
     /// Exception type, error class, or tracing target.
@@ -55,7 +60,10 @@ pub fn fingerprint(input: &FingerprintInput<'_>) -> String {
 /// two errors grouped, not just that their digests matched.
 #[must_use]
 pub fn fingerprint_parts(input: &FingerprintInput<'_>) -> Vec<String> {
-    let mut parts = vec![input.source.as_str().to_string()];
+    let mut parts = vec![
+        input.project_id.to_string(),
+        input.source.as_str().to_string(),
+    ];
 
     // An explicit client fingerprint wins, but stays namespaced by source.
     if let Some(client) = input.client_fingerprint {
@@ -370,6 +378,7 @@ mod tests {
         message: &'a str,
     ) -> FingerprintInput<'a> {
         FingerprintInput {
+            project_id: Uuid::from_u128(1),
             source: Source::App,
             error_type,
             message,
@@ -388,6 +397,16 @@ mod tests {
             fingerprint(&input(&a, "TypeError", "x is not a function")),
             fingerprint(&input(&b, "TypeError", "x is not a function")),
         );
+    }
+
+    #[test]
+    fn project_namespaces_the_key() {
+        let frames = vec![frame("handle", "/src/app/foo.ts", 1)];
+        let mut a = input(&frames, "TypeError", "boom");
+        let mut b = input(&frames, "TypeError", "boom");
+        a.project_id = Uuid::from_u128(1);
+        b.project_id = Uuid::from_u128(2);
+        assert_ne!(fingerprint(&a), fingerprint(&b));
     }
 
     #[test]
@@ -584,14 +603,14 @@ mod tests {
         let mut i = input(&frames, "E", "m");
         i.client_fingerprint = Some(&many);
         let parts = fingerprint_parts(&i);
-        // source + 8 capped parts
-        assert_eq!(parts.len(), MAX_CLIENT_PARTS + 1);
+        // project + source + 8 capped parts
+        assert_eq!(parts.len(), MAX_CLIENT_PARTS + 2);
 
         let long = vec!["x".repeat(500)];
         let mut j = input(&frames, "E", "m");
         j.client_fingerprint = Some(&long);
         assert_eq!(
-            fingerprint_parts(&j)[1].chars().count(),
+            fingerprint_parts(&j)[2].chars().count(),
             MAX_CLIENT_PART_LEN
         );
     }

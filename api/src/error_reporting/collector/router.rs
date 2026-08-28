@@ -12,7 +12,14 @@ use axum::{
 
 use crate::{app::App, error_reporting::config::CollectorConfig};
 
-use super::{handlers, ingest::CollectorSink, operator, state::CollectorState};
+use super::{
+    auth::TokenCache,
+    cors::{collector_cors_layer, load_origins, refresh_origins, OriginSet, ORIGIN_SET_TTL},
+    handlers,
+    ingest::CollectorSink,
+    operator, projects,
+    state::CollectorState,
+};
 
 /// How often retention sweeps. Hourly matches the framework's job cleanup.
 const RETENTION_INTERVAL_SECONDS: u64 = 3_600;
@@ -90,10 +97,58 @@ where
         );
     }
 
+    let token_cache = TokenCache::new();
+    let origin_set = OriginSet::new();
+    // Tests insert their own project (`sync_writes`). Production seeds here so
+    // ingest works the moment config tokens disappear.
+    if !config.sync_writes {
+        if let Some(Err(e)) = try_block_on(projects::seed_if_empty(
+            &app.db,
+            &app.config.error_reporting,
+            &config,
+        )) {
+            // Without a project every ingest 401s. Say so on stderr rather than
+            // leaving an operator to guess from the reports going missing;
+            // tokens themselves are never printed here.
+            eprintln!("error_reporting: could not seed the first project: {e}");
+        }
+    }
+    match try_block_on(load_origins(&app.db, &app.config.cors.allowed_origins)) {
+        Some(Ok(origins)) => origin_set.replace(origins),
+        Some(Err(e)) => {
+            eprintln!("error_reporting: could not warm CORS origins: {e}");
+            origin_set.replace(extras_only(&app.config.cors.allowed_origins));
+        }
+        // Current-thread test runtime cannot `block_in_place`. Extras still
+        // answer preflight; project origins land on create/refresh.
+        None => origin_set.replace(extras_only(&app.config.cors.allowed_origins)),
+    }
+
+    if !config.sync_writes {
+        let origin_set_bg = origin_set.clone();
+        let db_bg = app.db.clone();
+        let extras_bg = app.config.cors.allowed_origins.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(ORIGIN_SET_TTL).await;
+                if let Err(e) = refresh_origins(&origin_set_bg, &db_bg, &extras_bg).await {
+                    eprintln!("error_reporting: could not refresh CORS origins: {e}");
+                }
+            }
+        });
+    }
+
+    let skip_default_cors = app.skip_default_cors;
     let config = Arc::new(config);
     let sink = CollectorSink::start(app.db.clone(), Arc::clone(&config), alerts);
 
-    let state = CollectorState { app, config, sink };
+    let state = CollectorState {
+        app,
+        config,
+        sink,
+        token_cache,
+        origin_set: origin_set.clone(),
+    };
     let public_state = state.clone();
 
     // Ingest: token-authenticated, high volume, generous body limit.
@@ -108,6 +163,27 @@ where
     // Operator console: HTTP Basic, applied as a layer so no route can be added
     // later without it.
     let operator_routes = Router::new()
+        .route(
+            "/projects",
+            get(projects::list_projects::<ExtraConfig>)
+                .post(projects::create_project::<ExtraConfig>),
+        )
+        .route(
+            "/projects/{slug}",
+            get(projects::get_project::<ExtraConfig>),
+        )
+        .route(
+            "/projects/{slug}/tokens/server",
+            post(projects::rotate_server_token::<ExtraConfig>),
+        )
+        .route(
+            "/projects/{slug}/tokens/browser",
+            post(projects::rotate_browser_token::<ExtraConfig>),
+        )
+        .route(
+            "/projects/{slug}/tokens/scrape",
+            post(projects::set_scrape_metrics_token::<ExtraConfig>),
+        )
         .route("/issues", get(operator::list_issues::<ExtraConfig>))
         .route("/issues/counts", get(operator::issue_counts::<ExtraConfig>))
         .route(
@@ -217,8 +293,36 @@ where
         )
         .with_state(public_state);
 
-    Some(ingest.merge(Router::new().nest(
+    let mut routes = ingest.merge(Router::new().nest(
         "/collector",
         operator_routes.merge(machine_routes).merge(public_routes),
-    )))
+    ));
+    // One layer: the framework skipped its CorsLayer when skip_default_cors.
+    if skip_default_cors {
+        routes = routes.layer(collector_cors_layer(origin_set));
+    }
+    Some(routes)
+}
+
+fn extras_only(extras: &[String]) -> std::collections::HashSet<String> {
+    extras
+        .iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// Warm CORS / seed on the multi-thread serve runtime. `None` on the
+/// current-thread test runtime, which cannot `block_in_place`.
+fn try_block_on<F, T>(fut: F) -> Option<T>
+where
+    F: std::future::Future<Output = T>,
+{
+    let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        return None;
+    };
+    if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::CurrentThread {
+        return None;
+    }
+    Some(tokio::task::block_in_place(|| handle.block_on(fut)))
 }

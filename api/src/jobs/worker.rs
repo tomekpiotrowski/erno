@@ -600,6 +600,7 @@ mod tests {
             job_failure_handler: handler,
             user_data_deleter: None,
             error_reporter: crate::error_reporting::reporter::ErrorReporter::disabled(),
+            skip_default_cors: false,
         }
     }
 

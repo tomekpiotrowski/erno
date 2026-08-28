@@ -452,6 +452,7 @@ mod tests {
 
         let fp = |frames: &[Frame]| {
             fingerprint::fingerprint(&fingerprint::FingerprintInput {
+                project_id: uuid::Uuid::from_u128(1),
                 source: Source::Api,
                 error_type: "panic",
                 message: "attempt to divide by zero",

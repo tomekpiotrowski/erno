@@ -68,10 +68,12 @@ pub struct AddUpdate {
 /// Returns the database error.
 pub async fn create_component(
     db: &DatabaseConnection,
+    project_id: Uuid,
     input: UpsertComponent,
 ) -> Result<status_component::Model, DbErr> {
     status_component::ActiveModel {
         id: Set(Uuid::new_v4()),
+        project_id: Set(project_id),
         name: Set(truncate(input.name.trim(), 200)),
         description: Set(input.description.map(|d| truncate(&d, 1_000))),
         position: Set(input.position.unwrap_or(0)),
@@ -125,11 +127,13 @@ pub async fn delete_component(db: &DatabaseConnection, id: Uuid) -> Result<bool,
 /// Returns the database error.
 pub async fn open_incident(
     db: &DatabaseConnection,
+    project_id: Uuid,
     input: OpenIncident,
 ) -> Result<status_incident::Model, DbErr> {
     let now = Utc::now().naive_utc();
     let incident = status_incident::ActiveModel {
         id: Set(Uuid::new_v4()),
+        project_id: Set(project_id),
         title: Set(truncate(input.title.trim(), 300)),
         status: Set("investigating".to_string()),
         impact: Set(normalize_impact(input.impact.as_deref())),

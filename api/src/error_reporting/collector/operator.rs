@@ -23,10 +23,24 @@ use crate::admin::auth::verify_admin_basic_auth;
 use super::{
     models::IssueStatus,
     operator_dto::{EventQuery, IssueQuery, SeriesQuery},
+    projects,
     releases::{self, RecordRelease, ReleaseQuery},
     service::{self, IssueFilters},
     state::CollectorState,
 };
+
+/// Un-nested operator writes need a project until those routes are nested.
+async fn require_project_id(db: &sea_orm::DatabaseConnection) -> Result<Uuid, Response> {
+    match projects::first_project_id(db).await {
+        Ok(Some(id)) => Ok(id),
+        Ok(None) => Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "no project" })),
+        )
+            .into_response()),
+        Err(e) => Err(db_error(e)),
+    }
+}
 
 /// Reject anything without valid operator credentials.
 pub async fn require_operator<ExtraConfig>(
@@ -246,9 +260,16 @@ pub async fn anonymize_user<ExtraConfig>(
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    let authorized = super::auth::authenticate(&state.config, &headers, None)
-        .is_some_and(|identity| identity.origin.trusted);
-    if !authorized {
+    let Some(identity) =
+        super::auth::authenticate(&state.app.db, &state.token_cache, &headers, None).await
+    else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "invalid_ingest_key" })),
+        )
+            .into_response();
+    };
+    if !identity.origin.trusted {
         return (
             StatusCode::UNAUTHORIZED,
             Json(json!({ "error": "invalid_ingest_key" })),
@@ -256,7 +277,7 @@ where
             .into_response();
     }
 
-    match service::anonymize_user(&state.app.db, id).await {
+    match service::anonymize_user(&state.app.db, identity.project_id, id).await {
         Ok(rows) => Json(json!({ "anonymized": rows })).into_response(),
         Err(e) => db_error(e),
     }
@@ -288,9 +309,16 @@ pub async fn record_release<ExtraConfig>(
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    let authorized = super::auth::authenticate(&state.config, &headers, None)
-        .is_some_and(|identity| identity.origin.trusted);
-    if !authorized {
+    let Some(identity) =
+        super::auth::authenticate(&state.app.db, &state.token_cache, &headers, None).await
+    else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "invalid_ingest_key" })),
+        )
+            .into_response();
+    };
+    if !identity.origin.trusted {
         return (
             StatusCode::UNAUTHORIZED,
             Json(json!({ "error": "invalid_ingest_key" })),
@@ -306,7 +334,7 @@ where
             .into_response();
     }
 
-    match releases::record(&state.app.db, input).await {
+    match releases::record(&state.app.db, identity.project_id, input).await {
         Ok(model) => (
             StatusCode::CREATED,
             Json(json!({ "id": model.id, "version": model.version })),
@@ -339,9 +367,16 @@ pub async fn record_health<ExtraConfig>(
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    let authorized = super::auth::authenticate(&state.config, &headers, None)
-        .is_some_and(|identity| identity.origin.trusted);
-    if !authorized {
+    let Some(identity) =
+        super::auth::authenticate(&state.app.db, &state.token_cache, &headers, None).await
+    else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "invalid_ingest_key" })),
+        )
+            .into_response();
+    };
+    if !identity.origin.trusted {
         return (
             StatusCode::UNAUTHORIZED,
             Json(json!({ "error": "invalid_ingest_key" })),
@@ -349,7 +384,7 @@ where
             .into_response();
     }
 
-    match super::health::record(&state.app.db, &snapshot).await {
+    match super::health::record(&state.app.db, identity.project_id, &snapshot).await {
         Ok(()) => StatusCode::ACCEPTED.into_response(),
         Err(e) => db_error(e),
     }
@@ -384,7 +419,11 @@ pub async fn create_check<ExtraConfig>(
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    match super::uptime::service::create(&state.app.db, input).await {
+    let project_id = match require_project_id(&state.app.db).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    match super::uptime::service::create(&state.app.db, project_id, input).await {
         Ok(model) => (StatusCode::CREATED, Json(json!({ "id": model.id }))).into_response(),
         Err(super::uptime::service::CheckError::Invalid(message)) => (
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -478,7 +517,11 @@ where
         )
             .into_response();
     }
-    match super::status::service::create_component(&state.app.db, input).await {
+    let project_id = match require_project_id(&state.app.db).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    match super::status::service::create_component(&state.app.db, project_id, input).await {
         Ok(model) => (StatusCode::CREATED, Json(json!({ "id": model.id }))).into_response(),
         Err(e) => db_error(e),
     }
@@ -538,7 +581,11 @@ where
         )
             .into_response();
     }
-    match super::status::service::open_incident(&state.app.db, input).await {
+    let project_id = match require_project_id(&state.app.db).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    match super::status::service::open_incident(&state.app.db, project_id, input).await {
         Ok(model) => (StatusCode::CREATED, Json(json!({ "id": model.id }))).into_response(),
         Err(e) => db_error(e),
     }
@@ -610,7 +657,11 @@ pub async fn create_rule<ExtraConfig>(
 where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
-    match super::alerting::service::create(&state.app.db, input).await {
+    let project_id = match require_project_id(&state.app.db).await {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    match super::alerting::service::create(&state.app.db, project_id, input).await {
         Ok(model) => (StatusCode::CREATED, Json(json!({ "id": model.id }))).into_response(),
         Err(super::alerting::service::RuleError::Invalid(message)) => (
             StatusCode::UNPROCESSABLE_ENTITY,

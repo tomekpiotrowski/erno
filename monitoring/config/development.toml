@@ -68,7 +68,7 @@ default_max_requests = 1000
 backoff_multiplier = 2.0
 
 [metrics]
-table_counts = ["error_issue", "error_event"]
+table_counts = ["project", "error_issue", "error_event"]
 
 # Browsers post from the app and admin origins, which are different hosts.
 [cors]
@@ -81,18 +81,18 @@ password_hash = "$argon2id$v=19$m=19456,t=2,p=1$5B2ECOLqakkxkiD5EjKyDQ$PBe29N0j5
 
 [collector]
 enabled = true
-# Trusted server-to-server path. A real secret; belongs in SOPS in production.
+
+# Used only when the project table is empty, so the first `cargo run -- serve`
+# can ingest. Ignored after that.
+[collector.seed]
 server_token = "dev-server-token"
-# PUBLIC — this ships inside the JS bundle. A speed bump against drive-by
-# scanners, not a security control.
 browser_token = "dev-browser-token"
 
 [collector.status]
 enabled = true
 name = "Erno status"
-# In production this must be somewhere served independently of this deployment
-# — object storage behind a CDN — or the page goes down with the collector.
-output_path = "status/status.json"
+# A directory. The publisher writes `{dir}/status.json` until snapshots are project-scoped.
+output_path = "status/"
 refresh_seconds = 30
 
 # Alert rules with source = "promql" query this. `erno dev` starts Prometheus

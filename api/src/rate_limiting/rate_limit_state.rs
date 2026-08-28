@@ -285,15 +285,15 @@ impl RateLimitConfig {
                 tiers: vec![
                     RateLimitTier {
                         window_secs: 10,
-                        max_requests: 60,
-                    },
-                    RateLimitTier {
-                        window_secs: 60,
                         max_requests: 300,
                     },
                     RateLimitTier {
+                        window_secs: 60,
+                        max_requests: 1500,
+                    },
+                    RateLimitTier {
                         window_secs: 3600,
-                        max_requests: 3000,
+                        max_requests: 15000,
                     },
                 ],
             },
@@ -488,6 +488,18 @@ mod tests {
                 max_requests,
             }],
         }
+    }
+
+    #[test]
+    fn error_ingest_defaults_are_five_times_the_original_ceiling() {
+        let actions = RateLimitConfig::default_actions();
+        let ingest = actions.get("error_ingest").expect("error_ingest");
+        let tiers: Vec<(u64, u32)> = ingest
+            .tiers
+            .iter()
+            .map(|t| (t.window_secs, t.max_requests))
+            .collect();
+        assert_eq!(tiers, vec![(10, 300), (60, 1500), (3600, 15000)]);
     }
 
     #[tokio::test]

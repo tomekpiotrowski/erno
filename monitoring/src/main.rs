@@ -56,7 +56,7 @@ fn boot_config() -> BootConfig<MonitorConfig> {
         "Erno monitoring collector",
     );
 
-    BootConfig::new(app_info, app_router, job_registry(), job_schedule())
+    BootConfig::new(app_info, app_router, job_registry(), job_schedule()).skip_default_cors()
 }
 
 #[tokio::main]

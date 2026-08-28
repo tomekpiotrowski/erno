@@ -9,6 +9,7 @@
 pub mod alerting;
 pub mod alerts;
 pub mod auth;
+pub mod cors;
 pub mod dto;
 pub mod handlers;
 pub mod health;
@@ -17,6 +18,7 @@ pub mod migrations;
 pub mod models;
 pub mod operator;
 pub mod operator_dto;
+pub mod projects;
 pub mod releases;
 pub mod retention;
 pub mod router;

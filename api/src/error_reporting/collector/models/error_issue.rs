@@ -13,7 +13,7 @@ use sea_orm::entity::prelude::*;
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
-    #[sea_orm(unique)]
+    pub project_id: Uuid,
     pub fingerprint: String,
     pub source: String,
     pub error_type: String,
@@ -39,6 +39,14 @@ pub struct Model {
 pub enum Relation {
     #[sea_orm(has_many = "super::error_event::Entity")]
     ErrorEvent,
+    #[sea_orm(
+        belongs_to = "super::project::Entity",
+        from = "Column::ProjectId",
+        to = "super::project::Column::Id",
+        on_update = "Cascade",
+        on_delete = "Cascade"
+    )]
+    Project,
 }
 
 impl Related<super::error_event::Entity> for Entity {

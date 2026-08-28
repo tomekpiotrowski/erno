@@ -58,6 +58,7 @@ async fn create_app_for_routes<ExtraConfig>(config: Config<ExtraConfig>) -> App<
         job_failure_handler: None,
         user_data_deleter: None,
         error_reporter: crate::error_reporting::reporter::ErrorReporter::disabled(),
+        skip_default_cors: false,
     }
 }
 

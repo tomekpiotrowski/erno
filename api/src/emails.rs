@@ -276,6 +276,7 @@ mod tests {
             job_failure_handler: None,
             user_data_deleter: None,
             error_reporter: crate::error_reporting::reporter::ErrorReporter::disabled(),
+            skip_default_cors: false,
         };
 
         send_html_email(&app, "outbox@example.com", "Hello", "<p>Hi</p>".into())

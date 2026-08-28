@@ -7,23 +7,32 @@
 //! test in a binary must share one migrator — and only this crate's
 //! [`MonitorMigrator`] creates the collector tables.
 
+use axum::http::Method;
 use axum::Router;
 use erno::{
     app::App,
     app_info::AppInfo,
     boot::BootConfig,
-    error_reporting::collector::collector_router,
+    error_reporting::{
+        collector::{collector_router, models::project, projects},
+        CollectorConfig, ErrorReportingConfig,
+    },
     jobs::job_registry::JobRegistry,
     tests::{no_fixtures, require_single_test_thread, setup_test, TestUtils},
+    token::hash_token,
 };
-use sea_orm::{ConnectionTrait, DbBackend, EntityTrait, Statement};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ConnectionTrait, DbBackend, EntityTrait, Statement,
+};
 use serde_json::{json, Value};
+use uuid::Uuid;
 
 use crate::{MonitorConfig, MonitorMigrator};
 
 const BROWSER_TOKEN: &str = "dev-browser-token";
 const SERVER_TOKEN: &str = "dev-server-token";
 const INGEST: &str = "/api/errors";
+const PROJECTS: &str = "/api/collector/projects";
 
 fn collector_test_router(app: App<MonitorConfig>) -> Router {
     let config = app.config.extra.collector.clone();
@@ -44,6 +53,7 @@ fn boot(router: fn(App<MonitorConfig>) -> Router) -> BootConfig<MonitorConfig> {
         JobRegistry::new(),
         vec![],
     )
+    .skip_default_cors()
 }
 
 /// Every test in this suite boots through here, so the single-thread guard
@@ -53,7 +63,38 @@ fn boot(router: fn(App<MonitorConfig>) -> Router) -> BootConfig<MonitorConfig> {
 /// that deadlock against other tests' uncommitted rows when run in parallel.
 async fn setup_with(router: fn(App<MonitorConfig>) -> Router) -> TestUtils {
     require_single_test_thread("erno-monitoring");
-    setup_test::<MonitorMigrator, MonitorConfig>(boot(router), no_fixtures).await
+    let t = setup_test::<MonitorMigrator, MonitorConfig>(boot(router), no_fixtures).await;
+    insert_project(&t, "monitoring", SERVER_TOKEN, BROWSER_TOKEN, &[]).await;
+    t
+}
+
+/// Empty `project` table, for seed tests.
+async fn setup_empty() -> TestUtils {
+    require_single_test_thread("erno-monitoring");
+    setup_test::<MonitorMigrator, MonitorConfig>(boot(collector_test_router), no_fixtures).await
+}
+
+async fn insert_project(t: &TestUtils, slug: &str, server: &str, browser: &str, cors: &[&str]) {
+    project::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        slug: Set(slug.to_string()),
+        name: Set(slug.to_string()),
+        server_token_hash: Set(hash_token(server)),
+        browser_token_hash: Set(hash_token(browser)),
+        cors_origins: Set(json!(cors)),
+        scrape_target: Set(String::new()),
+        scrape_scheme: Set("https".to_string()),
+        scrape_metrics_token: Set(String::new()),
+        event_retention_days: Set(None),
+        issue_retention_days: Set(None),
+        max_events_per_issue: Set(None),
+        status_enabled: Set(false),
+        status_name: Set(String::new()),
+        created_at: Set(chrono::Utc::now().naive_utc()),
+    }
+    .insert(&t.db)
+    .await
+    .expect("insert project");
 }
 
 async fn setup() -> TestUtils {
@@ -212,6 +253,14 @@ async fn ingest_requires_a_known_token() {
 
     let missing = t.server.post(INGEST).json(&body).await;
     assert_eq!(missing.status_code(), 401);
+
+    let empty = t
+        .server
+        .post(INGEST)
+        .add_header("x-erno-ingest-key", "")
+        .json(&body)
+        .await;
+    assert_eq!(empty.status_code(), 401);
 
     let wrong = t
         .server
@@ -478,7 +527,8 @@ async fn the_test_config_selects_synchronous_writes() {
         config.extra.collector.sync_writes,
         "monitoring/config/test.toml must set [collector] sync_writes = true"
     );
-    assert_eq!(config.extra.collector.browser_token, BROWSER_TOKEN);
+    assert_eq!(config.extra.collector.seed.browser_token, BROWSER_TOKEN);
+    assert_eq!(config.extra.collector.seed.server_token, SERVER_TOKEN);
 }
 
 // ---------------------------------------------------------------------------
@@ -1861,13 +1911,18 @@ async fn the_publisher_writes_a_document_that_the_page_can_read() {
 
     let t = setup().await;
     create_component(&t, "API", None).await;
+    t.db.execute(Statement::from_string(
+        DbBackend::Postgres,
+        "UPDATE project SET status_enabled = true",
+    ))
+    .await
+    .expect("enable status");
 
     let dir = std::env::temp_dir().join(format!("erno-status-test-{}", uuid::Uuid::new_v4()));
-    let path = dir.join("status.json");
     let config = StatusConfig {
         enabled: true,
         name: "Acme status".to_string(),
-        output_path: path.to_string_lossy().to_string(),
+        output_path: dir.to_string_lossy().to_string(),
         refresh_seconds: 30,
     };
 
@@ -1875,7 +1930,7 @@ async fn the_publisher_writes_a_document_that_the_page_can_read() {
         .await
         .expect("publish");
 
-    let written = std::fs::read_to_string(&path).expect("the document exists");
+    let written = std::fs::read_to_string(dir.join("status.json")).expect("the document exists");
     let snapshot: Value = serde_json::from_str(&written).expect("it is valid JSON");
     assert_eq!(snapshot["name"], "Acme status");
     assert_eq!(snapshot["state"], "operational");
@@ -1883,6 +1938,30 @@ async fn the_publisher_writes_a_document_that_the_page_can_read() {
     assert_eq!(snapshot["refresh_seconds"], 30);
 
     std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test]
+async fn the_publisher_writes_nothing_when_no_project_has_status_enabled() {
+    use erno::error_reporting::collector::status::publisher;
+    use erno::error_reporting::StatusConfig;
+
+    let t = setup().await;
+    let dir = std::env::temp_dir().join(format!("erno-status-skip-{}", uuid::Uuid::new_v4()));
+    let config = StatusConfig {
+        enabled: true,
+        name: "Acme status".to_string(),
+        output_path: dir.to_string_lossy().to_string(),
+        refresh_seconds: 30,
+    };
+
+    publisher::publish_once(&t.db, &config)
+        .await
+        .expect("publish");
+
+    assert!(
+        !dir.join("status.json").exists(),
+        "output_path is a directory and is never treated as a file"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -2275,4 +2354,385 @@ async fn managing_alert_rules_requires_operator_credentials() {
             .status_code(),
         401
     );
+}
+
+// ---------------------------------------------------------------------------
+// Projects, tokens, CORS, seed
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn creating_a_project_returns_plaintext_tokens_once() {
+    let t = setup().await;
+    let created = t
+        .server
+        .post(PROJECTS)
+        .add_header("authorization", OPERATOR)
+        .json(&json!({
+            "slug": "teryon",
+            "name": "Teryon",
+            "cors_origins": ["https://app.teryon.com"],
+            "scrape_metrics_token": "scrape-secret"
+        }))
+        .await;
+    assert_eq!(created.status_code(), 201);
+    let body: Value = created.json();
+    let server = body["server_token"].as_str().expect("server_token once");
+    let browser = body["browser_token"].as_str().expect("browser_token once");
+    assert!(server.starts_with("erns_"));
+    assert!(browser.starts_with("ernb_"));
+    assert!(body.get("server_token_hash").is_none());
+    assert!(body.get("browser_token_hash").is_none());
+    assert!(body.get("scrape_metrics_token").is_none());
+    assert_eq!(body["scrape_metrics_token_set"], true);
+    assert_eq!(body["slug"], "teryon");
+
+    let listed = t
+        .server
+        .get(PROJECTS)
+        .add_header("authorization", OPERATOR)
+        .await;
+    assert_eq!(listed.status_code(), 200);
+    let list: Value = listed.json();
+    let teryon = list["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["slug"] == "teryon")
+        .unwrap();
+    assert!(teryon.get("server_token").is_none());
+    assert!(teryon.get("server_token_hash").is_none());
+    assert!(teryon.get("browser_token").is_none());
+    assert!(teryon.get("browser_token_hash").is_none());
+    assert!(teryon.get("scrape_metrics_token").is_none());
+    assert_eq!(teryon["scrape_metrics_token_set"], true);
+
+    let detail = t
+        .server
+        .get(&format!("{PROJECTS}/teryon"))
+        .add_header("authorization", OPERATOR)
+        .await;
+    let detail: Value = detail.json();
+    assert!(detail.get("server_token").is_none());
+    assert!(detail.get("scrape_metrics_token").is_none());
+    assert_eq!(detail["scrape_metrics_token_set"], true);
+
+    let ingest = t
+        .server
+        .post(INGEST)
+        .add_header("x-erno-ingest-key", server)
+        .json(&envelope(vec![event("TypeError", "from teryon")]))
+        .await;
+    assert_eq!(ingest.status_code(), 202);
+}
+
+#[tokio::test]
+async fn rotating_a_token_shows_plaintext_once_and_invalidates_the_old_one() {
+    let t = setup().await;
+
+    let rotated = t
+        .server
+        .post(&format!("{PROJECTS}/monitoring/tokens/server"))
+        .add_header("authorization", OPERATOR)
+        .await;
+    assert_eq!(rotated.status_code(), 200);
+    let body: Value = rotated.json();
+    let new_token = body["token"].as_str().expect("plaintext once").to_string();
+    assert!(new_token.starts_with("erns_"));
+    assert_ne!(new_token, SERVER_TOKEN);
+
+    let listed: Value = t
+        .server
+        .get(&format!("{PROJECTS}/monitoring"))
+        .add_header("authorization", OPERATOR)
+        .await
+        .json();
+    assert!(listed.get("token").is_none());
+    assert!(listed.get("server_token").is_none());
+    assert!(listed.get("server_token_hash").is_none());
+
+    let old = t
+        .server
+        .post(INGEST)
+        .add_header("x-erno-ingest-key", SERVER_TOKEN)
+        .json(&envelope(vec![event("E", "m")]))
+        .await;
+    assert_eq!(old.status_code(), 401);
+
+    let fresh = t
+        .server
+        .post(INGEST)
+        .add_header("x-erno-ingest-key", new_token)
+        .json(&envelope(vec![event("E", "m")]))
+        .await;
+    assert_eq!(fresh.status_code(), 202);
+}
+
+#[tokio::test]
+async fn a_server_hash_is_trusted_and_a_browser_hash_is_not() {
+    let t = setup().await;
+    let user = json!({
+        "events": [{
+            "type": "E",
+            "message": "m",
+            "user": { "id": "550e8400-e29b-41d4-a716-446655440000", "email": "x@example.com" }
+        }]
+    });
+
+    t.server
+        .post(INGEST)
+        .add_header("x-erno-ingest-key", BROWSER_TOKEN)
+        .json(&user)
+        .await;
+    assert_eq!(
+        scalar(
+            &t,
+            "SELECT count(*)::bigint AS value FROM error_event WHERE user_id IS NOT NULL"
+        )
+        .await,
+        0
+    );
+
+    t.server
+        .post(INGEST)
+        .add_header("x-erno-ingest-key", SERVER_TOKEN)
+        .json(&user)
+        .await;
+    assert_eq!(
+        scalar(
+            &t,
+            "SELECT count(*)::bigint AS value FROM error_event WHERE user_id IS NOT NULL"
+        )
+        .await,
+        1
+    );
+}
+
+#[tokio::test]
+async fn cors_union_is_the_origin_set_not_the_token_cache() {
+    let t = setup().await;
+
+    let extras = t
+        .server
+        .method(Method::OPTIONS, INGEST)
+        .add_header("origin", "http://localhost:4400")
+        .add_header("access-control-request-method", "POST")
+        .await;
+    assert_eq!(
+        extras.header("access-control-allow-origin"),
+        "http://localhost:4400",
+        "configured [cors] extras are warmed without a token"
+    );
+
+    let unknown = t
+        .server
+        .method(Method::OPTIONS, INGEST)
+        .add_header("origin", "https://app.teryon.com")
+        .add_header("access-control-request-method", "POST")
+        .await;
+    assert!(
+        unknown
+            .maybe_header("access-control-allow-origin")
+            .is_none(),
+        "a project origin is not in the set until the row exists"
+    );
+
+    let created = t
+        .server
+        .post(PROJECTS)
+        .add_header("authorization", OPERATOR)
+        .json(&json!({
+            "slug": "teryon",
+            "name": "Teryon",
+            "cors_origins": ["https://app.teryon.com"]
+        }))
+        .await;
+    assert_eq!(created.status_code(), 201);
+
+    let allowed = t
+        .server
+        .method(Method::OPTIONS, INGEST)
+        .add_header("origin", "https://app.teryon.com")
+        .add_header("access-control-request-method", "POST")
+        .await;
+    assert_eq!(
+        allowed.header("access-control-allow-origin"),
+        "https://app.teryon.com"
+    );
+}
+
+#[tokio::test]
+async fn machine_routes_are_scoped_to_the_presenting_token() {
+    let t = setup().await;
+    insert_project(&t, "cubeast", "cubeast-server", "cubeast-browser", &[]).await;
+
+    let user_id = "550e8400-e29b-41d4-a716-446655440000";
+    t.server
+        .post(INGEST)
+        .add_header("x-erno-ingest-key", SERVER_TOKEN)
+        .json(&json!({
+            "events": [{
+                "type": "E",
+                "message": "m",
+                "user": { "id": user_id, "email": "a@example.com" }
+            }]
+        }))
+        .await;
+    t.server
+        .post(INGEST)
+        .add_header("x-erno-ingest-key", "cubeast-server")
+        .json(&json!({
+            "events": [{
+                "type": "E",
+                "message": "m",
+                "user": { "id": user_id, "email": "b@example.com" }
+            }]
+        }))
+        .await;
+    assert_eq!(
+        scalar(
+            &t,
+            "SELECT count(*)::bigint AS value FROM error_event WHERE user_id IS NOT NULL"
+        )
+        .await,
+        2
+    );
+
+    let other = t
+        .server
+        .delete(&format!("/api/collector/users/{user_id}/events"))
+        .add_header("x-erno-ingest-key", "cubeast-server")
+        .await;
+    assert_eq!(other.status_code(), 200);
+    assert_eq!(
+        scalar(
+            &t,
+            "SELECT count(*)::bigint AS value FROM error_event WHERE user_email = 'a@example.com'"
+        )
+        .await,
+        1,
+        "cubeast cannot anonymise teryon/monitoring events"
+    );
+
+    let own = t
+        .server
+        .delete(&format!("/api/collector/users/{user_id}/events"))
+        .add_header("x-erno-ingest-key", SERVER_TOKEN)
+        .await;
+    assert_eq!(own.status_code(), 200);
+    assert_eq!(
+        scalar(
+            &t,
+            "SELECT count(*)::bigint AS value FROM error_event WHERE user_email = 'a@example.com'"
+        )
+        .await,
+        0
+    );
+
+    assert_eq!(
+        record_release(&t, "1.0.0", "production")
+            .await
+            .status_code(),
+        201
+    );
+    let cubeast_release = t
+        .server
+        .post(RELEASES)
+        .add_header("x-erno-ingest-key", "cubeast-server")
+        .json(&json!({ "version": "1.0.0", "environment": "production" }))
+        .await;
+    assert_eq!(cubeast_release.status_code(), 201);
+    assert_eq!(
+        scalar(&t, "SELECT count(*)::bigint AS value FROM release").await,
+        2,
+        "the same version is a different row per project"
+    );
+
+    assert_eq!(
+        post_health(&t, &health_snapshot("api-0"))
+            .await
+            .status_code(),
+        202
+    );
+    let cubeast_health = t
+        .server
+        .post(HEALTH)
+        .add_header("x-erno-ingest-key", "cubeast-server")
+        .json(&health_snapshot("api-0"))
+        .await;
+    assert_eq!(cubeast_health.status_code(), 202);
+    assert_eq!(
+        scalar(&t, "SELECT count(*)::bigint AS value FROM app_health").await,
+        2,
+        "the same instance name is a different row per project"
+    );
+}
+
+#[tokio::test]
+async fn seed_uses_ingest_token_when_set() {
+    let t = setup_empty().await;
+    let error_reporting = ErrorReportingConfig {
+        ingest_token: "from-ingest".to_string(),
+        ..ErrorReportingConfig::default()
+    };
+    let seeded = projects::seed_if_empty(&t.db, &error_reporting, &CollectorConfig::default())
+        .await
+        .expect("seed");
+    assert!(seeded);
+    assert_eq!(
+        scalar_text(&t, "SELECT slug AS value FROM project").await,
+        "monitoring"
+    );
+
+    let response = t
+        .server
+        .post(INGEST)
+        .add_header("x-erno-ingest-key", "from-ingest")
+        .json(&envelope(vec![event("E", "m")]))
+        .await;
+    assert_eq!(response.status_code(), 202);
+
+    let again = projects::seed_if_empty(&t.db, &error_reporting, &CollectorConfig::default())
+        .await
+        .expect("second boot");
+    assert!(!again, "never re-seed when the table is non-empty");
+}
+
+#[tokio::test]
+async fn empty_ingest_token_still_inserts_the_monitoring_project() {
+    let t = setup_empty().await;
+    let seeded = projects::seed_if_empty(
+        &t.db,
+        &ErrorReportingConfig::default(),
+        &CollectorConfig::default(),
+    )
+    .await
+    .expect("seed");
+    assert!(seeded);
+    assert_eq!(
+        scalar_text(&t, "SELECT slug AS value FROM project").await,
+        "monitoring"
+    );
+    assert_eq!(
+        t.server
+            .post(INGEST)
+            .json(&envelope(vec![event("E", "m")]))
+            .await
+            .status_code(),
+        401,
+        "a generated token is not the empty header"
+    );
+}
+
+#[test]
+fn monitoring_boot_skips_the_framework_cors_layer() {
+    // The real boot config, not this suite's helper: the collector attaches one
+    // origin-set CorsLayer of its own, and a second static layer from `router()`
+    // would answer preflight for a project origin before the predicate ran.
+    assert!(
+        crate::boot_config().skip_default_cors,
+        "the monitoring process attaches one origin-set CorsLayer of its own"
+    );
+    // The helper has to agree, or every request spec here exercises a stack the
+    // deployed binary never runs.
+    assert!(boot(collector_test_router).skip_default_cors);
 }
