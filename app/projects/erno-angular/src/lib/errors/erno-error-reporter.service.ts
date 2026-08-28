@@ -362,10 +362,10 @@ export class ErnoErrorReporterService implements OnDestroy {
   }
 
   private withUser(report: ErnoErrorReport): ErnoErrorReport {
-    if (!this.settings.sendUser || !this.auth?.currentUser) {
+    const user = this.auth?.currentUser();
+    if (!this.settings.sendUser || !user) {
       return report;
     }
-    const user = this.auth.currentUser;
     return {
       ...report,
       context: { ...report.context, user_id: user.id, user_email: user.email },

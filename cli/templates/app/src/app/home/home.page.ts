@@ -1,5 +1,4 @@
 import { ChangeDetectionStrategy, Component } from '@angular/core';
-import { Router } from '@angular/router';
 import {
   AlertController,
   IonButton,
@@ -20,16 +19,14 @@ import { ErnoAuthService, ErnoAlertsService } from 'erno-angular';
 export class HomePage {
   constructor(
     public auth: ErnoAuthService,
-    private router: Router,
     private alertController: AlertController,
     private alerts: ErnoAlertsService,
   ) {}
 
   logout() {
-    this.auth.logout().subscribe({
-      next: () => this.router.navigate(['/login']),
-      error: () => this.router.navigate(['/login']),
-    });
+    // `logout()` clears the session either way; `AppComponent` follows it to
+    // the login page.
+    this.auth.logout().subscribe({ error: () => undefined });
   }
 
   async confirmDeleteAccount() {
@@ -53,7 +50,6 @@ export class HomePage {
 
   private deleteAccount(password: string) {
     this.auth.deleteAccount(password).subscribe({
-      next: () => this.router.navigate(['/login']),
       error: (err) =>
         this.alerts.error(err?.status === 403 ? 'Incorrect password.' : 'Could not delete account.'),
     });

@@ -1,28 +1,21 @@
-import { Injectable } from '@angular/core';
-import { CanActivate, Router, UrlTree } from '@angular/router';
-import { Observable, of } from 'rxjs';
-import { catchError, map } from 'rxjs/operators';
-import { ErnoAuthService, isFatalRefreshError } from 'erno-angular';
+import { inject } from '@angular/core';
+import { CanActivateFn, Router } from '@angular/router';
+import { filter, map, take } from 'rxjs/operators';
+import { ErnoAuthService } from 'erno-angular';
 
-@Injectable({ providedIn: 'root' })
-export class AuthGuard implements CanActivate {
-  constructor(private auth: ErnoAuthService, private router: Router) {}
+/**
+ * Guards a route on `ErnoAuthService.authState$` rather than on the tokens in
+ * storage, so there is one answer to "is there a session" and everything reads
+ * it. On a cold load the state sits at `restoring` until the silent refresh
+ * comes back — waiting for that is what keeps a reload from flashing /login.
+ */
+export const authGuard: CanActivateFn = () => {
+  const auth = inject(ErnoAuthService);
+  const router = inject(Router);
 
-  canActivate(): Observable<boolean | UrlTree> | boolean | UrlTree {
-    if (this.auth.accessToken) {
-      return true;
-    }
-    if (this.auth.refreshToken) {
-      return this.auth.refresh().pipe(
-        map(() => true),
-        catchError(err => {
-          if (!isFatalRefreshError(err) && this.auth.refreshToken) {
-            return of(true);
-          }
-          return of(this.router.createUrlTree(['/login']));
-        }),
-      );
-    }
-    return this.router.createUrlTree(['/login']);
-  }
-}
+  return auth.authState$.pipe(
+    filter(state => state !== 'restoring'),
+    take(1),
+    map(state => (state === 'authenticated' ? true : router.createUrlTree(['/login']))),
+  );
+};

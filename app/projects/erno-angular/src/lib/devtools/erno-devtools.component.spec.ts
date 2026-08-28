@@ -1,3 +1,4 @@
+import { WritableSignal, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { HttpClient } from '@angular/common/http';
 import { BehaviorSubject, of, Subject } from 'rxjs';
@@ -46,7 +47,7 @@ describe('ErnoDevtoolsComponent', () => {
   let pushEvents$: Subject<SyncPushEvent>;
   let mailList$: Subject<MockEmail[]>;
   let jobsList$: Subject<DevJob[]>;
-  let currentUser$: BehaviorSubject<AuthUser | null>;
+  let currentUser: WritableSignal<AuthUser | null>;
   let pullDelta: ReturnType<typeof vi.fn>;
   let entities: ReturnType<typeof vi.fn>;
   let resetCursor: ReturnType<typeof vi.fn>;
@@ -62,7 +63,7 @@ describe('ErnoDevtoolsComponent', () => {
   let notifyStatusChange: ReturnType<typeof vi.fn>;
   let networkConnected$: BehaviorSubject<boolean>;
   let authStub: {
-    currentUser$: ReturnType<BehaviorSubject<AuthUser | null>['asObservable']>;
+    currentUser: WritableSignal<AuthUser | null>;
     accessToken: string | null;
     refreshToken: string | null;
     login: ReturnType<typeof vi.fn>;
@@ -80,7 +81,7 @@ describe('ErnoDevtoolsComponent', () => {
     status$ = new BehaviorSubject<SyncStatus>('synced');
     lastError$ = new BehaviorSubject<string | null>(null);
     pushEvents$ = new Subject<SyncPushEvent>();
-    currentUser$ = new BehaviorSubject<AuthUser | null>(null);
+    currentUser = signal<AuthUser | null>(null);
     mailList$ = new Subject();
     jobsList$ = new Subject();
     pullDelta = vi.fn().mockName('pullDelta').mockResolvedValue(undefined);
@@ -139,7 +140,7 @@ describe('ErnoDevtoolsComponent', () => {
     };
 
     authStub = {
-      currentUser$: currentUser$.asObservable(),
+      currentUser,
       accessToken: null,
       refreshToken: null,
       login,
@@ -368,7 +369,7 @@ describe('ErnoDevtoolsComponent', () => {
     sessionStorage.setItem('erno_access_token', 'keep-me-not');
     authStub.accessToken = 'keep-me-not';
     authStub.refreshToken = 'refresh';
-    currentUser$.next({ id: 'user-1', email: 'dev@example.com' });
+    currentUser.set({ id: 'user-1', email: 'dev@example.com' });
     flushLists();
     clickTab('Auth');
     const drop = [...fixture.nativeElement.querySelectorAll('button')].find(

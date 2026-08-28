@@ -115,7 +115,7 @@ describe('ErnoAuthService', () => {
       build();
       http.expectOne(REFRESH_URL).flush('down', { status: 503, statusText: 'Service Unavailable' });
       expect(service.refreshToken).toBe('stored_refresh');
-      expect(service.currentUser).toEqual({ id: 'user-1', email: 'user@example.com' });
+      expect(service.currentUser()).toEqual({ id: 'user-1', email: 'user@example.com' });
     });
   });
 
@@ -146,7 +146,7 @@ describe('ErnoAuthService', () => {
   it('does not refresh when there is no stored refresh token', () => {
     build();
     http.expectNone(REFRESH_URL);
-    expect(service.currentUser).toBeNull();
+    expect(service.currentUser()).toBeNull();
   });
 
   it('refreshes on construct when the stored access token is an expired JWT', () => {

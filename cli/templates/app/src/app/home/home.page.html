@@ -8,7 +8,7 @@
 </ion-header>
 
 <ion-content class="ion-padding">
-  <p>Signed in as <strong>{{ auth.currentUser?.email }}</strong></p>
+  <p>Signed in as <strong>{{ auth.currentUser()?.email }}</strong></p>
 
   <ion-button expand="block" color="danger" fill="outline" (click)="confirmDeleteAccount()">
     Delete account

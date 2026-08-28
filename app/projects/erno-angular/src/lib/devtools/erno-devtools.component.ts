@@ -13,7 +13,7 @@ import { HttpClient } from '@angular/common/http';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { catchError, of } from 'rxjs';
 import { ERNO_CONFIG, ErnoConfig } from '../erno.config';
-import { AuthUser, ErnoAuthService } from '../auth/erno-auth.service';
+import { ErnoAuthService } from '../auth/erno-auth.service';
 import { ErnoNetworkService } from '../network/erno-network.service';
 import { ErnoRealtimeService } from '../realtime/erno-realtime.service';
 import { ErnoSyncService, SyncStatus } from '../sync/erno-sync.service';
@@ -184,7 +184,8 @@ export class ErnoDevtoolsComponent implements OnInit {
   readonly jobQuery = signal('');
   readonly jobFilter = signal<JobKindFilter>('all');
   readonly unread = signal<Set<string>>(new Set());
-  readonly user = signal<AuthUser | null>(null);
+  /** The live session, straight off the service — no local copy to fall behind. */
+  readonly user = computed(() => this.auth.currentUser());
   readonly wsConnected = signal(false);
   readonly syncStatus = signal<SyncStatus>('idle');
   readonly lastSyncError = signal<string | null>(null);
@@ -370,9 +371,6 @@ export class ErnoDevtoolsComponent implements OnInit {
 
   ngOnInit(): void {
     if (!this.visible) return;
-    this.auth.currentUser$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(user => {
-      this.user.set(user);
-    });
     this.network.connected$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(connected => {
       this.online.set(connected);
       if (connected) this.simulatingOffline.set(false);

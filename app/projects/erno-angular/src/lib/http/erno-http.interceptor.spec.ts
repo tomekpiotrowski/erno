@@ -77,7 +77,7 @@ describe('ErnoHttpInterceptor', () => {
     // The dead tokens are gone, so nothing reaches for a refresh again.
     expect(auth.refreshToken).toBeNull();
     expect(auth.accessToken).toBeNull();
-    expect(auth.currentUser).toBeNull();
+    expect(auth.currentUser()).toBeNull();
   });
 
   it('retries the original request once the refresh succeeds', () => {
@@ -111,7 +111,7 @@ describe('ErnoHttpInterceptor', () => {
     http.expectNone(LOGOUT_URL);
     expect(auth.refreshToken).toBe('dead_refresh');
     expect(auth.accessToken).toBe('stale_access');
-    expect(auth.currentUser).toEqual({ id: 'u', email: 'u@example.com' });
+    expect(auth.currentUser()).toEqual({ id: 'u', email: 'u@example.com' });
   });
 
   it('keeps the session when refresh fails with a network error', () => {

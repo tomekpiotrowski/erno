@@ -71,8 +71,10 @@ export class ResetPasswordComponent implements OnInit {
     this.error.set('');
     this.auth.confirmPasswordReset(this.token, this.form.value.password!).subscribe({
       next: () => {
-        this.alerts.success('Password updated — you can now sign in.');
-        this.router.navigate(['/login']);
+        // `confirmPasswordReset` returns a session, so the user is already
+        // signed in — sending them to /login would only bounce back.
+        this.alerts.success('Password updated.');
+        this.router.navigate(['/']);
       },
       error: (e) => {
         this.error.set(e?.error?.message ?? 'Reset failed. The link may have expired.');

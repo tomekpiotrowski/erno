@@ -8,8 +8,7 @@ import {
   output,
   signal,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { AuthUser, ErnoAuthService } from '../../auth/erno-auth.service';
+import { ErnoAuthService } from '../../auth/erno-auth.service';
 import { ERNO_DEVTOOLS_STYLES } from '../erno-devtools.styles';
 import {
   StatusRow,
@@ -87,7 +86,8 @@ export class ErnoDevtoolsAuthTab implements OnInit {
 
   readonly email = signal(SEED_EMAIL);
   readonly password = signal(SEED_PASSWORD);
-  readonly user = signal<AuthUser | null>(null);
+  /** The live session, straight off the service. */
+  readonly user = this.auth.currentUser;
   readonly accessPresent = signal(false);
   readonly refreshPresent = signal(false);
   readonly busy = signal(false);
@@ -129,10 +129,6 @@ export class ErnoDevtoolsAuthTab implements OnInit {
   readonly toneColor = toneColor;
 
   ngOnInit(): void {
-    this.auth.currentUser$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(user => {
-      this.user.set(user);
-      this.syncTokens();
-    });
     this.syncTokens();
     const tick = setInterval(() => {
       this.now.set(Date.now());

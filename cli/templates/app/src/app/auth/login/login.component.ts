@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import { FormGroup, FormControl, ReactiveFormsModule, Validators } from '@angular/forms';
-import { Router, RouterLink } from '@angular/router';
+import { RouterLink } from '@angular/router';
 import {
   IonButton,
   IonCard,
@@ -42,18 +42,17 @@ export class LoginComponent {
   error = signal('');
   loading = signal(false);
 
-  constructor(
-    private auth: ErnoAuthService,
-    private router: Router,
-  ) {}
+  constructor(private auth: ErnoAuthService) {}
 
   submit() {
     if (this.form.invalid || this.loading()) return;
     this.loading.set(true);
     this.error.set('');
     const { email, password } = this.form.value;
+    // No navigate here: `AppComponent` moves the app when the auth state does,
+    // so signing in from anywhere — including the devtools panel — lands the
+    // same way.
     this.auth.login(email!, password!).subscribe({
-      next: () => this.router.navigate(['/']),
       error: (e) => {
         this.error.set(e?.error?.message ?? 'Invalid email or password');
         this.loading.set(false);

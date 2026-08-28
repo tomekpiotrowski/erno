@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { BehaviorSubject, Observable, from } from 'rxjs';
 import { finalize, shareReplay, switchMap, tap } from 'rxjs/operators';
@@ -17,6 +18,15 @@ export interface LoginResponse {
 }
 
 export type OauthProviderName = 'google' | 'discord' | 'apple';
+
+/**
+ * The session as the router should see it.
+ *
+ * `restoring` is the cold-load window where tokens exist but the server has
+ * not answered yet — a guard that treated it as `anonymous` would bounce a
+ * signed-in user to the login page on every reload.
+ */
+export type ErnoAuthState = 'restoring' | 'authenticated' | 'anonymous';
 
 export interface OauthProvidersResponse {
   providers: OauthProviderName[];
@@ -79,7 +89,18 @@ export class ErnoAuthService {
 
   private _currentUser = new BehaviorSubject<AuthUser | null>(null);
   readonly currentUser$ = this._currentUser.asObservable();
-  get currentUser(): AuthUser | null { return this._currentUser.value; }
+  /**
+   * Signal view of `currentUser$`, so templates and `computed()` track the
+   * session without a subscription of their own. The subject stays the single
+   * source of truth — `toSignal` mirrors it synchronously, so a template and
+   * an RxJS subscriber never disagree about who is signed in.
+   */
+  readonly currentUser = toSignal(this.currentUser$, { requireSync: true });
+
+  private _authState = new BehaviorSubject<ErnoAuthState>('anonymous');
+  readonly authState$ = this._authState.asObservable();
+  /** Signal view of `authState$` — what routing should be derived from. */
+  readonly authState = toSignal(this.authState$, { requireSync: true });
 
   get accessToken(): string | null { return ernoAccessToken(); }
   get refreshToken(): string | null { return localStorage.getItem(REFRESH_KEY); }
@@ -198,6 +219,7 @@ export class ErnoAuthService {
     localStorage.setItem(REFRESH_KEY, res.refresh_token);
     localStorage.setItem(USER_KEY, JSON.stringify(res.user));
     this._currentUser.next(res.user);
+    this._authState.next('authenticated');
   }
 
   private clearSession(): void {
@@ -205,6 +227,7 @@ export class ErnoAuthService {
     localStorage.removeItem(REFRESH_KEY);
     localStorage.removeItem(USER_KEY);
     this._currentUser.next(null);
+    this._authState.next('anonymous');
   }
 
   /**
@@ -226,6 +249,7 @@ export class ErnoAuthService {
         const user = JSON.parse(raw) as AuthUser;
         if (user?.id && user?.email) {
           this._currentUser.next(user);
+          this._authState.next('authenticated');
         }
       } catch {
         localStorage.removeItem(USER_KEY);
@@ -234,11 +258,22 @@ export class ErnoAuthService {
 
     // Missing access token (new tab), expired JWT, or user profile (upgrade /
     // cleared key): refresh re-issues both and repopulates storage.
-    if (!this.accessToken || !this.currentUser || jwtAccessTokenExpired(this.accessToken)) {
+    if (!this.accessToken || !this.currentUser() || jwtAccessTokenExpired(this.accessToken)) {
+      // With no rehydrated user there is nothing to show yet, and a guard that
+      // ran now would send a signed-in user to /login. Hold it at `restoring`
+      // until the server answers.
+      if (this._authState.value === 'anonymous') {
+        this._authState.next('restoring');
+      }
       this.refresh().subscribe({
         error: err => {
           if (isFatalRefreshError(err)) {
             this.clearSession();
+          } else if (this._authState.value === 'restoring') {
+            // A network error, a 404 from the boot server, a 5xx: the API is
+            // down, not the session. Let the app in — the interceptor refreshes
+            // again on the next call that needs a token.
+            this._authState.next('authenticated');
           }
         },
       });

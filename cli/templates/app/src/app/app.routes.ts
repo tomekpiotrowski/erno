@@ -1,5 +1,5 @@
 import { Routes } from '@angular/router';
-import { AuthGuard } from './auth/auth.guard';
+import { authGuard } from './auth/auth.guard';
 import { HomePage } from './home/home.page';
 import { LoginComponent } from './auth/login/login.component';
 import { RegisterComponent } from './auth/register/register.component';
@@ -8,7 +8,7 @@ import { ResetPasswordComponent } from './auth/reset-password/reset-password.com
 import { VerifyEmailComponent } from './auth/verify-email/verify-email.component';
 
 export const routes: Routes = [
-  { path: '', component: HomePage, canActivate: [AuthGuard] },
+  { path: '', component: HomePage, canActivate: [authGuard] },
   { path: 'login', component: LoginComponent },
   { path: 'register', component: RegisterComponent },
   { path: 'forgot-password', component: ForgotPasswordComponent },
