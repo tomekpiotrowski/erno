@@ -31,35 +31,22 @@ pub struct ScrapeTarget<'a> {
     pub bearer_token: Option<&'a str>,
 }
 
-/// Default port the monitoring collector listens on in development.
-pub const MONITORING_PORT: u16 = 3001;
-
 /// Write a Prometheus config for a development run.
 ///
-/// Scrapes the application, and the monitoring collector too when this project
-/// has one — an operator needs to know when the thing doing the watching is
-/// itself struggling. A project without a `monitoring/` directory does not get
-/// a target pointed at a port nothing is listening on: a permanently red scrape
-/// target teaches people to ignore the scrape health page.
+/// Scrapes whatever `erno dev` started here, on the port its config names — the
+/// application in a product tree, the collector in the collector's own. A
+/// target pointed at a port nothing is listening on is worse than none: a
+/// permanently red scrape target teaches people to ignore the health page.
 pub fn prepare_dir(
     root: &Path,
     api_port: u16,
     bearer_token: Option<&str>,
 ) -> std::io::Result<PathBuf> {
-    let mut targets = vec![ScrapeTarget {
+    let targets = vec![ScrapeTarget {
         job: "erno-api",
         port: api_port,
         bearer_token,
     }];
-
-    if root.join("monitoring").join("Cargo.toml").exists() {
-        targets.push(ScrapeTarget {
-            job: "erno-monitoring",
-            port: MONITORING_PORT,
-            // The collector's own `/metrics` is ungated in development.
-            bearer_token: None,
-        });
-    }
 
     write_config(root, &targets)
 }
