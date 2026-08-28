@@ -20,7 +20,7 @@ pub const TEMPO_PORT: i32 = 3200;
 pub const TEMPO_OTLP_PORT: i32 = 4318;
 pub const LOKI_PORT: i32 = 3100;
 pub const DEFAULT_PROMETHEUS_IMAGE: &str = "prom/prometheus:v2.55.1";
-pub const DEFAULT_TEMPO_IMAGE: &str = "grafana/tempo:2.7.2";
+pub const DEFAULT_TEMPO_IMAGE: &str = "grafana/tempo:3.0.3";
 pub const DEFAULT_LOKI_IMAGE: &str = "grafana/loki:3.4.2";
 
 /// Where the user-owned deploy files live for a target.

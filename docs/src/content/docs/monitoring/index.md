@@ -68,8 +68,10 @@ every application deployment two large tables it never writes to.
 | Monitoring console | 4400 |
 | Prometheus | 9090 |
 | Loki | 3100 |
+| Loki (gRPC) | 9096 |
 | Tempo (query) | 3200 |
 | Tempo (OTLP/HTTP) | 4318 |
+| Tempo (gRPC) | 9095 |
 
 The console has a page per service: Issues, Releases, System, Uptime,
 Performance, Logs, Statistics, Alerts and Status page.

@@ -47,12 +47,18 @@ exporter drops.
 ## Topology
 
 **Development.** `erno dev` starts Tempo next to Prometheus (`127.0.0.1:3200`
-query, `127.0.0.1:4318` OTLP/HTTP). Skip with `--no-tempo`.
+query, `127.0.0.1:4318` OTLP/HTTP) and sets `APP_TRACING__OTEL__ENDPOINT` on
+the API (and the collector) so traces flow even when `[tracing.otel]` is
+empty in `development.toml`. Skip with `--no-tempo`. The config it writes is
+Tempo 3.0 (`live_store` / `backend_scheduler`); a 2.x binary that still
+expects `ingester` / `compactor` will not start.
 
-**Production.** Tempo lives in the monitoring release. Applications **push**
-OTLP to `https://<monitoring_host>/otlp/v1/traces` with the trusted server
-ingest token. The console queries through `/tempo/`, gated by operator Basic,
-the same way `/prometheus/` works. Tempo itself has no authentication.
+**Production.** Tempo 3.0 lives in the monitoring release (`grafana/tempo:3.0.3`,
+`live_store` / `backend_scheduler`, same shape as `erno dev`). Applications
+**push** OTLP to `https://<monitoring_host>/otlp/v1/traces` with the trusted
+server ingest token. The console queries through `/tempo/`, gated by operator
+Basic, the same way `/prometheus/` works. Tempo itself has no authentication.
+A 2.x volume is not readable after this upgrade.
 
 The public browser token is rejected on this path. Traces are server-side.
 

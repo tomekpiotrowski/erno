@@ -54,9 +54,11 @@ pub fn ports_to_check(urls: &DevUrls) -> Vec<u16> {
     if let Some(url) = &urls.tempo {
         ports.push(port_from_url(Some(url)).unwrap_or(3200));
         ports.push(super::tempo::OTLP_PORT);
+        ports.push(super::tempo::GRPC_PORT);
     }
     if let Some(url) = &urls.loki {
         ports.push(port_from_url(Some(url)).unwrap_or(3100));
+        ports.push(super::loki::GRPC_PORT);
     }
     if let Some(url) = &urls.admin {
         ports.push(port_from_url(Some(url)).unwrap_or(4300));
@@ -242,6 +244,31 @@ port = 3005
             "http://localhost:8765/tools/solve_studio/".into(),
         ));
         assert!(ports_to_check(&urls).contains(&8765));
+    }
+
+    #[test]
+    fn tempo_and_loki_grpc_ports_are_checked() {
+        let mut urls = DevUrls {
+            api: None,
+            app: None,
+            www: None,
+            prometheus: None,
+            tempo: Some("http://localhost:3200".into()),
+            loki: Some("http://localhost:3100".into()),
+            monitoring: None,
+            console: None,
+            admin: None,
+            extra: Vec::new(),
+        };
+        let ports = ports_to_check(&urls);
+        assert!(ports.contains(&3200));
+        assert!(ports.contains(&4318));
+        assert!(ports.contains(&9095));
+        assert!(ports.contains(&3100));
+        assert!(ports.contains(&9096));
+        urls.tempo = None;
+        urls.loki = None;
+        assert!(ports_to_check(&urls).is_empty());
     }
 
     #[test]

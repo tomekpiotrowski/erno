@@ -2,7 +2,7 @@ mod banner;
 mod device;
 mod lock;
 mod log;
-mod loki;
+pub(crate) mod loki;
 mod mail;
 mod open;
 mod ports;

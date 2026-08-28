@@ -1,10 +1,13 @@
 # Written by `erno dev` under `.erno/loki/`. `__DATA__` is replaced with that
 # directory. Query and OTLP/HTTP logs (`/otlp/v1/logs`) share :3100.
+# gRPC is :9096 so it does not collide with Tempo's default :9095.
 auth_enabled: false
 
 server:
   http_listen_address: 127.0.0.1
   http_listen_port: 3100
+  grpc_listen_address: 127.0.0.1
+  grpc_listen_port: 9096
   log_level: error
 
 common:

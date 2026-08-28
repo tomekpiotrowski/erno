@@ -48,8 +48,10 @@ process pushes OTLP, the same way it pushes traces.
 
 ## Topology
 
-**Development.** `erno dev` starts Loki on `127.0.0.1:3100`. Skip with
-`--no-loki`.
+**Development.** `erno dev` starts Grafana Loki on `127.0.0.1:3100`. Skip with
+`--no-loki`. The binary on `PATH` must be Grafana Loki (`loki, version …`).
+Debian/Ubuntu's `loki` package is a different program (MCMC linkage analysis)
+and will be rejected.
 
 **Production.** Loki lives in the monitoring release. Applications push to
 `https://<monitoring_host>/otlp/v1/logs` with the trusted server ingest

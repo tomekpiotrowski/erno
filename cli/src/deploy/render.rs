@@ -714,8 +714,8 @@ fn tempo_yml(plan: &MonitoringPlan<'_>) -> String {
     format!(
         "server:\n  http_listen_port: {TEMPO_PORT}\n  log_level: error\n\
 distributor:\n  receivers:\n    otlp:\n      protocols:\n        http:\n          endpoint: 0.0.0.0:{TEMPO_OTLP_PORT}\n\
-ingester:\n  max_block_duration: 5m\n\
-compactor:\n  compaction:\n    block_retention: {}\n\
+live_store:\n  max_block_duration: 5m\n  wal:\n    path: /var/tempo/live-store/traces\n  shutdown_marker_dir: /var/tempo/live-store/shutdown-marker\n\
+backend_scheduler:\n  local_work_path: /var/tempo/work\n  provider:\n    compaction:\n      compaction:\n        block_retention: {}\n\
 storage:\n  trace:\n    backend: local\n    wal:\n      path: /var/tempo/wal\n    local:\n      path: /var/tempo/blocks\n",
         plan.env.tempo.retention
     )
@@ -1489,7 +1489,10 @@ api:
         assert!(yaml.contains("bearer_token: \"ametrics\""));
         assert!(yaml.contains("TEMPO_HOST"));
         assert!(yaml.contains("LOKI_HOST"));
-        assert!(yaml.contains("grafana/tempo"));
+        assert!(yaml.contains("grafana/tempo:3.0.3"));
+        assert!(yaml.contains("live_store:"));
+        assert!(yaml.contains("/var/tempo/live-store/traces"));
+        assert!(!yaml.contains("\ningester:"));
         assert!(yaml.contains("grafana/loki"));
         assert!(yaml.contains("otlp-http"));
         assert!(yaml.contains("APP__TRACING__OTEL__ENDPOINT"));

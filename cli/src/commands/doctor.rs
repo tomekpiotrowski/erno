@@ -447,15 +447,23 @@ fn check_tempo() -> CheckResult {
 }
 
 fn check_loki() -> CheckResult {
-    match run_cmd("loki", &["-version"]).or_else(|| run_cmd("loki", &["--version"])) {
-        None => CheckResult::fail(
+    match super::dev::loki::probe() {
+        super::dev::loki::Binary::Grafana { version } => CheckResult::pass("loki", version),
+        super::dev::loki::Binary::Missing => CheckResult::fail(
             "loki",
             "not found",
-            "Install Loki for `erno dev`:\n\
+            "Install Grafana Loki for `erno dev`:\n\
              https://grafana.com/docs/loki/latest/setup/install/\n\
              Or pass --no-loki to `erno dev`.",
         ),
-        Some(v) => CheckResult::pass("loki", v.lines().next().unwrap_or(v.trim()).to_string()),
+        super::dev::loki::Binary::Other { summary } => CheckResult::fail(
+            "loki",
+            format!("not Grafana Loki ({summary})"),
+            "Debian/Ubuntu's `loki` package is MCMC linkage analysis, not Grafana Loki.\n\
+             Install Grafana Loki for `erno dev`:\n\
+             https://grafana.com/docs/loki/latest/setup/install/\n\
+             Or pass --no-loki to `erno dev`.",
+        ),
     }
 }
 

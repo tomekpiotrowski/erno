@@ -32,7 +32,7 @@ storage = "10Gi"
 
 [production.tempo]
 enabled = true
-image = "grafana/tempo:2.7.2"
+image = "grafana/tempo:3.0.3"
 retention = "72h"
 storage = "10Gi"
 
