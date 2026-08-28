@@ -1,7 +1,7 @@
 # Cargo workspace for the Erno monorepo.
 #
-# `api/` (the erno library), `cli/` (the erno binary) and `monitoring/` (the
-# collector) share 18 dependencies between them. Before this workspace existed
+# `api/` (the erno library) and `cli/` (the erno binary) share most of their
+# dependencies. Before this workspace existed
 # each crate declared its own versions and they had already drifted — cli was
 # pulling in native-TLS while the other two were rustls-only, and serde/tokio
 # were pinned in two crates and floating in the third. `[workspace.dependencies]`
@@ -11,7 +11,7 @@
 # `cli/templates/` is excluded because it holds scaffold templates whose
 # Cargo.toml carries `{{name}}` placeholders and is not valid to cargo.
 [workspace]
-members  = ["api", "cli", "error-reporting-types", "monitoring"]
+members  = ["api", "cli", "error-reporting-types"]
 exclude  = ["cli/templates", "target"]
 resolver = "2"
 
@@ -20,8 +20,9 @@ edition      = "2021"
 rust-version = "1.88.0"
 
 [workspace.dependencies]
-# The error-reporting contract. `api/` (the reporter) and `monitoring/` (the
-# collector) are deployed separately and must agree on these shapes.
+# The error-reporting contract. The reporter here and the collector in the
+# erno-monitoring repository are deployed separately and must agree on these
+# shapes, so neither owns them.
 erno-error-reporting-types = { path = "error-reporting-types" }
 # Shared by all three crates.
 reqwest    = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

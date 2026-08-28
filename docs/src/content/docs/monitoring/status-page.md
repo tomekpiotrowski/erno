@@ -5,7 +5,7 @@ sidebar:
   order: 6
 ---
 
-> **Source**: `monitoring/src/collector/status/`, `monitoring/status/`
+> **Source**: `erno-monitoring: api/src/collector/status/`, `erno-monitoring: api/status/`
 
 ## The constraint everything follows from
 

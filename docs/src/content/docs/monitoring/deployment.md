@@ -23,8 +23,8 @@ Without `--target` both commands act on the application, exactly as before.
 | Path | What |
 |---|---|
 | `monitoring/Dockerfile` | The collector image (`context: ./monitoring`) |
-| `monitoring/ui/Dockerfile` | The console image (`context: ./monitoring/ui`) |
-| `monitoring/ui/docker/{nginx.conf,entrypoint.sh}` | Console nginx, proxying `/api/` to the collector |
+| `erno-monitoring: app/Dockerfile` | The console image (`context: ./app`) |
+| `erno-monitoring: app/docker/{nginx.conf,entrypoint.sh}` | Console nginx, proxying `/api/` to the collector |
 | `monitoring/deploy/config.toml` | Context, host, scrape target, Prometheus |
 | `monitoring/deploy/secrets.example.yaml` | Collector secrets, registry pull creds |
 | `.github/workflows/monitoring.yaml` | Its own build and release workflow, tagged `mon-v*` |

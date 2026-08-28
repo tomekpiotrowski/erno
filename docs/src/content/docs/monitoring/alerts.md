@@ -5,7 +5,7 @@ sidebar:
   order: 5
 ---
 
-> **Source**: `monitoring/src/collector/alerting/`
+> **Source**: `erno-monitoring: api/src/collector/alerting/`
 
 ## Why this is not Alertmanager
 

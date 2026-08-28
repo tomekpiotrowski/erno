@@ -11,14 +11,13 @@ Rust/Axum SaaS infrastructure: auth, jobs, billing, sync, storage.
 | `admin/` | Operator Angular app |
 | `cli/` | `erno` CLI |
 | `docs/` | Astro docs (`cd docs && npm run dev`) |
-| `error-reporting-types/` | The error-reporting contract `api/` and `monitoring/` share |
-| `monitoring/` | The collector: its own crate, its own deployment |
+| `error-reporting-types/` | The error-reporting contract this repo and the collector share |
 
 ## Build
 
-`api/`, `cli/`, `error-reporting-types/` and `monitoring/` share one cargo workspace. `app/`, `admin/`, `monitoring/ui` and `docs/` are npm projects.
+`api/`, `cli/` and `error-reporting-types/` share one cargo workspace. `app/`, `admin/` and `docs/` are npm projects.
 
-`monitoring/` depends on `api/`, never the other way round. The collector watches applications and must not ship with them, so nothing in `api/` may reach into it — the only thing both sides share is `error-reporting-types/`.
+The monitoring collector lives in its own repository (`erno-monitoring`). It depends on this one; nothing here may depend on it. The only thing both sides share is `error-reporting-types/` — what crosses the wire between an application and the collector watching it. Generated apps do not contain a collector: one deployment watches every Erno app in an organisation.
 
 ```sh
 ./build.sh              # build everything

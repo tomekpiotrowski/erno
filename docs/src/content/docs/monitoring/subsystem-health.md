@@ -5,7 +5,7 @@ sidebar:
   order: 3
 ---
 
-> **Source**: `api/src/health/`, `monitoring/src/collector/health.rs`
+> **Source**: `api/src/health/`, `erno-monitoring: api/src/collector/health.rs`
 
 Generic monitoring sees HTTP status codes and CPU. These signals require
 knowing what Erno is doing: that jobs move through a lifecycle, that a

@@ -5,7 +5,7 @@ sidebar:
   order: 4
 ---
 
-> **Source**: `monitoring/src/collector/uptime/`
+> **Source**: `erno-monitoring: api/src/collector/uptime/`
 
 Without probes, a status page is a manual claim. With them it is an observation.
 

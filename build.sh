@@ -7,9 +7,8 @@
 #   ./build.sh test           run the Rust test suites
 #   ./build.sh help           list every target
 #
-# api/, cli/, error-reporting-types/ and monitoring/ are members of one cargo
-# workspace (see the root Cargo.toml); app/, admin/, monitoring/ui and docs/ are
-# npm projects. This
+# api/, cli/ and error-reporting-types/ are members of one cargo workspace (see
+# the root Cargo.toml); app/, admin/ and docs/ are npm projects. This
 # script is the one entry point across all of them.
 
 set -euo pipefail
@@ -44,14 +43,6 @@ build_app() {
     (cd app && npm run build -- erno-angular)
 }
 
-build_monitoring() {
-    step "Building monitoring (collector)"
-    cargo build -p erno-monitoring
-    ensure_node_modules monitoring/ui
-    step "Building monitoring console"
-    (cd monitoring/ui && npm run build)
-}
-
 build_admin() {
     ensure_node_modules admin
     step "Building admin (operator console)"
@@ -74,15 +65,6 @@ run_test() {
     cargo test -p erno --all-features
     step "Testing cli"
     cargo test -p erno-cli
-    # Uses its own database (erno_monitoring_test); see monitoring/config/test.toml.
-    #
-    # Deliberately `cd`s instead of `cargo test -p`: monitoring/.cargo/config.toml
-    # sets RUST_TEST_THREADS=1, and cargo finds that by walking up from the
-    # current directory. Its tests issue table-wide statements that deadlock
-    # against each other's uncommitted rows when run in parallel. A guard in the
-    # suite itself fails loudly if this is ever bypassed.
-    step "Testing monitoring"
-    (cd monitoring && cargo test)
     ensure_node_modules app
     step "Testing app (erno-angular)"
     (cd app && npm test -- --watch=false)
@@ -103,7 +85,7 @@ run_fmt() {
 run_clean() {
     step "Cleaning build outputs"
     cargo clean
-    rm -rf app/dist docs/dist admin/dist monitoring/ui/dist
+    rm -rf app/dist docs/dist admin/dist
 }
 
 usage() {
@@ -115,7 +97,6 @@ Build targets (all run when no target is given):
   cli         Build the erno binary           (cargo build -p erno-cli)
   app         Build the erno-angular library  (cd app  && npm run build -- erno-angular)
   admin       Build the operator console      (cd admin && npm run build)
-  monitoring  Build the collector + console   (cargo build -p erno-monitoring)
   docs        Build the Astro docs site       (cd docs && npm run build)
 
 Other targets:
@@ -134,7 +115,6 @@ if [ $# -eq 0 ]; then
     build_cli
     build_app
     build_admin
-    build_monitoring
     build_docs
     step "Done"
     exit 0
@@ -146,9 +126,8 @@ for target in "$@"; do
         cli) build_cli ;;
         app) build_app ;;
         admin) build_admin ;;
-        monitoring) build_monitoring ;;
         docs) build_docs ;;
-        all) build_api; build_cli; build_app; build_admin; build_monitoring; build_docs ;;
+        all) build_api; build_cli; build_app; build_admin; build_docs ;;
         test) run_test ;;
         check) run_check ;;
         fmt) run_fmt ;;

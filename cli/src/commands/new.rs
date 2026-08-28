@@ -118,19 +118,12 @@ pub async fn handle_new(
     install_www_deps(&dest);
     create_e2e(&dest);
     copy_admin(&dest, erno_path);
-    let has_monitoring = copy_monitoring(&dest, erno_path, name, &db_name);
 
     ui::section(ui::icon::DATABASE, "Databases");
 
     let config = GlobalConfig::load().ok();
     if let Some(config) = config {
-        create_databases(
-            &config.postgres.admin_url,
-            &db_name,
-            &db_password,
-            has_monitoring,
-        )
-        .await;
+        create_databases(&config.postgres.admin_url, &db_name, &db_password).await;
     } else {
         ui::warn("Skipped database creation — no ~/.erno/config.toml found");
         ui::detail(format!(
@@ -417,103 +410,6 @@ fn copy_admin(dest: &Path, erno_path: Option<&str>) {
     ui::ok("admin/");
 }
 
-/// Copy the monitoring deployment into the new project.
-///
-/// Unlike [`copy_admin`], this runs whether or not `--erno-path` was given: the
-/// monitoring stack is part of every project now. Without an explicit path it
-/// falls back to the checkout this CLI was built from, which covers anyone
-/// working from the monorepo. Returns whether it actually landed.
-fn copy_monitoring(dest: &Path, erno_path: Option<&str>, name: &str, db_name: &str) -> bool {
-    let Some(src) = framework_root(erno_path).map(|r| r.join("monitoring")) else {
-        ui::warn("could not find an erno checkout to copy monitoring/ from");
-        ui::detail(
-            "The project is complete without it. To add it later, re-run with\n\
-             --erno-path <path-to-erno>, or copy monitoring/ across by hand.",
-        );
-        return false;
-    };
-    if !src.join("Cargo.toml").is_file() {
-        return false;
-    }
-
-    let dst = dest.join("monitoring");
-    copy_dir_filtered(&src, &dst);
-    rewrite_monitoring_manifest(&dst, erno_path);
-    rewrite_monitoring_config(&dst, name, db_name);
-    ui::ok("monitoring/");
-    true
-}
-
-/// Where the framework's own `admin/` and `monitoring/` trees live.
-///
-/// `--erno-path` wins. Otherwise fall back to the checkout this binary was
-/// compiled from, which is present for anyone developing against the monorepo
-/// and absent for `cargo install erno-cli` users — hence the `Option`.
-fn framework_root(erno_path: Option<&str>) -> Option<PathBuf> {
-    if let Some(p) = erno_path {
-        return Some(resolve_local_erno_paths(p).0);
-    }
-    let built_from = Path::new(env!("CARGO_MANIFEST_DIR")).parent()?;
-    built_from
-        .join("monitoring/Cargo.toml")
-        .is_file()
-        .then(|| built_from.to_path_buf())
-}
-
-/// Point the copied `monitoring/Cargo.toml` at erno the same way `api/` does.
-///
-/// Rewritten line-wise rather than by replacing the literal `"../api"`: the git
-/// form carries no path at all, and `--erno-path` yields an absolute one. A
-/// relative `../api` would also escape the Docker build context, so getting
-/// this wrong breaks both `cargo check` and the image build.
-fn rewrite_monitoring_manifest(dir: &Path, erno_path: Option<&str>) {
-    let path = dir.join("Cargo.toml");
-    let Ok(content) = fs::read_to_string(&path) else {
-        return;
-    };
-    let (erno_dep, _) = resolve_erno_deps(erno_path);
-    let dev_dep = with_test_utils_feature(&erno_dep);
-
-    let mut out = Vec::new();
-    let mut in_dev = false;
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('[') {
-            in_dev = trimmed == "[dev-dependencies]";
-        }
-        if trimmed.starts_with("erno") && trimmed.contains("path") {
-            out.push(format!(
-                "erno = {}",
-                if in_dev { &dev_dep } else { &erno_dep }
-            ));
-            continue;
-        }
-        out.push(line.to_string());
-    }
-    let _ = fs::write(path, out.join("\n") + "\n");
-}
-
-/// Give the collector its own databases, named after this project.
-///
-/// Without this every project on a machine shares `erno_monitoring`, silently
-/// mixing their error data.
-fn rewrite_monitoring_config(dir: &Path, name: &str, db_name: &str) {
-    for (file, suffix) in [
-        ("development.toml", "monitoring_development"),
-        ("test.toml", "monitoring_test"),
-    ] {
-        let path = dir.join("config").join(file);
-        let Ok(content) = fs::read_to_string(&path) else {
-            continue;
-        };
-        let updated = content
-            .replace("erno_monitoring_test", &format!("{db_name}_{suffix}"))
-            .replace("erno_monitoring", &format!("{db_name}_{suffix}"))
-            .replace("Erno status", &format!("{name} status"));
-        let _ = fs::write(path, updated);
-    }
-}
-
 fn copy_dir_filtered(src: &Path, dst: &Path) {
     std::fs::create_dir_all(dst).ok();
     let Ok(entries) = std::fs::read_dir(src) else {
@@ -521,8 +417,7 @@ fn copy_dir_filtered(src: &Path, dst: &Path) {
     };
     for entry in entries.flatten() {
         let name = entry.file_name();
-        // `target` and `.git` matter for monitoring/, which carries a Rust
-        // crate: copying a build directory means gigabytes.
+        // Build output and history are never part of a scaffold.
         if name == "node_modules"
             || name == "dist"
             || name == ".angular"
@@ -767,12 +662,7 @@ fn patch_app(
 
 // ── Database creation ─────────────────────────────────────────────────────────
 
-async fn create_databases(
-    admin_url: &str,
-    db_name: &str,
-    db_password: &str,
-    with_monitoring: bool,
-) {
+async fn create_databases(admin_url: &str, db_name: &str, db_password: &str) {
     match tokio_postgres::connect(admin_url, tokio_postgres::NoTls).await {
         Err(e) => {
             ui::warn(format!(
@@ -790,15 +680,7 @@ async fn create_databases(
                 let _ = connection.await;
             });
             if create_db_user(&client, db_name, db_password).await {
-                let mut databases =
-                    vec![format!("{db_name}_development"), format!("{db_name}_test")];
-                // The collector keeps its own, deliberately separate from the
-                // application's — in production it is a different deployment
-                // on different infrastructure.
-                if with_monitoring {
-                    databases.push(format!("{db_name}_monitoring_development"));
-                    databases.push(format!("{db_name}_monitoring_test"));
-                }
+                let databases = [format!("{db_name}_development"), format!("{db_name}_test")];
                 for db in &databases {
                     create_db(&client, db).await;
                     grant_schema_public(admin_url, db, db_name).await;
@@ -886,8 +768,12 @@ fn print_next_steps(name: &str, starting_dev: bool) {
     ui::info("app/         Ionic product app (app.example.com in production)");
     ui::info("www/         Astro marketing site (example.com in production)");
     ui::info("admin/       Operator console for the API (admin.example.com)");
-    ui::info("monitoring/  Error reporting, uptime, alerts, status page");
-    ui::detail("Deployed separately: erno deploy init --target monitoring");
+    ui::blank();
+    ui::info("Error reporting, uptime and alerts come from a collector this app");
+    ui::detail(
+        "does not contain: one deployment watches every Erno app in an\n\
+         organisation. Register this one with it to start reporting.",
+    );
     ui::blank();
 
     if starting_dev {
@@ -910,77 +796,7 @@ fn print_next_steps(name: &str, starting_dev: bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::{decide_start_dev, rewrite_monitoring_config, rewrite_monitoring_manifest};
-    use std::fs;
-
-    /// A temp dir keyed by a nonce, matching the pattern used elsewhere in the
-    /// CLI's tests, with manual cleanup.
-    fn scratch(nonce: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("erno-new-{nonce}"));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(dir.join("config")).unwrap();
-        dir
-    }
-
-    const MANIFEST: &str = r#"[package]
-name = "erno-monitoring"
-
-[dependencies]
-erno = { path = "../api" }
-axum = { workspace = true }
-
-[dev-dependencies]
-erno = { path = "../api", features = ["test-utils"] }
-axum-test = { workspace = true }
-"#;
-
-    #[test]
-    fn the_erno_dependency_is_rewritten_for_a_generated_project() {
-        let dir = scratch("manifest-git");
-        fs::write(dir.join("Cargo.toml"), MANIFEST).unwrap();
-
-        rewrite_monitoring_manifest(&dir, None);
-        let out = fs::read_to_string(dir.join("Cargo.toml")).unwrap();
-
-        // `../api` would not exist in a generated project, and would escape the
-        // Docker build context even if it did.
-        assert!(!out.contains("../api"), "{out}");
-        assert!(out.contains(r#"erno = { git = "https://github.com/tomekpiotrowski/erno" }"#));
-        // The dev-dependency keeps test-utils, or the collector's suite will
-        // not compile.
-        assert!(out.contains("test-utils"), "{out}");
-        // Untouched lines survive.
-        assert!(out.contains("axum = { workspace = true }"));
-        assert!(out.contains("axum-test = { workspace = true }"));
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn the_collector_gets_its_own_databases_named_after_the_project() {
-        let dir = scratch("config");
-        fs::write(
-            dir.join("config/development.toml"),
-            "[database]\nurl = \"postgres://erno:erno@localhost/erno_monitoring\"\nname = \"Erno status\"\n",
-        )
-        .unwrap();
-        fs::write(
-            dir.join("config/test.toml"),
-            "[database]\nurl = \"postgres://erno:erno@localhost/erno_monitoring_test\"\n",
-        )
-        .unwrap();
-
-        rewrite_monitoring_config(&dir, "acme", "acme");
-
-        let dev = fs::read_to_string(dir.join("config/development.toml")).unwrap();
-        let test = fs::read_to_string(dir.join("config/test.toml")).unwrap();
-        // Two projects on one machine must not share an error database.
-        assert!(dev.contains("acme_monitoring_development"), "{dev}");
-        assert!(test.contains("acme_monitoring_test"), "{test}");
-        assert!(!dev.contains("erno_monitoring"), "{dev}");
-        assert!(!test.contains("erno_monitoring"), "{test}");
-        assert!(dev.contains("acme status"));
-        let _ = fs::remove_dir_all(&dir);
-    }
+    use super::decide_start_dev;
 
     #[test]
     fn flags_override_tty() {

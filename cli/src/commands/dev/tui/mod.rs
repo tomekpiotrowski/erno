@@ -117,7 +117,6 @@ pub struct TuiOpts {
     pub tempo: Option<String>,
     pub loki: Option<String>,
     pub api: Option<String>,
-    pub console: Option<String>,
 }
 
 pub async fn run(
@@ -397,14 +396,9 @@ async fn handle_action(
             }
         }
         Action::Open => {
-            if state.lens == LensMode::Trace {
-                if let (Some(id), Some(console)) = (state.selected_trace.clone(), &opts.console) {
-                    let url = format!("{}/performance/traces/{id}", console.trim_end_matches('/'));
-                    let _ = open::open_browser(&url);
-                    state.say(format!("open {url}"));
-                    return;
-                }
-            }
+            // A trace has nowhere to open any more: the console belongs to the
+            // collector, which is its own deployment and not something a
+            // product `erno dev` knows the address of.
             if state.lens == LensMode::Mail {
                 if let (Some(m), Some(api)) = (state.emails.first(), &opts.api) {
                     let url = format!("{}/dev/emails/{}/preview", api.trim_end_matches('/'), m.id);

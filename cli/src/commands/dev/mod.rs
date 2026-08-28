@@ -70,9 +70,6 @@ pub struct DevArgs {
     /// Do not start the operator admin SPA
     #[arg(long)]
     pub no_admin: bool,
-    /// Skip the monitoring collector and console even when monitoring/ is present
-    #[arg(long)]
-    pub no_monitoring: bool,
     /// Extra `[[package.dev]]` service to start (repeatable; added to the usual stack)
     #[arg(long)]
     pub package: Vec<String>,
@@ -119,16 +116,6 @@ pub async fn handle_dev(root: Option<PathBuf>, args: DevArgs) -> ui::Cmd {
     // pinned long before the admin child starts and its row has to be there
     // from the first frame — the pinned region's height cannot change later.
     let admin_dir = (!args.no_admin).then(|| find_admin_dir(&root)).flatten();
-    // Gated on `sel.api`: the collector exists to receive the app's reports, so
-    // starting it for `erno dev --www` would be noise.
-    let monitoring_dir = (sel.api && !args.no_monitoring)
-        .then(|| find_monitoring_dir(&root))
-        .flatten();
-    let console_dir = monitoring_dir
-        .as_ref()
-        .map(|d| d.join("ui"))
-        .filter(|d| d.join("package.json").is_file());
-
     let mut urls = ports::discover_urls(&root, &sel);
     if sel.api && !args.no_prometheus {
         urls.prometheus = Some(prometheus::LISTEN_URL.to_string());
@@ -145,17 +132,6 @@ pub async fn handle_dev(root: Option<PathBuf>, args: DevArgs) -> ui::Cmd {
         .collect();
     if admin_dir.is_some() {
         urls.admin = Some(ADMIN_URL.to_string());
-    }
-    if monitoring_dir.is_some() {
-        urls.monitoring = Some(monitoring_url());
-    }
-    if let Some(dir) = &console_dir {
-        // The console's port lives in package.json's start script, not in
-        // angular.json — `read_angular_port` returns None for it.
-        urls.console = Some(ports::port_from_package_script(dir, "start").map_or_else(
-            || CONSOLE_URL.to_string(),
-            |p| format!("http://localhost:{p}"),
-        ));
     }
 
     let device = if args.ios {
@@ -390,37 +366,6 @@ pub async fn handle_dev(root: Option<PathBuf>, args: DevArgs) -> ui::Cmd {
     // The collector migrates its own database on boot, exactly like the api, so
     // there is no separate `db migrate up` step here. The database itself must
     // already exist; `erno dev` warns rather than failing if it does not.
-    let monitoring = match monitoring_dir {
-        Some(monitoring_dir) => {
-            let mon_sink = sink.clone();
-            let otel = otel.clone();
-            Some(Supervisor::start("mon", shutdown_rx.clone(), move || {
-                let mut cmd = Command::new("cargo");
-                cmd.arg("run");
-                apply_local_otel(&mut cmd, &otel);
-                spawn_labeled(cmd, &monitoring_dir, "mon", mon_sink.clone())
-            }))
-        }
-        None => None,
-    };
-
-    let console = match console_dir {
-        Some(console_dir) => {
-            ensure_npm_deps(&console_dir, "console")?;
-            let console_sink = sink.clone();
-            Some(Supervisor::start(
-                "console",
-                shutdown_rx.clone(),
-                move || {
-                    let mut cmd = Command::new("npm");
-                    cmd.arg("start");
-                    spawn_labeled(cmd, &console_dir, "console", console_sink.clone())
-                },
-            ))
-        }
-        None => None,
-    };
-
     let www = sel.www.then(|| {
         let www_dir_spawn = www_dir.clone();
         let www_sink = sink.clone();
@@ -467,12 +412,6 @@ pub async fn handle_dev(root: Option<PathBuf>, args: DevArgs) -> ui::Cmd {
         if let Some(s) = admin.clone() {
             supervisors.insert("admin".into(), s);
         }
-        if let Some(s) = console.clone() {
-            supervisors.insert("console".into(), s);
-        }
-        if let Some(s) = monitoring.clone() {
-            supervisors.insert("mon".into(), s);
-        }
         for (i, s) in extra_supervisors.iter().enumerate() {
             if let Some((name, _)) = urls.extra.get(i) {
                 supervisors.insert(name.clone(), s.clone());
@@ -488,7 +427,6 @@ pub async fn handle_dev(root: Option<PathBuf>, args: DevArgs) -> ui::Cmd {
             tempo: urls.tempo.clone(),
             loki: urls.loki.clone(),
             api: urls.api.clone(),
-            console: urls.console.clone(),
         };
         if let Err(e) = tui::run(&urls, sink.clone(), project, supervisors, opts).await {
             ui::warn(e);
@@ -523,12 +461,6 @@ pub async fn handle_dev(root: Option<PathBuf>, args: DevArgs) -> ui::Cmd {
     if let Some(admin) = admin {
         admin.shutdown().await;
     }
-    if let Some(console) = console {
-        console.shutdown().await;
-    }
-    if let Some(monitoring) = monitoring {
-        monitoring.shutdown().await;
-    }
     for extra in extra_supervisors {
         extra.shutdown().await;
     }
@@ -538,29 +470,6 @@ pub async fn handle_dev(root: Option<PathBuf>, args: DevArgs) -> ui::Cmd {
 /// Where the operator admin SPA serves from. `admin/package.json` starts
 /// `ng serve --port 4300`, and the two have to agree.
 pub const ADMIN_URL: &str = "http://localhost:4300";
-
-/// Where the monitoring operator console serves from when its start script
-/// cannot be read. `monitoring/ui/package.json` starts `ng serve --port 4400`.
-pub const CONSOLE_URL: &str = "http://localhost:4400";
-
-/// Where the collector listens. Derived from the port Prometheus is configured
-/// to scrape, so the two cannot drift apart.
-pub fn monitoring_url() -> String {
-    format!("http://localhost:{}", prometheus::MONITORING_PORT)
-}
-
-/// The monitoring deployment, local to this project only.
-///
-/// Deliberately **not** mirroring `find_admin_dir`'s sibling fallback. The admin
-/// SPA is a pure client that proxies to whichever API is running, so borrowing
-/// the framework's copy is harmless. The collector is not: it has its own
-/// database and its own config, so falling back to the framework's `monitoring/`
-/// would run erno's own collector against `erno_monitoring` while you develop a
-/// different project — silently mixing two projects' error data.
-fn find_monitoring_dir(root: &Path) -> Option<PathBuf> {
-    let local = root.join("monitoring");
-    local.join("Cargo.toml").is_file().then_some(local)
-}
 
 fn find_admin_dir(root: &Path) -> Option<PathBuf> {
     let local = root.join("admin");

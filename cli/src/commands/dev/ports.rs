@@ -30,8 +30,6 @@ pub fn discover_urls(root: &Path, sel: &ServiceSelection) -> DevUrls {
         // Filled in by `handle_dev` once it knows whether monitoring/ is
         // present — but before the banner is pinned, since its height is fixed
         // at that point.
-        monitoring: None,
-        console: None,
         admin: None,
         extra: Vec::new(),
     }
@@ -62,12 +60,6 @@ pub fn ports_to_check(urls: &DevUrls) -> Vec<u16> {
     }
     if let Some(url) = &urls.admin {
         ports.push(port_from_url(Some(url)).unwrap_or(4300));
-    }
-    if let Some(url) = &urls.monitoring {
-        ports.push(port_from_url(Some(url)).unwrap_or(3001));
-    }
-    if let Some(url) = &urls.console {
-        ports.push(port_from_url(Some(url)).unwrap_or(4400));
     }
     for (_, url) in &urls.extra {
         if let Some(port) = port_from_url(Some(url)) {
@@ -255,8 +247,6 @@ port = 3005
             prometheus: None,
             tempo: Some("http://localhost:3200".into()),
             loki: Some("http://localhost:3100".into()),
-            monitoring: None,
-            console: None,
             admin: None,
             extra: Vec::new(),
         };
@@ -280,8 +270,6 @@ port = 3005
             prometheus: None,
             tempo: None,
             loki: None,
-            monitoring: None,
-            console: None,
             admin: None,
             extra: vec![("local".into(), "http://localhost/tools/".into())],
         };
