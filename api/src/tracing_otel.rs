@@ -68,12 +68,30 @@ fn provider(config: &OtelConfig) -> Option<&'static SdkTracerProvider> {
     }
 }
 
+/// The URL to POST a signal to, given whatever the operator configured.
+///
+/// `with_endpoint` is used **verbatim** by the SDK — only the generic
+/// `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable gets a signal path
+/// appended. So a base URL like `http://tempo:4318` was posting to `/`, which
+/// Tempo answers with 404: traces vanished with nothing in the log to say so.
+///
+/// Appending rather than requiring the full path keeps every shape working:
+/// `http://tempo:4318` and Loki's `http://loki:3100/otlp` both get their
+/// signal, and a URL that already ends in one is left alone.
+fn signal_endpoint(endpoint: &str, signal_path: &str) -> String {
+    let trimmed = endpoint.trim_end_matches('/');
+    if trimmed.ends_with(signal_path) {
+        return trimmed.to_string();
+    }
+    format!("{trimmed}{signal_path}")
+}
+
 fn build_provider(
     config: &OtelConfig,
 ) -> Result<SdkTracerProvider, Box<dyn std::error::Error + Send + Sync>> {
     let mut exporter = SpanExporter::builder()
         .with_http()
-        .with_endpoint(config.endpoint.trim());
+        .with_endpoint(signal_endpoint(config.endpoint.trim(), "/v1/traces"));
     if !config.token.trim().is_empty() {
         exporter = exporter.with_headers(auth_headers(config));
     }
@@ -120,7 +138,9 @@ fn build_logger_provider(
     let endpoint = config
         .logs_target()
         .expect("logger_provider is only called when logs_target is set");
-    let mut exporter = LogExporter::builder().with_http().with_endpoint(endpoint);
+    let mut exporter = LogExporter::builder()
+        .with_http()
+        .with_endpoint(signal_endpoint(endpoint, "/v1/logs"));
     if !config.token.trim().is_empty() {
         exporter = exporter.with_headers(auth_headers(config));
     }
@@ -332,6 +352,33 @@ mod tests {
         assert_eq!(config.logs_target(), Some("http://127.0.0.1:3100/otlp"));
         config.log_level.clear();
         assert_eq!(config.logs_target(), None);
+    }
+
+    /// The SDK does not append a signal path to a programmatic endpoint, so a
+    /// base URL posted to `/` and Tempo answered 404 — traces disappeared with
+    /// nothing in the log to say why.
+    #[test]
+    fn a_base_endpoint_gains_its_signal_path() {
+        assert_eq!(
+            signal_endpoint("http://127.0.0.1:4318", "/v1/traces"),
+            "http://127.0.0.1:4318/v1/traces"
+        );
+        // Loki's OTLP receiver lives under a prefix, which has to be kept.
+        assert_eq!(
+            signal_endpoint("http://127.0.0.1:3100/otlp", "/v1/logs"),
+            "http://127.0.0.1:3100/otlp/v1/logs"
+        );
+        // A trailing slash is not a second path segment.
+        assert_eq!(
+            signal_endpoint("http://tempo:4318/", "/v1/traces"),
+            "http://tempo:4318/v1/traces"
+        );
+        // An endpoint that already names the signal is left alone, so the
+        // production form through nginx keeps working.
+        assert_eq!(
+            signal_endpoint("https://m.example.com/otlp/v1/traces", "/v1/traces"),
+            "https://m.example.com/otlp/v1/traces"
+        );
     }
 
     #[test]
