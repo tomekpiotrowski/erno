@@ -414,7 +414,6 @@ fn check_deploy_layout() -> Option<CheckResult> {
 
 fn deploy_dir_present() -> bool {
     std::path::Path::new("deploy/config.toml").exists()
-        || std::path::Path::new("monitoring/deploy/config.toml").exists()
 }
 
 fn check_prometheus() -> CheckResult {

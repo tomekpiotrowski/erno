@@ -113,20 +113,20 @@ Product routes go on that `router`. Syncable entities are `.with_sync::<E>()` on
 | `app/` | Angular library (`erno-angular`) |
 | `cli/` | `erno` binary |
 | `admin/` | Operator SPA |
-| `monitoring/` | Error collector, uptime, alerts, status page — its own binary, database, and deploy |
+| `error-reporting-types/` | The error-reporting contract this repo shares with the collector |
 | `docs/` | Astro documentation site |
 
-`api/`, `cli/`, and `monitoring/` are one Cargo workspace. `app/`, `admin/`, `monitoring/ui`, and `docs/` are npm projects. From the repo root:
+`api/`, `cli/`, and `error-reporting-types/` are one Cargo workspace. `app/`, `admin/`, and `docs/` are npm projects. From the repo root:
 
 ```sh
-./build.sh              # api, cli, app, admin, monitoring, docs
+./build.sh              # api, cli, app, admin, docs
 ./build.sh api cli      # a subset
 ./build.sh test         # Rust suites (need PostgreSQL)
 ./build.sh check        # fmt + clippy -D warnings
 ./build.sh help
 ```
 
-API tests use `postgres://erno:erno@localhost/erno`. Monitoring tests use a different database (`erno_monitoring_test`) and must run single-threaded; `./build.sh test` does that. Do not run `cargo test --workspace` from the root.
+API tests use `postgres://erno:erno@localhost/erno`. The collector lives in its own repository ([erno-monitoring](#)) with its own database and test suite.
 
 Contributor notes for each part live in [AGENTS.md](AGENTS.md).
 

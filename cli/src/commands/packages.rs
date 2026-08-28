@@ -255,19 +255,7 @@ fn conventional(root: &Path) -> Vec<Package> {
     }
 
     // The collector: its own crate, its own test database.
-    if root.join("monitoring").join("Cargo.toml").is_file() {
-        packages.push(rust_package("monitoring", "monitoring"));
-    }
-
-    for (name, dir) in [
-        ("app", "app"),
-        ("www", "www"),
-        ("admin", "admin"),
-        // The monitoring operator console. A separate package from the
-        // collector because a package runs its steps in one directory, and
-        // npm-in-monitoring/ui cannot share one with cargo-in-monitoring.
-        ("console", "monitoring/ui"),
-    ] {
+    for (name, dir) in [("app", "app"), ("www", "www"), ("admin", "admin")] {
         if let Some(package) = npm_package(root, name, dir) {
             packages.push(package);
         }

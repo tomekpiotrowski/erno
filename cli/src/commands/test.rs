@@ -25,10 +25,10 @@ pub async fn handle_test(args: SelectionArgs) -> ui::Cmd {
     let all = load_packages(&root)?;
     let selected = select(&all, &args)?;
 
-    // Each package that declares `database` gets its own test database. The
-    // monitoring collector has one of its own, so a single hardcoded
-    // api/config/test.toml is no longer enough. Duplicates are skipped, since
-    // e2e and any package without its own config fall back to the api's.
+    // Each package that declares `database` gets its own test database, so a
+    // single hardcoded api/config/test.toml is not enough. Duplicates are
+    // skipped, since e2e and any package without its own config fall back to
+    // the api's.
     let mut ensured: Vec<String> = Vec::new();
     for package in selected.iter().filter(|p| p.database || p.is_e2e()) {
         let config = test_config_path(&root, &package.dir);
@@ -437,25 +437,25 @@ mod tests {
             Some("postgres://u:p@localhost/x_test")
         );
 
-        // A package with its own config owns its own database. The collector
-        // does; e2e does not, and falls back to the api's.
-        std::fs::create_dir_all(root.join("monitoring/config")).unwrap();
+        // A package with its own config owns its own database; e2e does not,
+        // and falls back to the api's.
+        std::fs::create_dir_all(root.join("reports/config")).unwrap();
         std::fs::write(
-            root.join("monitoring/config/test.toml"),
-            "[database]\nurl = \"postgres://u:p@localhost/x_monitoring_test\"\n",
+            root.join("reports/config/test.toml"),
+            "[database]\nurl = \"postgres://u:p@localhost/x_reports_test\"\n",
         )
         .unwrap();
         assert_eq!(
-            test_config_path(&root, "monitoring"),
-            root.join("monitoring/config/test.toml")
+            test_config_path(&root, "reports"),
+            root.join("reports/config/test.toml")
         );
         assert_eq!(
             test_config_path(&root, "e2e"),
             root.join("api/config/test.toml")
         );
         assert_eq!(
-            test_database_url(&test_config_path(&root, "monitoring")).as_deref(),
-            Some("postgres://u:p@localhost/x_monitoring_test")
+            test_database_url(&test_config_path(&root, "reports")).as_deref(),
+            Some("postgres://u:p@localhost/x_reports_test")
         );
 
         let _ = std::fs::remove_dir_all(&root);

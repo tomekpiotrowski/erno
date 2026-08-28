@@ -276,8 +276,6 @@ pub fn service_meta(name: &str) -> (&'static str, &'static str) {
         "tempo" => ("tempo", ".erno/tempo"),
         "loki" => ("loki", ".erno/loki"),
         "admin" => ("npm start", "admin/"),
-        "console" => ("npm start", "monitoring/ui"),
-        "mon" => ("cargo run", "monitoring/"),
         _ => ("", ""),
     }
 }

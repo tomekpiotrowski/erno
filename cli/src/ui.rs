@@ -951,7 +951,7 @@ pub fn label_style(label: &str) -> Style {
         "api" => CYAN,
         "app" => GREEN,
         "www" | "mail" => MAGENTA,
-        "prom" | "mon" | "console" | "admin" => YELLOW,
+        "prom" | "admin" => YELLOW,
         _ => BLUE,
     }
 }
@@ -965,8 +965,6 @@ pub fn label_icon(label: &str) -> &'static str {
         "www" => "🌐",
         "mail" => "📧",
         "prom" => "📊",
-        "mon" => "📡",
-        "console" => "🔭",
         "admin" => "🧰",
         _ => "🔹",
     }

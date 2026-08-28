@@ -61,7 +61,7 @@ password_hash = "$argon2id$v=19$m=19456,t=2,p=1$5B2ECOLqakkxkiD5EjKyDQ$PBe29N0j5
 # Inert until `collector_url` is set, so a fresh app never phones home.
 [error_reporting]
 enabled = true
-collector_url = ""          # e.g. "http://localhost:3001" when running `monitoring/`
+collector_url = ""          # e.g. "http://localhost:3001" against a local collector
 ingest_token = ""           # trusted server-to-server token; a real secret
 capture_tracing_errors = true
 capture_panics = true

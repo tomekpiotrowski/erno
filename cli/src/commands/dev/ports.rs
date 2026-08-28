@@ -146,10 +146,10 @@ pub fn read_www_port(root: &Path) -> Option<u16> {
 }
 
 /// The `--port` a package.json script passes, for the projects whose port is
-/// declared there rather than in `angular.json`.
+/// declared there rather than in a framework config.
 ///
-/// `monitoring/ui`'s serve block has no `options.port`, so `read_angular_port`
-/// returns `None` for it and this is what finds 4400.
+/// `www/` is an Astro site with no `angular.json` to read, so its `dev` script
+/// is the only place its port is written down.
 pub fn port_from_package_script(dir: &Path, script: &str) -> Option<u16> {
     let content = std::fs::read_to_string(dir.join("package.json")).ok()?;
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;

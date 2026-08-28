@@ -28,4 +28,4 @@ The monitoring collector lives in its own repository (`erno-monitoring`). It dep
 
 Shared crate versions live in root `Cargo.toml` `[workspace.dependencies]`. Add a dependency there when a second crate uses it.
 
-**Never `cargo test --workspace` from the root.** Monitoring tests must run single-threaded: `./build.sh test` or `cd monitoring && cargo test`.
+`./build.sh test` runs every suite. The collector's tests live in the erno-monitoring repository, not here.
