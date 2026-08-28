@@ -91,7 +91,7 @@ pub async fn handle_deploy_init(target: Target) -> ui::Cmd {
     if target == Target::Monitoring {
         write_monitoring_files(vars);
         setup_sops(&name, &github_repo, &spec).await;
-        link_ingest_token(&ingest_token);
+        warn_if_erno_is_a_path_dependency();
         print_admin_password_once(&admin_password);
         print_monitoring_next_steps(&name);
         return Ok(());
@@ -144,31 +144,21 @@ pub async fn handle_deploy_init(target: Target) -> ui::Cmd {
     Ok(())
 }
 
-/// The monitoring deployment's own files. Every path is under `monitoring/`,
-/// which is what keeps the two targets from colliding.
+/// The collector's deployment files, written into its own repository.
+///
+/// It is laid out as an ordinary Erno application, so the collector's image
+/// builds from `api/` and the operator console's from `app/`.
 fn write_monitoring_files(vars: &[(&str, &str)]) {
+    write_file("api/Dockerfile", render(TEMPLATE_MON_DOCKERFILE, vars));
+    write_file("app/Dockerfile", render(TEMPLATE_MON_UI_DOCKERFILE, vars));
+    write_file("app/docker/nginx.conf", render(TEMPLATE_MON_UI_NGINX, vars));
     write_file(
-        "monitoring/Dockerfile",
-        render(TEMPLATE_MON_DOCKERFILE, vars),
-    );
-    write_file(
-        "monitoring/ui/Dockerfile",
-        render(TEMPLATE_MON_UI_DOCKERFILE, vars),
-    );
-    write_file(
-        "monitoring/ui/docker/nginx.conf",
-        render(TEMPLATE_MON_UI_NGINX, vars),
-    );
-    write_file(
-        "monitoring/ui/docker/entrypoint.sh",
+        "app/docker/entrypoint.sh",
         render(TEMPLATE_MON_UI_ENTRYPOINT, vars),
     );
+    write_file("deploy/config.toml", render(TEMPLATE_MON_CONFIG, vars));
     write_file(
-        "monitoring/deploy/config.toml",
-        render(TEMPLATE_MON_CONFIG, vars),
-    );
-    write_file(
-        "monitoring/deploy/secrets.example.yaml",
+        "deploy/secrets.example.yaml",
         render(TEMPLATE_MON_SECRETS_EXAMPLE, vars),
     );
     // Its own workflow, never the application's: two independent deployables
@@ -189,47 +179,34 @@ fn generate_token() -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
-/// Write the generated ingest token into the *application* chart too.
+/// Warn when `erno` is a path dependency, which no image build can satisfy.
 ///
-/// This is the one value that has to match across two charts in two clusters,
-/// and a mismatch fails silently — the API's reports are rejected with a 401
-/// and nothing says so. Filling both sides here is the only place that can
-/// close the loop automatically.
-fn link_ingest_token(token: &str) {
-    let path = Path::new("deploy/secrets.example.yaml");
-    if !path.exists() {
-        return;
-    }
-    let Ok(content) = std::fs::read_to_string(path) else {
+/// A Docker build only sees its context. A path like `../../erno/api` resolves
+/// on the machine that scaffolded this and nowhere else, so the collector image
+/// fails to build in CI with a confusing cargo error. Saying so at init time is
+/// the difference between a five-second fix and a red pipeline.
+fn warn_if_erno_is_a_path_dependency() {
+    let Ok(manifest) = std::fs::read_to_string("api/Cargo.toml") else {
         return;
     };
-    // Only fill an empty field: never overwrite a token already in use.
-    let Some(updated) = fill_empty_ingest_token(&content, token) else {
-        ui::info("deploy/secrets.example.yaml already has an ingest_token — left as is");
-        ui::detail("It must be a project's server ingest token on the collector.");
+    if !erno_dep_is_path(&manifest) {
         return;
-    };
-    if std::fs::write(path, updated).is_ok() {
-        ui::ok("deploy/secrets.example.yaml (ingest_token linked)");
     }
+    ui::warn("api/Cargo.toml depends on erno by path — the image will not build");
+    ui::detail(
+        "A Docker build sees only its context, so a path outside this repository\n\
+         cannot resolve. Point erno (and erno-error-reporting-types) at a git\n\
+         revision before tagging a release.",
+    );
 }
 
-/// Replace an empty `ingest_token: ""` with `token`. `None` when there is no
-/// such key, or it already has a value.
-fn fill_empty_ingest_token(content: &str, token: &str) -> Option<String> {
-    let mut out = Vec::new();
-    let mut filled = false;
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if !filled && (trimmed == "ingest_token: \"\"" || trimmed == "ingest_token: ''") {
-            let indent = &line[..line.len() - line.trim_start().len()];
-            out.push(format!("{indent}ingest_token: \"{token}\""));
-            filled = true;
-        } else {
-            out.push(line.to_string());
-        }
-    }
-    filled.then(|| out.join("\n") + "\n")
+/// Whether the manifest's `erno` dependency is a local path.
+fn erno_dep_is_path(manifest: &str) -> bool {
+    manifest
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("erno ") || l.starts_with("erno="))
+        .any(|l| l.contains("path"))
 }
 
 /// Generate a high-entropy admin password and its Argon2 hash.
@@ -346,13 +323,9 @@ async fn setup_sops(name: &str, github_repo: &str, spec: &TargetSpec) {
     // decrypts both secret files. So if one already exists, reuse its recipient.
     // Generating a fresh key here would silently make every existing
     // secrets.<env>.yaml undecryptable — including the other target's.
-    if let Some(public_key) = existing_age_recipient(&[
-        "deploy/.sops.yaml",
-        "monitoring/deploy/.sops.yaml",
-        "chart/.sops.yaml",
-        "monitoring/deploy/chart/.sops.yaml",
-        &sops_path,
-    ]) {
+    if let Some(public_key) =
+        existing_age_recipient(&["deploy/.sops.yaml", "chart/.sops.yaml", &sops_path])
+    {
         write_file(
             &sops_path,
             format!("creation_rules:\n  - age: \"{public_key}\"\n"),
@@ -438,11 +411,11 @@ fn print_monitoring_next_steps(name: &str) {
     ui::next_steps(
         "Next steps",
         &[
-            "cp monitoring/deploy/secrets.example.yaml \\\n     monitoring/deploy/secrets.production.yaml".to_string(),
-            "sops -e -i monitoring/deploy/secrets.production.yaml".to_string(),
-            "erno deploy setup --target monitoring".to_string(),
-            "git tag mon-v0.1.0 && git push --tags".to_string(),
-            format!("erno deploy install v0.1.0 --target monitoring   # release {name}-monitoring"),
+            "cp deploy/secrets.example.yaml deploy/secrets.production.yaml".to_string(),
+            "sops -e -i deploy/secrets.production.yaml".to_string(),
+            "erno deploy setup".to_string(),
+            "git tag v0.1.0 && git push --tags".to_string(),
+            format!("erno deploy install v0.1.0   # release {name}"),
         ],
     );
     ui::blank();
@@ -460,7 +433,7 @@ fn print_monitoring_next_steps(name: &str) {
     );
     ui::blank();
     ui::info("Point monitoring.example.com at the monitoring cluster's LoadBalancer,");
-    ui::detail("and add the app/admin origins to monitoring/config/production.toml [cors].");
+    ui::detail("and add the app/admin origins to api/config/production.toml [cors].");
 }
 
 /// The age recipient already configured for this repository, if any.
@@ -655,18 +628,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn init_writes_the_generated_ingest_token_to_both_sides_of_the_link() {
+    fn init_seeds_the_collector_but_leaves_the_application_token_empty() {
         let token = "a-generated-token";
         let vars: &[(&str, &str)] = &[
             ("{{admin_password_hash}}", "hash"),
             ("{{ingest_token}}", token),
         ];
+
+        // The collector hashes this into its seeded `monitoring` project on an
+        // empty database, which is how it can accept anything at all on day one.
         let rendered = render(TEMPLATE_MON_SECRETS_EXAMPLE, vars);
         assert!(!rendered.contains("{{ingest_token}}"));
-
-        // The collector hashes this into the seeded `monitoring` project, so it
-        // has to be the same string the application sends. Writing only the
-        // application's half leaves every report 401ing with nothing to say so.
         let parsed: serde_yaml::Value =
             serde_yaml::from_str(&rendered).expect("rendered monitoring secrets parse");
         assert_eq!(
@@ -674,70 +646,48 @@ mod tests {
             Some(token)
         );
 
-        let app_side = fill_empty_ingest_token(TEMPLATE_SECRETS_EXAMPLE, token)
-            .expect("the app template ships an empty ingest_token");
-        assert!(app_side.contains(token));
-    }
-
-    #[test]
-    fn each_target_gets_its_own_release_and_paths() {
-        let app = TargetSpec::resolve(Target::App);
-        assert_eq!(deploy::release_name(app.target, "acme"), "acme");
-        assert_eq!(app.layout.dir, "deploy");
-        assert_eq!(
-            app.layout.secrets_path("production").to_str().unwrap(),
-            "deploy/secrets.production.yaml"
-        );
-        assert_eq!(
-            app.layout.config_path().to_str().unwrap(),
-            "deploy/config.toml"
-        );
-
-        let mon = TargetSpec::resolve(Target::Monitoring);
-        assert_eq!(deploy::release_name(mon.target, "acme"), "acme-monitoring");
-        assert_eq!(mon.layout.dir, "monitoring/deploy");
-        assert_eq!(
-            mon.layout.secrets_path("production").to_str().unwrap(),
-            "monitoring/deploy/secrets.production.yaml"
-        );
-        assert_eq!(
-            mon.layout.config_path().to_str().unwrap(),
-            "monitoring/deploy/config.toml"
+        // An application's token is not minted here. It is a project's server
+        // token, which the collector mints per project, so the scaffold ships an
+        // empty slot for the operator to paste into.
+        assert!(
+            TEMPLATE_SECRETS_EXAMPLE.contains("ingest_token: \"\""),
+            "the app scaffold must ship an empty ingest_token"
         );
     }
 
     #[test]
-    fn the_two_targets_never_share_a_path_or_a_release() {
-        let app = TargetSpec::resolve(Target::App);
-        let mon = TargetSpec::resolve(Target::Monitoring);
-        assert_ne!(
-            deploy::release_name(app.target, "acme"),
-            deploy::release_name(mon.target, "acme")
-        );
-        assert_ne!(app.layout.dir, mon.layout.dir);
-        // Every monitoring path is under monitoring/, which is what keeps
-        // `deploy init --target monitoring` from overwriting the app's files.
-        assert!(mon.layout.dir.starts_with("monitoring/"));
-        assert!(mon
-            .layout
-            .secrets_path("staging")
-            .to_str()
-            .unwrap()
-            .starts_with("monitoring/"));
+    fn a_path_dependency_on_erno_is_flagged_before_it_reaches_ci() {
+        // A Docker build sees only its context, so these never resolve.
+        assert!(erno_dep_is_path(r#"erno = { path = "../../erno/api" }"#));
+        assert!(erno_dep_is_path("erno = { path = \"../api\" }"));
+        // The forms an image can actually build from.
+        assert!(!erno_dep_is_path(
+            r#"erno = { git = "https://github.com/acme/erno", rev = "abc123" }"#
+        ));
+        assert!(!erno_dep_is_path(r#"erno = "0.1""#));
+        // A different crate that merely starts with the same letters.
+        assert!(!erno_dep_is_path(
+            r#"erno-error-reporting-types = { path = "../x" }"#
+        ));
     }
 
     #[test]
-    fn an_empty_ingest_token_is_filled_and_an_existing_one_is_left_alone() {
-        let empty = "api:\n  ingest_token: \"\"\n";
-        let filled = fill_empty_ingest_token(empty, "s3cret").expect("should fill");
-        assert!(filled.contains("ingest_token: \"s3cret\""));
-        // Indentation is preserved, or the YAML stops being valid.
-        assert!(filled.contains("  ingest_token:"));
-
-        // Never clobber a token already in use: the other cluster is using it.
-        let existing = "api:\n  ingest_token: \"live\"\n";
-        assert!(fill_empty_ingest_token(existing, "s3cret").is_none());
-        assert!(fill_empty_ingest_token("api: {}\n", "s3cret").is_none());
+    fn both_targets_deploy_from_the_same_directory() {
+        // The collector has its own repository, so the two charts are never in
+        // one tree and no longer need separate paths to avoid clobbering each
+        // other. Each repo has one `deploy/`.
+        for target in [Target::App, Target::Monitoring] {
+            let spec = TargetSpec::resolve(target);
+            assert_eq!(spec.layout.dir, "deploy");
+            assert_eq!(
+                spec.layout.secrets_path("production").to_str().unwrap(),
+                "deploy/secrets.production.yaml"
+            );
+            assert_eq!(
+                spec.layout.config_path().to_str().unwrap(),
+                "deploy/config.toml"
+            );
+        }
     }
 
     #[test]

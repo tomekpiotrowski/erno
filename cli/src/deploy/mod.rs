@@ -49,18 +49,19 @@ impl Target {
         }
     }
 
-    pub fn init_flag(self) -> &'static str {
-        match self {
-            Target::App => "",
-            Target::Monitoring => " --target monitoring",
+    /// Which deployment this tree *is*.
+    ///
+    /// Not a flag any more. The collector has its own repository, laid out as
+    /// an ordinary Erno application, so the only thing a `--target` could still
+    /// have chosen is which chart to render — and the tree already says. A flag
+    /// there is just a way to deploy the wrong chart into the wrong cluster.
+    #[must_use]
+    pub fn detect() -> Self {
+        if project::is_collector_tree() {
+            Self::Monitoring
+        } else {
+            Self::App
         }
-    }
-}
-
-pub fn release_name(target: Target, project: &str) -> String {
-    match target {
-        Target::App => project.to_string(),
-        Target::Monitoring => format!("{project}-monitoring"),
     }
 }
 
@@ -93,29 +94,30 @@ fn require_layout(target: Target) -> Result<Layout, String> {
     if Path::new(layout.legacy_chart_dir()).exists() {
         return Err(format!(
             "{} is a Helm chart; this CLI no longer installs those\n\
-             Run `erno deploy migrate{}` to convert it to {}.",
+             Run `erno deploy migrate` to convert it to {}.",
             layout.legacy_chart_dir(),
-            target.init_flag(),
             layout.config_path().display()
         ));
     }
     Err(format!(
         "missing {}\n\
-         Run `erno deploy init{}` first.",
-        layout.config_path().display(),
-        target.init_flag()
+         Run `erno deploy init` first.",
+        layout.config_path().display()
     ))
 }
 
 fn prepare(version: &str, env_name: &str, target: Target) -> Result<Prepared, String> {
     validate_project_root(target);
     let layout = require_layout(target)?;
-    let project = read_project_name();
-    let release = release_name(target, &project);
+    // The release is the project name for both targets. The collector used to
+    // carry a `-monitoring` suffix because it was deployed out of the
+    // application's tree and the two releases had to differ; it has its own
+    // repository, and its own project name, now.
+    let release = read_project_name();
     let file = load_deploy_file(&layout)?;
     let env = env(&file, env_name)?.clone();
     env.validate(target)?;
-    let tag = image_tag(version, target);
+    let tag = image_tag(version);
     let secrets_path = layout.secrets_path(env_name);
     if !secrets_path.exists() {
         return Err(format!(
@@ -304,8 +306,11 @@ pub async fn handle_diff(version: &str, env_name: &str, target: Target) -> ui::C
 pub async fn handle_status(env_name: &str, target: Target) -> ui::Cmd {
     validate_project_root(target);
     let layout = require_layout(target)?;
-    let project = read_project_name();
-    let release = release_name(target, &project);
+    // The release is the project name for both targets. The collector used to
+    // carry a `-monitoring` suffix because it was deployed out of the
+    // application's tree and the two releases had to differ; it has its own
+    // repository, and its own project name, now.
+    let release = read_project_name();
     let file = load_deploy_file(&layout)?;
     let env = env(&file, env_name)?;
     switch_context(&env.kubernetes_context)?;
@@ -351,8 +356,11 @@ pub async fn handle_status(env_name: &str, target: Target) -> ui::Cmd {
 pub async fn handle_rollback(env_name: &str, target: Target) -> ui::Cmd {
     validate_project_root(target);
     let layout = require_layout(target)?;
-    let project = read_project_name();
-    let release = release_name(target, &project);
+    // The release is the project name for both targets. The collector used to
+    // carry a `-monitoring` suffix because it was deployed out of the
+    // application's tree and the two releases had to differ; it has its own
+    // repository, and its own project name, now.
+    let release = read_project_name();
     let file = load_deploy_file(&layout)?;
     let env = env(&file, env_name)?;
     switch_context(&env.kubernetes_context)?;
@@ -394,11 +402,10 @@ pub fn handle_migrate(target: Target) -> ui::Cmd {
     }
     ui::blank();
     ui::ok("migrate complete");
-    ui::detail(format!(
+    ui::detail(
         "Install the version that is already live before changing images:\n\
-         erno deploy install <current-tag>{} --env production",
-        target.init_flag()
-    ));
+         erno deploy install <current-tag> --env production",
+    );
     Ok(())
 }
 
@@ -409,8 +416,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn release_names_never_collide() {
-        assert_eq!(release_name(Target::App, "acme"), "acme");
-        assert_eq!(release_name(Target::Monitoring, "acme"), "acme-monitoring");
+    fn both_targets_deploy_from_the_same_directory() {
+        // They are never in one tree any more: an application repository holds
+        // the app chart, the erno-monitoring repository holds the collector's.
+        assert_eq!(
+            Layout::for_target(Target::App).dir,
+            Layout::for_target(Target::Monitoring).dir
+        );
     }
 }

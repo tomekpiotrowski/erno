@@ -15,12 +15,8 @@ pub fn migrate(target: Target, github_repo: &str) -> Result<Vec<String>, String>
     if !chart.exists() {
         return Err(format!(
             "nothing to migrate — {} is missing\n\
-             Run `erno deploy init{}` for a new layout.",
-            chart.display(),
-            match target {
-                Target::App => "",
-                Target::Monitoring => " --target monitoring",
-            }
+             Run `erno deploy init` for a new layout.",
+            chart.display()
         ));
     }
     if layout.config_exists() {

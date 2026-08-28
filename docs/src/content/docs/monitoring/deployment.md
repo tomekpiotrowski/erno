@@ -3,46 +3,49 @@ title: Deploying monitoring
 description: Shipping the collector, console and Prometheus as their own release, in their own cluster.
 ---
 
-The monitoring stack is a **separate deployment**: its own `erno deploy`
-target, its own release, its own Kubernetes context. That separation is the
-entire point — a monitoring stack that shares a failure domain with the
-application goes down with the outage it exists to report.
+The collector is a **separate deployment in a separate repository**
+(`erno-monitoring`), with its own release and its own Kubernetes context. That
+separation is the entire point — a monitoring stack that shares a failure domain
+with the application goes down with the outage it exists to report.
 
-## The two commands
+## The commands
+
+Run them from the collector's repository. There is no `--target`: the tree says
+what it is, because only the collector's `api/config/*.toml` declares
+`[collector]`.
 
 ```sh
-erno deploy init --target monitoring      # generate Dockerfiles, config, workflow
-erno deploy setup --target monitoring     # cert-manager + ingress-nginx on that cluster
-erno deploy install v0.1.0 --target monitoring
+erno deploy init          # generate Dockerfiles, config, workflow
+erno deploy setup         # cert-manager + ingress-nginx on that cluster
+erno deploy install v0.1.0
 ```
 
-Without `--target` both commands act on the application, exactly as before.
-
-`deploy init --target monitoring` writes:
+`deploy init` writes:
 
 | Path | What |
 |---|---|
-| `monitoring/Dockerfile` | The collector image (`context: ./monitoring`) |
-| `erno-monitoring: app/Dockerfile` | The console image (`context: ./app`) |
-| `erno-monitoring: app/docker/{nginx.conf,entrypoint.sh}` | Console nginx, proxying `/api/` to the collector |
-| `monitoring/deploy/config.toml` | Context, host, scrape target, Prometheus |
-| `monitoring/deploy/secrets.example.yaml` | Collector secrets, registry pull creds |
-| `.github/workflows/monitoring.yaml` | Its own build and release workflow, tagged `mon-v*` |
+| `api/Dockerfile` | The collector image (`context: ./api`) |
+| `app/Dockerfile` | The console image (`context: ./app`) |
+| `app/docker/{nginx.conf,entrypoint.sh}` | Console nginx, proxying `/api/` to the collector |
+| `deploy/config.toml` | Context, host, scrape target, Prometheus |
+| `deploy/secrets.example.yaml` | Collector secrets, registry pull creds |
+| `.github/workflows/monitoring.yaml` | Its own build and release workflow, tagged `v*` |
 
-Every path is under `monitoring/`, so it can never overwrite the application's
-`deploy/`. The one exception is the workflow, which is a separate file rather
-than a merge into `build.yaml` — the two deployables have independent release
-cadences.
+The collector image only builds while `erno` is a **git** dependency in
+`api/Cargo.toml`. A Docker build sees nothing outside its context, so a path
+dependency on a sibling checkout cannot resolve; `erno deploy init` warns when
+it finds one.
 
 ## Release names
 
 | | Application | Monitoring |
 |---|---|---|
-| Release | `{name}` | `{name}-monitoring` |
+| Release | `{name}` | `{name}` — from its own `api/Cargo.toml` |
 | Images | `…/{api,app,www,admin}:<tag>` | `…/monitoring:<tag>`, `…/monitoring-ui:<tag>` |
-| Config | `deploy/` | `monitoring/deploy/` |
-| Secrets | `deploy/secrets.{env}.yaml` | `monitoring/deploy/secrets.{env}.yaml` |
-| Context | `deploy/config.toml` | `monitoring/deploy/config.toml` |
+| Config | `deploy/` | `deploy/` — in the other repository |
+| Secrets | `deploy/secrets.{env}.yaml` | same, in the other repository |
+
+The two never collide because they are never in one tree.
 
 ## One host, one origin
 
@@ -76,9 +79,11 @@ mismatched token means reports are rejected with a 401 and nothing says so.
 | Scrape token | `api.metrics_auth_token` | `api.metrics_auth_token` |
 | OTLP token | `api.ingest_token` (same as errors) | the same project server token |
 
-`erno deploy init --target monitoring` generates the ingest token and writes it
-into **both** `secrets.example.yaml` files, filling the application's only if it
-is still empty — an in-use token is never overwritten.
+`erno deploy init` generates a token into the collector's own
+`error_reporting.ingest_token`, which seeds its first project on an empty
+database. It cannot fill the application's half — that lives in another
+repository — so the application's `api.ingest_token` is the project server token
+the collector mints, pasted in by a human.
 
 The console's per-source "last report received" timestamps are what make a
 mismatch visible after the fact. Check them after the first deploy.
@@ -86,8 +91,8 @@ mismatch visible after the fact. Check them after the first deploy.
 ## What cannot come from the deploy config
 
 `config_rs` parses environment variables without a list separator, so any
-**list-valued** config key has to live in `monitoring/config/production.toml`,
-which ships inside the image:
+**list-valued** config key has to live in the collector's
+`api/config/production.toml`, which ships inside the image:
 
 - `[cors] allowed_origins` — the app and admin origins that post error reports.
   A missing origin here silently kills browser reporting.

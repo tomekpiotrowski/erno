@@ -34,10 +34,9 @@ impl Layout {
     pub fn for_target(target: Target) -> Self {
         Self {
             target,
-            dir: match target {
-                Target::App => "deploy",
-                Target::Monitoring => "monitoring/deploy",
-            },
+            // Both are `deploy/` now: the collector is its own repository, so
+            // nothing has to keep two charts side by side in one tree.
+            dir: "deploy",
         }
     }
 
@@ -66,11 +65,12 @@ impl Layout {
     }
 
     /// Pre-migration Helm tree. Install refuses this without `deploy migrate`.
+    /// Where a pre-CLI Helm chart sat, so `erno deploy migrate` can find one.
+    ///
+    /// The same for both targets, because each is now the only deployable in
+    /// its own repository.
     pub fn legacy_chart_dir(&self) -> &'static str {
-        match self.target {
-            Target::App => "chart",
-            Target::Monitoring => "monitoring/deploy/chart",
-        }
+        "chart"
     }
 }
 
@@ -462,14 +462,13 @@ fn require_host(key: &str, value: &str) -> Result<(), String> {
     }
 }
 
-/// Image tag written onto every workload. `mon-v1.2.3` (the monitoring workflow
-/// tag) stores the image as `v1.2.3`.
-pub fn image_tag(version: &str, target: Target) -> String {
-    let v = version.trim();
-    match target {
-        Target::Monitoring => v.strip_prefix("mon-").unwrap_or(v).to_string(),
-        Target::App => v.to_string(),
-    }
+/// Image tag written onto every workload.
+///
+/// The collector's tags used to carry a `mon-` prefix so they could be told
+/// apart from an application's in a shared repository. It has its own now, so a
+/// tag is just a tag.
+pub fn image_tag(version: &str) -> String {
+    version.trim().to_string()
 }
 
 pub fn origin(tls: bool, host: &str) -> String {
@@ -631,10 +630,8 @@ typo = true
 
     #[test]
     fn image_tag_strips_the_monitoring_prefix() {
-        assert_eq!(image_tag("v1.2.3", Target::App), "v1.2.3");
-        assert_eq!(image_tag("v1.2.3", Target::Monitoring), "v1.2.3");
-        assert_eq!(image_tag("mon-v1.2.3", Target::Monitoring), "v1.2.3");
-        assert_eq!(image_tag(" mon-v1.2.3 ", Target::Monitoring), "v1.2.3");
+        assert_eq!(image_tag("v1.2.3"), "v1.2.3");
+        assert_eq!(image_tag(" v1.2.3 "), "v1.2.3");
     }
 
     #[test]
@@ -718,17 +715,15 @@ error_reporting:
         parse_monitoring_secrets(&mon_secrets).unwrap();
     }
 
+    /// Each target owns its whole repository now, so both read the same paths.
+    /// The old split existed to stop `deploy init --target monitoring` writing
+    /// over an application's chart when the two shared a tree.
     #[test]
-    fn layout_paths_do_not_overlap() {
-        let app = Layout::for_target(Target::App);
-        let mon = Layout::for_target(Target::Monitoring);
-        assert_eq!(app.config_path().to_str().unwrap(), "deploy/config.toml");
-        assert_eq!(
-            mon.config_path().to_str().unwrap(),
-            "monitoring/deploy/config.toml"
-        );
-        assert_eq!(app.legacy_chart_dir(), "chart");
-        assert!(mon.legacy_chart_dir().starts_with("monitoring/"));
-        assert_ne!(app.dir, mon.dir);
+    fn both_targets_use_the_same_layout() {
+        for target in [Target::App, Target::Monitoring] {
+            let layout = Layout::for_target(target);
+            assert_eq!(layout.config_path().to_str().unwrap(), "deploy/config.toml");
+            assert_eq!(layout.legacy_chart_dir(), "chart");
+        }
     }
 }

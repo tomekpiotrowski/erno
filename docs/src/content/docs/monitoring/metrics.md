@@ -22,13 +22,13 @@ Two consequences:
   doing the watching is itself struggling.
 
 ```toml
-# monitoring/deploy/config.toml
+# erno-monitoring: deploy/config.toml
 [production.scrape]
 target = "api.example.com:443"
 scheme = "https"
 ```
 
-`api.metrics_auth_token` in `monitoring/deploy/secrets.<env>.yaml` must equal
+`api.metrics_auth_token` in the collector's `deploy/secrets.<env>.yaml` must equal
 the application's `[metrics] auth_token`.
 
 In development `erno dev` writes a config that scrapes the application, and the

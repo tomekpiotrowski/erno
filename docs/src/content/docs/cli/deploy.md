@@ -82,7 +82,7 @@ Once per cluster, before the first `install`:
 
 ```sh
 erno deploy setup
-erno deploy setup --target monitoring    # the monitoring cluster, separately
+erno deploy setup                        # run again in erno-monitoring for that cluster
 erno deploy setup --provider kind        # local kind instead of a cloud LoadBalancer
 erno deploy setup --upgrade              # re-apply the pinned versions
 ```

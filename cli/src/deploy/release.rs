@@ -225,7 +225,6 @@ fn commit_sha_for(version: &str) -> Option<String> {
     let tag = String::from_utf8(described.stdout).ok()?;
     if tag.trim() != version
         && tag.trim().trim_start_matches('v') != version.trim_start_matches('v')
-        && tag.trim().strip_prefix("mon-") != Some(version.trim_start_matches("mon-"))
     {
         return None;
     }

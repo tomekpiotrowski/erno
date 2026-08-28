@@ -1,6 +1,6 @@
 # The monitoring operator console.
 #
-# `npm ci` rather than `npm install`: monitoring/ui ships a package-lock.json,
+# `npm ci` rather than `npm install`: the console ships a package-lock.json,
 # and a reproducible install is the point of having one.
 FROM node:22-alpine AS build
 WORKDIR /src

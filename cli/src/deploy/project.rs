@@ -11,16 +11,8 @@ pub fn validate_project_root(target: Target) {
         );
     }
     if target == Target::Monitoring {
-        if !Path::new("monitoring/Cargo.toml").exists() {
-            ui::abort(
-                "this project has no monitoring/\n\
-                 It predates monitoring scaffolding. Copy monitoring/ from an erno\n\
-                 checkout, or re-scaffold with `erno new --erno-path <path-to-erno>`.",
-            );
-        }
-        if !Path::new("monitoring/ui/package.json").exists() {
-            ui::abort("monitoring/ui is missing — the operator console cannot be built");
-        }
+        // Nothing else to check: the target was derived from this tree in the
+        // first place, so it cannot disagree with it.
         return;
     }
     if !Path::new("www/package.json").exists() {
@@ -30,6 +22,25 @@ pub fn validate_project_root(target: Target) {
              Add a www/ package, or set workloads.www = false in deploy/config.toml.",
         );
     }
+}
+
+/// Whether this tree is the collector rather than a product application.
+pub fn is_collector_tree() -> bool {
+    let config = std::fs::read_to_string("api/config/production.toml")
+        .or_else(|_| std::fs::read_to_string("api/config/development.toml"))
+        .unwrap_or_default();
+    declares_collector(&config)
+}
+
+/// Whether an api config is the collector's.
+///
+/// `[collector]` and its subtables are the collector's alone — a product
+/// application configures `[error_reporting]` to *send* to one, never a
+/// `[collector]` to receive.
+fn declares_collector(config: &str) -> bool {
+    config
+        .lines()
+        .any(|l| l.trim_start().starts_with("[collector"))
 }
 
 pub fn read_project_name() -> String {
@@ -96,6 +107,23 @@ pub fn www_present() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `Target::detect` reads this, so a wrong answer here deploys the wrong
+    /// chart into the wrong cluster — which is exactly what removing the
+    /// `--target` flag was meant to make impossible.
+    #[test]
+    fn only_the_collector_declares_a_collector_table() {
+        assert!(declares_collector("[collector]\nenabled = true\n"));
+        assert!(declares_collector(
+            "[server]\nport = 3001\n\n[collector.alerts]\n"
+        ));
+        assert!(declares_collector("  [collector]\n"));
+        // A product app sends to a collector; it does not host one.
+        assert!(!declares_collector(
+            "[error_reporting]\ncollector_url = \"https://m.test\"\n"
+        ));
+        assert!(!declares_collector(""));
+    }
 
     #[test]
     fn github_urls() {

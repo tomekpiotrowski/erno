@@ -82,12 +82,7 @@ struct DeployArgs {
 #[derive(Subcommand)]
 enum DeployCommands {
     /// Generate Dockerfiles, deploy config, and GitHub Actions workflow
-    Init {
-        /// Which deployment to generate files for. The monitoring stack is a
-        /// separate release in a separate cluster.
-        #[arg(long, value_enum, default_value_t = commands::deploy::Target::App)]
-        target: commands::deploy::Target,
-    },
+    Init {},
     /// Deploy a specific version to the cluster
     Install {
         /// Image tag to deploy (e.g. v1.2.3)
@@ -95,9 +90,6 @@ enum DeployCommands {
         /// Target environment
         #[arg(long, default_value = "production")]
         env: String,
-        /// Which deployment to install
-        #[arg(long, value_enum, default_value_t = commands::deploy::Target::App)]
-        target: commands::deploy::Target,
     },
     /// Show what would change in the cluster
     Diff {
@@ -105,34 +97,23 @@ enum DeployCommands {
         version: String,
         #[arg(long, default_value = "production")]
         env: String,
-        #[arg(long, value_enum, default_value_t = commands::deploy::Target::App)]
-        target: commands::deploy::Target,
     },
     /// Show the recorded revision and live deployments
     Status {
         #[arg(long, default_value = "production")]
         env: String,
-        #[arg(long, value_enum, default_value_t = commands::deploy::Target::App)]
-        target: commands::deploy::Target,
     },
     /// Re-install the previous revision's image tags
     Rollback {
         #[arg(long, default_value = "production")]
         env: String,
-        #[arg(long, value_enum, default_value_t = commands::deploy::Target::App)]
-        target: commands::deploy::Target,
     },
     /// Convert a Helm chart/ tree into deploy/
-    Migrate {
-        #[arg(long, value_enum, default_value_t = commands::deploy::Target::App)]
-        target: commands::deploy::Target,
-    },
+    Migrate {},
     /// Install cert-manager and ingress-nginx (once per cluster)
     Setup {
         #[arg(long, default_value = "production")]
         env: String,
-        #[arg(long, value_enum, default_value_t = commands::deploy::Target::App)]
-        target: commands::deploy::Target,
         /// Re-apply even if the add-ons are already present
         #[arg(long)]
         upgrade: bool,
@@ -191,30 +172,28 @@ async fn dispatch(command: Commands) -> ui::Cmd {
         Commands::Test(args) => commands::test::handle_test(args).await,
         Commands::Upgrade(args) => commands::upgrade::handle_upgrade(args).await,
         Commands::Deploy(args) => match args.command {
-            DeployCommands::Init { target } => commands::deploy::handle_deploy_init(target).await,
-            DeployCommands::Install {
-                version,
-                env,
-                target,
-            } => commands::deploy::handle_deploy_install(&version, &env, target).await,
-            DeployCommands::Diff {
-                version,
-                env,
-                target,
-            } => crate::deploy::handle_diff(&version, &env, target).await,
-            DeployCommands::Status { env, target } => {
-                crate::deploy::handle_status(&env, target).await
+            DeployCommands::Init {} => {
+                commands::deploy::handle_deploy_init(deploy::Target::detect()).await
             }
-            DeployCommands::Rollback { env, target } => {
-                crate::deploy::handle_rollback(&env, target).await
+            DeployCommands::Install { version, env } => {
+                commands::deploy::handle_deploy_install(&version, &env, deploy::Target::detect())
+                    .await
             }
-            DeployCommands::Migrate { target } => crate::deploy::handle_migrate(target),
+            DeployCommands::Diff { version, env } => {
+                crate::deploy::handle_diff(&version, &env, deploy::Target::detect()).await
+            }
+            DeployCommands::Status { env } => {
+                crate::deploy::handle_status(&env, deploy::Target::detect()).await
+            }
+            DeployCommands::Rollback { env } => {
+                crate::deploy::handle_rollback(&env, deploy::Target::detect()).await
+            }
+            DeployCommands::Migrate {} => crate::deploy::handle_migrate(deploy::Target::detect()),
             DeployCommands::Setup {
                 env,
-                target,
                 upgrade,
                 provider,
-            } => crate::deploy::handle_setup(&env, target, upgrade, provider),
+            } => crate::deploy::handle_setup(&env, deploy::Target::detect(), upgrade, provider),
         },
     }
 }

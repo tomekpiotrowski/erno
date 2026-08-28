@@ -1,13 +1,12 @@
-# The monitoring deployment builds and releases independently of the
-# application. A single workflow would rebuild and republish the monitoring
-# chart on every application tag, and the two have no reason to share a cadence.
+# The collector's own repository, so this is its only workflow. It releases on
+# `v*` tags. The `mon-` prefix these carried existed only to tell them apart
+# from an application's tags in a shared repository.
 name: Monitoring
 
 on:
   push:
-    tags: [ 'mon-v*' ]
+    tags: [ 'v*' ]
   pull_request:
-    paths: [ 'monitoring/**' ]
 
 env:
   REGISTRY: ghcr.io
@@ -34,11 +33,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: PGPASSWORD=erno createdb -h localhost -U erno erno_monitoring_test
-      # `working-directory` rather than `-p`: monitoring/.cargo/config.toml sets
+      # `working-directory` rather than `-p`: api/.cargo/config.toml sets
       # RUST_TEST_THREADS=1, which cargo finds by walking up from the working
       # directory. The suite deadlocks against itself in parallel.
       - run: cargo test
-        working-directory: monitoring
+        working-directory: api
 
   collector_docker:
     name: Build collector image
@@ -55,10 +54,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: meta
-        run: echo "version=${GITHUB_REF#refs/tags/mon-}" >> "$GITHUB_OUTPUT"
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
-          context: ./monitoring
+          context: ./api
           push: ${{ startsWith(github.ref, 'refs/tags/') }}
           tags: ${{ env.REGISTRY }}/${{ github.repository }}/monitoring:${{ steps.meta.outputs.version }}
 
@@ -76,9 +75,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: meta
-        run: echo "version=${GITHUB_REF#refs/tags/mon-}" >> "$GITHUB_OUTPUT"
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
-          context: ./monitoring/ui
+          context: ./app
           push: ${{ startsWith(github.ref, 'refs/tags/') }}
           tags: ${{ env.REGISTRY }}/${{ github.repository }}/monitoring-ui:${{ steps.meta.outputs.version }}
