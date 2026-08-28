@@ -31,3 +31,6 @@ Cargo.lock
 coverage/
 *.profraw
 *.profdata
+
+# Angular build cache
+.angular/

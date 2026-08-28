@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/nocturne-8275d433-382a-453e-a849-4161d569ad50/styles.css">
+<script src="_ds/nocturne-8275d433-382a-453e-a849-4161d569ad50/_ds_bundle.js"></script>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+  body{margin:0;background:var(--color-bg)}
+  a{color:var(--color-accent-400)} a:hover{color:var(--color-accent-300)}
+  @keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes rise{0%{opacity:0;transform:translateY(6px)}100%{opacity:1;transform:none}}
+  .dt-scroll{scrollbar-width:thin;scrollbar-color:var(--color-neutral-800) transparent}
+  .dt-row:hover{background:color-mix(in srgb, var(--color-text) 5%, transparent)}
+  .dt-row:hover .dt-act{opacity:1}
+</style>
+</helmet>
+
+<div style="min-height:100vh;background:var(--color-bg);font-family:var(--font-body);color:var(--color-text);position:relative;overflow:hidden">
+
+  <div style="position:absolute;inset:0;opacity:.3;padding:26px 34px;display:flex;flex-direction:column;gap:22px;pointer-events:none">
+    <div style="display:flex;align-items:center;gap:var(--space-3);border-bottom:1px solid var(--color-divider);padding-bottom:16px">
+      <span style="font-family:var(--font-heading);font-size:15px;color:var(--color-neutral-500)">teryon</span>
+      <span style="width:1px;height:14px;background:var(--color-neutral-800)"></span>
+      <span style="font-size:13px;color:var(--color-neutral-600)">Orders</span>
+      <span style="font-size:13px;color:var(--color-neutral-700)">Customers</span>
+      <span style="font-size:13px;color:var(--color-neutral-700)">Settings</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px;max-width:520px">
+      <span style="height:22px;width:240px;border-radius:var(--radius-sm);background:var(--color-neutral-900)"></span>
+      <span style="height:10px;width:100%;border-radius:var(--radius-sm);background:var(--color-neutral-900)"></span>
+      <span style="height:10px;width:82%;border-radius:var(--radius-sm);background:var(--color-neutral-900)"></span>
+      <span style="height:10px;width:64%;border-radius:var(--radius-sm);background:var(--color-neutral-900)"></span>
+    </div>
+  </div>
+
+  <div style="position:absolute;left:34px;bottom:28px;color:var(--color-neutral-600);font-size:12px;display:flex;flex-direction:column;gap:4px;max-width:280px">
+    <span style="font-family:'JetBrains Mono',monospace;color:var(--color-accent)">erno devtools</span>
+    <span style="text-wrap:pretty">Docked in the running app. Everything here works — switch tabs, expand a job, force a re-sync, collapse it.</span>
+  </div>
+
+  <sc-if value="{{ open }}" hint-placeholder-val="{{ true }}">
+  <div style="position:absolute;right:28px;bottom:28px;width:400px;display:flex;flex-direction:column;border-radius:var(--radius-lg);background:var(--color-bg);box-shadow:0 0 0 1px var(--color-neutral-800), var(--shadow-lg);overflow:hidden;animation:rise .22s ease-out">
+
+    <div style="display:flex;align-items:center;gap:var(--space-2);padding:11px 12px 11px 14px;border-bottom:1px solid var(--color-divider);background:var(--color-surface)">
+      <span style="width:7px;height:7px;border-radius:50%;background:{{ healthColor }};box-shadow:0 0 0 3px color-mix(in srgb, {{ healthColor }} 20%, transparent)"></span>
+      <span style="font-family:var(--font-heading);font-size:13px;font-weight:500;letter-spacing:.01em">Erno Devtools</span>
+      <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--color-neutral-600)">0.14.2</span>
+      <span style="margin-left:auto;display:flex;align-items:center;gap:2px">
+        <button class="btn btn-ghost" style="height:26px;min-height:26px;padding:0 8px;font-size:11px;color:var(--color-neutral-500)" onClick="{{ toggleDock }}">{{ dockLabel }}</button>
+        <button class="btn btn-ghost" style="height:26px;min-height:26px;width:26px;padding:0;font-size:14px;color:var(--color-neutral-500)" onClick="{{ close }}" title="collapse">—</button>
+      </span>
+    </div>
+
+    <div style="display:flex;gap:2px;padding:9px 12px 0">
+      <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="3">
+        <button style="{{ t.style }}" onClick="{{ t.onClick }}">
+          <span>{{ t.label }}</span>
+          <sc-if value="{{ t.hasCount }}" hint-placeholder-val="{{ true }}">
+            <span style="{{ t.countStyle }}">{{ t.count }}</span>
+          </sc-if>
+        </button>
+      </sc-for>
+    </div>
+    <div style="height:1px;background:var(--color-divider);margin-top:9px"></div>
+
+    <div class="dt-scroll" style="max-height:{{ bodyHeight }};overflow-y:auto;display:flex;flex-direction:column">
+
+      <sc-if value="{{ isStatus }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;flex-direction:column;padding:4px 0 10px">
+          <sc-for list="{{ statusRows }}" as="s" hint-placeholder-count="5">
+            <div class="dt-row" style="display:grid;grid-template-columns:76px minmax(0,1fr) auto;gap:0 10px;align-items:baseline;padding:8px 14px;border-bottom:1px solid color-mix(in srgb, var(--color-divider) 55%, transparent)">
+              <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--color-neutral-600)">{{ s.key }}</span>
+              <span style="display:flex;flex-direction:column;gap:2px;min-width:0">
+                <span style="{{ s.valStyle }}">{{ s.val }}</span>
+                <sc-if value="{{ s.hasDetail }}" hint-placeholder-val="{{ false }}">
+                  <span style="font-size:11px;color:var(--color-neutral-600);text-wrap:pretty">{{ s.detail }}</span>
+                </sc-if>
+              </span>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--color-neutral-700);white-space:nowrap">{{ s.meta }}</span>
+            </div>
+          </sc-for>
+          <div style="display:flex;align-items:center;gap:var(--space-2);padding:12px 14px 2px">
+            <button class="btn btn-primary" style="height:32px;min-height:32px;font-size:12px" onClick="{{ resync }}" disabled="{{ syncBusy }}">
+              <sc-if value="{{ syncBusy }}" hint-placeholder-val="{{ false }}">
+                <span style="display:inline-block;width:10px;height:10px;margin-right:7px;border:1.5px solid var(--color-accent);border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite"></span>
+              </sc-if>
+              <span>{{ syncLabel }}</span>
+            </button>
+            <span style="font-size:11px;color:var(--color-neutral-600)">{{ syncNote }}</span>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isEmails }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column">
+          <sc-for list="{{ emails }}" as="m" hint-placeholder-count="2">
+            <div class="dt-row" style="display:flex;flex-direction:column;gap:3px;padding:10px 14px;border-bottom:1px solid color-mix(in srgb, var(--color-divider) 55%, transparent);cursor:pointer" onClick="{{ m.onOpen }}">
+              <span style="display:flex;align-items:baseline;gap:8px">
+                <span style="font-size:13px;font-weight:500;color:{{ m.subjectColor }};min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ m.subject }}</span>
+                <sc-if value="{{ m.unread }}" hint-placeholder-val="{{ true }}">
+                  <span style="width:5px;height:5px;border-radius:50%;background:var(--color-accent);flex:none"></span>
+                </sc-if>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--color-neutral-700);flex:none">{{ m.time }}</span>
+              </span>
+              <span style="display:flex;align-items:baseline;gap:8px">
+                <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--color-neutral-500);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ m.to }}</span>
+                <span class="dt-act" style="margin-left:auto;display:flex;gap:8px;opacity:.35;transition:opacity .15s;flex:none">
+                  <button class="btn btn-ghost" style="height:22px;min-height:22px;padding:0 6px;font-size:11px" onClick="{{ m.onOpen }}">open ↗</button>
+                  <button class="btn btn-ghost" style="height:22px;min-height:22px;padding:0 6px;font-size:11px;color:var(--color-neutral-500)" onClick="{{ m.onDismiss }}">✕</button>
+                </span>
+              </span>
+            </div>
+          </sc-for>
+          <sc-if value="{{ noEmails }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:28px 14px;display:flex;flex-direction:column;gap:5px;align-items:center;text-align:center">
+              <span style="font-size:13px;color:var(--color-neutral-500)">Outbox empty</span>
+              <span style="font-size:11px;color:var(--color-neutral-700)">Mail the app sends in dev lands here instead of going out.</span>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isJobs }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column">
+          <div style="display:flex;align-items:center;gap:8px;padding:9px 14px;border-bottom:1px solid var(--color-divider)">
+            <input class="input" style="height:28px;min-height:28px;font-size:12px;font-family:'JetBrains Mono',monospace;background:var(--color-bg)" placeholder="filter jobs" value="{{ filter }}" onInput="{{ onFilter }}">
+            <sc-for list="{{ jobFilters }}" as="jf" hint-placeholder-count="3">
+              <button style="{{ jf.style }}" onClick="{{ jf.onClick }}">{{ jf.label }}</button>
+            </sc-for>
+          </div>
+          <sc-for list="{{ jobs }}" as="j" hint-placeholder-count="6">
+            <div style="border-bottom:1px solid color-mix(in srgb, var(--color-divider) 55%, transparent)">
+              <div class="dt-row" style="display:grid;grid-template-columns:12px minmax(0,1fr) auto auto;gap:0 9px;align-items:center;padding:7px 14px;cursor:pointer" onClick="{{ j.onToggle }}">
+                <span style="{{ j.caretStyle }}">▸</span>
+                <span style="display:flex;align-items:baseline;gap:7px;min-width:0">
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ j.name }}</span>
+                  <sc-if value="{{ j.grouped }}" hint-placeholder-val="{{ true }}">
+                    <span style="font-family:'JetBrains Mono',monospace;font-size:10px;padding:1px 5px;border-radius:var(--radius-sm);background:var(--color-neutral-900);color:var(--color-neutral-500);flex:none">×{{ j.runCount }}</span>
+                  </sc-if>
+                </span>
+                <span style="{{ j.statusStyle }}">{{ j.status }}</span>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--color-neutral-700);white-space:nowrap">{{ j.timing }}</span>
+              </div>
+              <sc-if value="{{ j.expanded }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-direction:column;padding:2px 14px 9px 35px;animation:rise .18s ease-out">
+                  <sc-for list="{{ j.runs }}" as="run" hint-placeholder-count="3">
+                    <div style="display:grid;grid-template-columns:minmax(0,1fr) 54px 62px;gap:0 8px;align-items:baseline;padding:3px 0;font-family:'JetBrains Mono',monospace;font-size:11px">
+                      <span style="color:var(--color-neutral-600);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ run.id }}</span>
+                      <span style="{{ run.msStyle }}">{{ run.ms }}</span>
+                      <span style="{{ run.stateStyle }}">{{ run.state }}</span>
+                    </div>
+                  </sc-for>
+                  <sc-if value="{{ j.hasError }}" hint-placeholder-val="{{ false }}">
+                    <div style="margin-top:7px;padding:8px 10px;border-radius:var(--radius-md);border:1px solid color-mix(in srgb, var(--dt-err) 45%, transparent);background:color-mix(in srgb, var(--dt-err) 9%, transparent);display:flex;flex-direction:column;gap:3px">
+                      <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--color-accent-300);text-wrap:pretty">{{ j.errorMsg }}</span>
+                      <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--color-neutral-600)">{{ j.errorAt }}</span>
+                      <span style="display:flex;gap:6px;padding-top:2px">
+                        <button class="btn btn-ghost" style="height:22px;min-height:22px;padding:0 6px;font-size:11px" onClick="{{ j.onRetry }}">retry</button>
+                        <button class="btn btn-ghost" style="height:22px;min-height:22px;padding:0 6px;font-size:11px;color:var(--color-neutral-500)" onClick="{{ j.onOpenSrc }}">open source ↗</button>
+                      </span>
+                    </div>
+                  </sc-if>
+                </div>
+              </sc-if>
+            </div>
+          </sc-for>
+          <sc-if value="{{ noJobs }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:28px 14px;display:flex;flex-direction:column;gap:5px;align-items:center;text-align:center">
+              <span style="font-size:13px;color:var(--color-neutral-500)">Nothing matches “{{ filter }}”</span>
+              <span style="font-size:11px;color:var(--color-neutral-700)">{{ totalJobsLabel }}</span>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:var(--space-2);padding:8px 12px 8px 14px;border-top:1px solid var(--color-divider);background:var(--color-surface)">
+      <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--color-neutral-600);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ footNote }}</span>
+      <button class="btn btn-secondary" style="margin-left:auto;height:26px;min-height:26px;padding:0 10px;font-size:11px;flex:none" onClick="{{ clearAll }}">Clear all</button>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ collapsed }}" hint-placeholder-val="{{ false }}">
+    <button style="position:absolute;right:28px;bottom:28px;display:flex;align-items:center;gap:9px;padding:8px 13px;border-radius:999px;border:1px solid var(--color-neutral-800);background:var(--color-surface);box-shadow:var(--shadow-md);color:var(--color-text);font-family:var(--font-body);font-size:12px;cursor:pointer;animation:rise .2s ease-out" style-hover="border-color:var(--color-accent)" onClick="{{ reopen }}">
+      <span style="width:7px;height:7px;border-radius:50%;background:{{ healthColor }}"></span>
+      <span>Erno Devtools</span>
+      <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--color-neutral-500)">{{ pillCounts }}</span>
+    </button>
+  </sc-if>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1180,&quot;height&quot;:720},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#9184d9&quot;,&quot;options&quot;:[&quot;#9184d9&quot;,&quot;#84d9b8&quot;,&quot;#d9a184&quot;,&quot;#b5abfc&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Panel&quot;}}">
+const OK = 'oklch(0.755 0.085 168)', WARN = 'oklch(0.80 0.095 82)', ERR = 'oklch(0.695 0.125 22)';
+const pad = n => String(n).padStart(2,'0');
+const hhmmss = t => { const d = new Date(t); return pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds()); };
+const rnd = (a,b) => a + Math.random()*(b-a);
+
+const JOB_DEFS = [
+  {name:'send_password_reset_email', n:1, ms:[180,240], state:'done'},
+  {name:'detect_stuck_runs', n:47, ms:[28,64], state:'done'},
+  {name:'sync_inventory', n:12, ms:[120,320], state:'done'},
+  {name:'rebuild_search_index', n:1, ms:[1400,2100], state:'running'},
+  {name:'charge_pending_orders', n:3, ms:[240,600], state:'failed',
+   error:'PoolTimedOut: acquiring a postgres connection timed out after 30s',
+   at:'crates/api/src/jobs/charge.rs:74'},
+  {name:'expire_sessions', n:24, ms:[8,22], state:'done'},
+  {name:'refresh_materialized_views', n:6, ms:[420,900], state:'done'},
+  {name:'prune_audit_log', n:6, ms:[60,140], state:'done'}
+];
+
+class Component extends DCLogic {
+  constructor(props){
+    super(props);
+    const now = Date.now();
+    this.state = {
+      t: now, boot: now - 3852000,
+      tab: 'status', open: true, dock: 'right',
+      expanded: {}, filter: '', jobFilter: 'all',
+      syncState: 'error', syncBusy: false, wsSince: now - 3852000,
+      note: '',
+      emails: [
+        {id:'m1', subject:'Reset your password', to:'teryon@teryon.dev', t: now - 42000, unread:true},
+        {id:'m2', subject:'Your order #882 shipped', to:'ada@example.com', t: now - 260000, unread:false},
+        {id:'m3', subject:'Weekly digest', to:'ada@example.com', t: now - 900000, unread:false}
+      ],
+      jobs: JOB_DEFS.map((d,i) => ({
+        id:'j'+i, name:d.name, n:d.n, state:d.state, error:d.error, at:d.at,
+        runs: Array.from({length: d.n}, (_,k) => ({
+          id: d.name.slice(0,4) + '_' + (9120 - i*13 - k),
+          ms: Math.round(rnd(d.ms[0], d.ms[1])),
+          state: d.state === 'failed' ? (k === 0 ? 'failed' : 'done') : (d.state === 'running' && k === 0 ? 'running' : 'done'),
+          t: now - (k*1150 + i*400)
+        }))
+      }))
+    };
+  }
+
+  componentDidMount(){
+    this.applyVars();
+    this.timer = setInterval(() => this.setState({t: Date.now()}), 1000);
+  }
+  componentDidUpdate(){ this.applyVars(); }
+  componentWillUnmount(){ clearInterval(this.timer); clearTimeout(this.noteTimer); clearTimeout(this.syncTimer); }
+  applyVars(){
+    const r = document.documentElement.style;
+    r.setProperty('--dt-err', ERR);
+    r.setProperty('--color-accent', this.props.accent ?? '#9184d9');
+  }
+
+  say(msg){
+    clearTimeout(this.noteTimer);
+    this.setState({note: msg});
+    this.noteTimer = setTimeout(() => this.setState({note: ''}), 3000);
+  }
+
+  visibleJobs(){
+    const s = this.state;
+    const q = s.filter.trim().toLowerCase();
+    return s.jobs.filter(j =>
+      (!q || j.name.includes(q)) &&
+      (s.jobFilter === 'all' || (s.jobFilter === 'failed' ? j.state === 'failed' : j.state === 'running' || j.state === 'failed'))
+    );
+  }
+
+  resync(){
+    if (this.state.syncBusy) return;
+    this.setState({syncBusy: true});
+    this.syncTimer = setTimeout(() => {
+      this.setState({syncBusy: false, syncState: 'ok'});
+      this.say('schema in step · 24 migrations applied');
+    }, 1600);
+  }
+
+  clearAll(){
+    const tab = this.state.tab;
+    if (tab === 'emails') { this.setState({emails: []}); this.say('outbox cleared'); }
+    else if (tab === 'jobs') { this.setState({jobs: [], expanded: {}}); this.say('job history cleared'); }
+    else { this.setState({note: ''}); this.say('status counters reset'); }
+  }
+
+  renderVals(){
+    const s = this.state;
+    const emails = s.emails;
+    const unread = emails.filter(m => m.unread).length;
+    const jobsAll = s.jobs;
+    const totalRuns = jobsAll.reduce((a,j) => a + j.n, 0);
+    const failing = jobsAll.filter(j => j.state === 'failed').length;
+    const running = jobsAll.filter(j => j.state === 'running').length;
+    const health = s.syncState === 'error' || failing ? ERR : (running ? WARN : OK);
+    const upMin = Math.floor((s.t - s.wsSince) / 60000);
+    const upLabel = Math.floor(upMin/60) + 'h' + pad(upMin % 60) + 'm';
+
+    const tabDef = [
+      {key:'status', label:'Status', count: s.syncState === 'error' ? '!' : null, tone: s.syncState === 'error' ? ERR : null},
+      {key:'emails', label:'Emails', count: emails.length ? String(emails.length) : null, tone: unread ? 'accent' : null},
+      {key:'jobs', label:'Jobs', count: totalRuns ? String(totalRuns) : null, tone: failing ? ERR : null}
+    ];
+    const tabs = tabDef.map(t => {
+      const on = s.tab === t.key;
+      return {
+        label: t.label, hasCount: !!t.count, count: t.count,
+        style: {
+          display:'flex', alignItems:'center', gap:'6px', padding:'6px 11px', cursor:'pointer',
+          fontFamily:'var(--font-body)', fontSize:'12px', border:'none', borderRadius:'var(--radius-sm)',
+          background: on ? 'color-mix(in srgb, var(--color-accent) 16%, transparent)' : 'transparent',
+          color: on ? 'var(--color-accent-200)' : 'var(--color-neutral-500)',
+          boxShadow: on ? 'inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 50%, transparent)' : 'none'
+        },
+        countStyle: {
+          fontFamily:"'JetBrains Mono',monospace", fontSize:'10px', padding:'1px 5px', borderRadius:'999px',
+          background: t.tone === ERR ? 'color-mix(in srgb, ' + ERR + ' 22%, transparent)' : (t.tone === 'accent' ? 'var(--color-accent-800)' : 'var(--color-neutral-900)'),
+          color: t.tone === ERR ? ERR : (t.tone === 'accent' ? 'var(--color-accent-100)' : 'var(--color-neutral-500)')
+        },
+        onClick: () => this.setState({tab: t.key})
+      };
+    });
+
+    const statusRows = [
+      {key:'websocket', val:'connected', tone: OK, meta:'ws://localhost:3000 · ' + upLabel},
+      s.syncState === 'error'
+        ? {key:'sync', val:'error', tone: ERR, meta:'12:15:03',
+           detail:'last push rejected — local schema is 1 migration behind (0024_shipments)'}
+        : {key:'sync', val:'in step', tone: OK, meta: hhmmss(s.t), detail:'24 migrations applied · head 0024_shipments'},
+      {key:'api', val:'ready', tone: OK, meta:'localhost:3000 · 31ms p95'},
+      {key:'queue', val: running + ' running · ' + failing + ' failed', tone: failing ? ERR : OK, meta: totalRuns + ' runs today'},
+      {key:'build', val:'ok', tone: OK, meta:'0.9s · 1 crate'}
+    ].map(r => ({
+      key: r.key, val: r.val, meta: r.meta,
+      hasDetail: !!r.detail, detail: r.detail || '',
+      valStyle: {fontSize:'13px', color: r.tone, fontFamily:"'JetBrains Mono',monospace"}
+    }));
+
+    const jobFilters = [
+      {key:'all', label:'all'},
+      {key:'attention', label:'attention'},
+      {key:'failed', label:'failed'}
+    ].map(f => ({
+      label: f.label,
+      style: {
+        padding:'4px 8px', fontSize:'11px', fontFamily:"'JetBrains Mono',monospace", cursor:'pointer',
+        borderRadius:'var(--radius-sm)', border:'1px solid ' + (s.jobFilter === f.key ? 'var(--color-accent)' : 'var(--color-divider)'),
+        background:'transparent', color: s.jobFilter === f.key ? 'var(--color-accent)' : 'var(--color-neutral-600)',
+        whiteSpace:'nowrap', flex:'none'
+      },
+      onClick: () => this.setState({jobFilter: f.key})
+    }));
+
+    const jobs = this.visibleJobs().map(j => {
+      const ex = !!s.expanded[j.id];
+      const avg = Math.round(j.runs.reduce((a,r) => a + r.ms, 0) / j.runs.length);
+      const label = j.state === 'failed' ? 'Failed' : (j.state === 'running' ? 'Running' : 'Completed');
+      const tone = j.state === 'failed' ? ERR : (j.state === 'running' ? WARN : OK);
+      return {
+        name: j.name, grouped: j.n > 1, runCount: j.n, expanded: ex,
+        status: label, timing: j.state === 'running' ? hhmmss(j.runs[0].t) : (j.n > 1 ? 'avg ' + avg + 'ms' : avg + 'ms'),
+        statusStyle: {fontSize:'11px', color: tone, whiteSpace:'nowrap', animation: j.state === 'running' ? 'pulse 1.4s infinite' : 'none'},
+        caretStyle: {fontSize:'9px', color:'var(--color-neutral-600)', transition:'transform .15s', transform: ex ? 'rotate(90deg)' : 'none'},
+        runs: (ex ? j.runs.slice(0, 8) : []).map(r => ({
+          id: r.id, ms: r.ms + 'ms', state: r.state,
+          msStyle: {color: r.ms > 500 ? WARN : 'var(--color-neutral-600)', textAlign:'right'},
+          stateStyle: {color: r.state === 'failed' ? ERR : (r.state === 'running' ? WARN : 'var(--color-neutral-700)'), textAlign:'right'}
+        })),
+        hasError: ex && !!j.error, errorMsg: j.error || '', errorAt: j.at || '',
+        onToggle: () => this.setState(st => ({expanded: {...st.expanded, [j.id]: !st.expanded[j.id]}})),
+        onRetry: () => this.say('re-enqueued ' + j.name),
+        onOpenSrc: () => this.say(j.at + ' → $EDITOR')
+      };
+    });
+
+    const footByTab = {
+      status: 'ws up ' + upLabel + ' · ' + totalRuns + ' runs · ' + emails.length + ' mails held',
+      emails: emails.length ? emails.length + ' held · ' + unread + ' unread · nothing left the machine' : 'nothing held',
+      jobs: jobs.length + ' of ' + jobsAll.length + ' kinds · ' + totalRuns + ' runs · ' + failing + ' failing'
+    };
+
+    return {
+      open: s.open, collapsed: !s.open,
+      close: () => this.setState({open: false}),
+      reopen: () => this.setState({open: true}),
+      toggleDock: () => { this.setState(st => ({dock: st.dock === 'right' ? 'wide' : 'right'})); },
+      dockLabel: s.dock === 'right' ? 'tall' : 'short',
+      bodyHeight: s.dock === 'right' ? '300px' : '460px',
+      healthColor: health,
+      pillCounts: (unread ? unread + ' mail · ' : '') + (failing ? failing + ' failed' : totalRuns + ' runs'),
+      tabs,
+      isStatus: s.tab === 'status', isEmails: s.tab === 'emails', isJobs: s.tab === 'jobs',
+      statusRows,
+      syncBusy: s.syncBusy,
+      syncLabel: s.syncBusy ? 'Re-syncing' : (s.syncState === 'error' ? 'Force re-sync' : 'Re-sync'),
+      syncNote: s.note || (s.syncState === 'error' ? 'runs 0024_shipments, then reconnects' : 'last synced ' + hhmmss(s.t)),
+      resync: () => this.resync(),
+      emails: emails.map(m => ({
+        subject: m.subject, to: m.to, time: hhmmss(m.t), unread: m.unread,
+        subjectColor: m.unread ? 'var(--color-text)' : 'var(--color-neutral-400)',
+        onOpen: () => { this.setState(st => ({emails: st.emails.map(x => x.id === m.id ? {...x, unread:false} : x)})); this.say('opened in mail preview'); },
+        onDismiss: (e) => { if (e && e.stopPropagation) e.stopPropagation(); this.setState(st => ({emails: st.emails.filter(x => x.id !== m.id)})); }
+      })),
+      noEmails: emails.length === 0,
+      jobs, jobFilters, filter: s.filter,
+      onFilter: e => this.setState({filter: e.target.value}),
+      noJobs: jobs.length === 0,
+      totalJobsLabel: jobsAll.length ? jobsAll.length + ' kinds held · ' + totalRuns + ' runs' : 'history cleared',
+      footNote: s.note || footByTab[s.tab],
+      clearAll: () => this.clearAll()
+    };
+  }
+}
+</script>
+</body>
+</html>
