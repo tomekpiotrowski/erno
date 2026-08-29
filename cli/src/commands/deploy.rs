@@ -28,11 +28,11 @@ const TEMPLATE_ADMIN_ENTRYPOINT: &str = include_str!("../../templates/deploy/adm
 // The monitoring deployment: its own release, its own cluster.
 const TEMPLATE_MON_DOCKERFILE: &str = include_str!("../../templates/deploy/monitoring/Dockerfile");
 const TEMPLATE_MON_UI_DOCKERFILE: &str =
-    include_str!("../../templates/deploy/monitoring/ui/Dockerfile");
+    include_str!("../../templates/deploy/monitoring/console/Dockerfile");
 const TEMPLATE_MON_UI_NGINX: &str =
-    include_str!("../../templates/deploy/monitoring/ui/docker/nginx.conf");
+    include_str!("../../templates/deploy/monitoring/console/docker/nginx.conf");
 const TEMPLATE_MON_UI_ENTRYPOINT: &str =
-    include_str!("../../templates/deploy/monitoring/ui/docker/entrypoint.sh");
+    include_str!("../../templates/deploy/monitoring/console/docker/entrypoint.sh");
 const TEMPLATE_MON_SECRETS_EXAMPLE: &str =
     include_str!("../../templates/deploy/monitoring/secrets.example.yaml");
 const TEMPLATE_MON_CONFIG: &str = include_str!("../../templates/deploy/monitoring/config.toml");
