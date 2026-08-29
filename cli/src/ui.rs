@@ -197,6 +197,7 @@ pub mod icon {
     pub const BUILD: &str = "🔨";
     pub const LINT: &str = "🧹";
     pub const TEST: &str = "🧪";
+    pub const CLEAN: &str = "🧼";
     pub const UPGRADE: &str = "⏫";
     pub const DEPLOY: &str = "🚢";
 
@@ -210,9 +211,9 @@ pub mod icon {
 
     /// Every constant above, for the width test and nothing else.
     #[cfg(test)]
-    pub const ALL: [&str; 20] = [
+    pub const ALL: [&str; 21] = [
         OK, WARN, FAIL, READY, STARTING, MIGRATING, DOCTOR, NEW, SETUP, DEV, BUILD, LINT, TEST,
-        UPGRADE, DEPLOY, PACKAGE, DATABASE, KEY, CLOUD, NOTE,
+        CLEAN, UPGRADE, DEPLOY, PACKAGE, DATABASE, KEY, CLOUD, NOTE,
     ];
 }
 

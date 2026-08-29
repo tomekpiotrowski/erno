@@ -67,6 +67,8 @@ enum Commands {
     Lint(commands::lint::LintArgs),
     /// Run the project's test suites
     Test(commands::packages::SelectionArgs),
+    /// Reset local build artifacts and databases
+    Clean(commands::clean::CleanArgs),
     /// Update Erno-managed packages in this project
     Upgrade(commands::upgrade::UpgradeArgs),
     /// Set up and manage production deployment
@@ -178,6 +180,7 @@ async fn dispatch(command: Commands) -> ui::Cmd {
         Commands::Build(args) => commands::build::handle_build(args).await,
         Commands::Lint(args) => commands::lint::handle_lint(args).await,
         Commands::Test(args) => commands::test::handle_test(args).await,
+        Commands::Clean(args) => commands::clean::handle_clean(args).await,
         Commands::Upgrade(args) => commands::upgrade::handle_upgrade(args).await,
         Commands::Monitoring(args) => commands::monitoring::handle(args.command).await,
         Commands::Deploy(args) => match args.command {
