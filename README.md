@@ -100,6 +100,7 @@ Product routes go on that `router`. Syncable entities are `.with_sync::<E>()` on
 | `erno new <name>` | Scaffold a product repo |
 | `erno dev` | Run the API, app, www, and whatever else is present |
 | `erno test` / `build` / `lint` | Drive every package from `erno.toml` |
+| `erno clean` | Reset local build artifacts and databases |
 | `erno upgrade` | Update Erno-managed packages |
 | `erno deploy` | Docker + Kubernetes install (no Helm) |
 
