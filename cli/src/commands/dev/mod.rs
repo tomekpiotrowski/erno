@@ -24,6 +24,7 @@ use tokio::process::Command;
 
 use banner::spawn_readiness_watcher;
 use log::LogSink;
+pub(crate) use ports::parse_table_string;
 use process::{spawn_labeled, Supervisor};
 pub use project::resolve_project_root;
 

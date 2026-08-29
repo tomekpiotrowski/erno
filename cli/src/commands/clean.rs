@@ -1,9 +1,10 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
 use std::path::Path;
 
 use clap::Args;
 
-use crate::commands::dev::resolve_project_root;
+use crate::commands::dev::{parse_table_string, resolve_project_root};
 use crate::commands::packages::Package;
 use crate::ui;
 
@@ -19,20 +20,25 @@ const ARTIFACTS: &[&str] = &[
 
 const CONVENTIONAL_DIRS: &[&str] = &["api", "app", "www", "admin", "e2e"];
 
-/// Project-relative artifact directories that exist and are safe to delete.
-fn collect_dirs(root: &Path, packages: &[Package]) -> Vec<String> {
+/// Package directories from the manifest, plus the conventional scaffold dirs
+/// so `admin/` is still cleaned when `erno.toml` omitted it.
+fn package_bases(packages: &[Package]) -> BTreeSet<String> {
     let mut bases: BTreeSet<String> = CONVENTIONAL_DIRS.iter().map(|s| (*s).to_string()).collect();
     for package in packages {
         if !package.dir.is_empty() {
             bases.insert(package.dir.clone());
         }
     }
+    bases
+}
 
+/// Project-relative artifact directories that exist and are safe to delete.
+fn collect_dirs(root: &Path, packages: &[Package]) -> Vec<String> {
     let mut found = BTreeSet::new();
     if root.join(".erno").is_dir() {
         found.insert(".erno".to_string());
     }
-    for base in bases {
+    for base in package_bases(packages) {
         for artifact in ARTIFACTS {
             let rel = format!("{base}/{artifact}");
             if root.join(&rel).is_dir() {
@@ -41,6 +47,92 @@ fn collect_dirs(root: &Path, packages: &[Package]) -> Vec<String> {
         }
     }
     found.into_iter().collect()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PlannedDatabase {
+    name: String,
+    user: Option<String>,
+}
+
+fn is_postgres_ident(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+fn database_name(url: &str) -> Option<String> {
+    let after = url.rsplit('/').next()?;
+    let name = after.split('?').next()?;
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
+}
+
+fn database_user(url: &str) -> Option<String> {
+    let rest = url.split("://").nth(1)?;
+    let creds = rest.split_once('@')?.0;
+    let user = creds.split(':').next()?.trim();
+    if user.is_empty() {
+        None
+    } else {
+        Some(user.to_string())
+    }
+}
+
+fn drop_sql(name: &str) -> String {
+    format!("DROP DATABASE IF EXISTS {name} WITH (FORCE)")
+}
+
+fn create_sql(name: &str) -> String {
+    format!("CREATE DATABASE {name}")
+}
+
+fn grant_sql(_name: &str, user: &str) -> String {
+    format!("GRANT ALL ON SCHEMA public TO {user}")
+}
+
+fn collect_databases(root: &Path, packages: &[Package]) -> Result<Vec<PlannedDatabase>, String> {
+    let mut found: BTreeMap<String, PlannedDatabase> = BTreeMap::new();
+    for base in package_bases(packages) {
+        for file in ["development.toml", "test.toml"] {
+            let path = root.join(&base).join("config").join(file);
+            let Ok(raw) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let Some(url) = parse_table_string(&raw, "database", "url") else {
+                continue;
+            };
+            let Some(name) = database_name(&url) else {
+                continue;
+            };
+            if !is_postgres_ident(&name) {
+                return Err(format!(
+                    "database name `{name}` in {} is not a Postgres identifier",
+                    path.display()
+                ));
+            }
+            let user = match database_user(&url) {
+                Some(user) if is_postgres_ident(&user) => Some(user),
+                Some(user) => {
+                    return Err(format!(
+                        "database user `{user}` in {} is not a Postgres identifier",
+                        path.display()
+                    ));
+                }
+                None => None,
+            };
+            found
+                .entry(name.clone())
+                .or_insert(PlannedDatabase { name, user });
+        }
+    }
+    Ok(found.into_values().collect())
 }
 
 #[derive(Args, Debug, Default)]
@@ -167,10 +259,7 @@ mod tests {
         touch_dir(&root, "vision/target");
         let mut vision = pkg("vision", "vision");
         vision.default = false;
-        assert_eq!(
-            collect_dirs(&root, &[vision]),
-            vec!["vision/target"]
-        );
+        assert_eq!(collect_dirs(&root, &[vision]), vec!["vision/target"]);
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -197,5 +286,93 @@ mod tests {
             vec![".erno", "api/target", "www/dist"]
         );
         let _ = fs::remove_dir_all(&root);
+    }
+
+    fn write_db_url(root: &Path, rel: &str, url: &str) {
+        touch_file(root, rel, &format!("[database]\nurl = \"{url}\"\n"));
+    }
+
+    #[test]
+    fn reads_database_urls_from_development_and_test_config() {
+        let root = temp("db-urls");
+        write_db_url(
+            &root,
+            "api/config/development.toml",
+            "postgres://app:secret@localhost/app_development",
+        );
+        write_db_url(
+            &root,
+            "api/config/test.toml",
+            "postgres://app:secret@localhost/app_test",
+        );
+        let dbs = collect_databases(&root, &[pkg("api", "api")]).unwrap();
+        let names: Vec<_> = dbs.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(names, vec!["app_development", "app_test"]);
+        assert_eq!(dbs[0].user.as_deref(), Some("app"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn deduplicates_the_same_database_name() {
+        let root = temp("db-dedup");
+        write_db_url(
+            &root,
+            "api/config/development.toml",
+            "postgres://app:secret@localhost/app_dev",
+        );
+        write_db_url(
+            &root,
+            "api/config/test.toml",
+            "postgres://app:secret@localhost/app_dev",
+        );
+        let dbs = collect_databases(&root, &[pkg("api", "api")]).unwrap();
+        assert_eq!(dbs.len(), 1);
+        assert_eq!(dbs[0].name, "app_dev");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn parses_role_from_database_url() {
+        assert_eq!(
+            database_user("postgres://cubeast_erno:secret@localhost/cubeast_erno_test").as_deref(),
+            Some("cubeast_erno")
+        );
+        assert_eq!(
+            database_name("postgres://cubeast_erno:secret@localhost/cubeast_erno_test").as_deref(),
+            Some("cubeast_erno_test")
+        );
+    }
+
+    #[test]
+    fn rejects_unsafe_database_identifiers() {
+        for name in ["foo-bar", "", "erno;drop", "has space"] {
+            assert!(!is_postgres_ident(name), "{name} should be rejected");
+        }
+        assert!(is_postgres_ident("erno_dev"));
+        assert!(is_postgres_ident("_tmp"));
+        assert!(is_postgres_ident("A1"));
+
+        let root = temp("db-bad");
+        write_db_url(
+            &root,
+            "api/config/development.toml",
+            "postgres://app:secret@localhost/foo-bar",
+        );
+        let err = collect_databases(&root, &[pkg("api", "api")]).unwrap_err();
+        assert!(err.contains("foo-bar"), "{err}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn drop_and_create_sql_use_the_validated_name() {
+        assert_eq!(
+            drop_sql("erno_dev"),
+            "DROP DATABASE IF EXISTS erno_dev WITH (FORCE)"
+        );
+        assert_eq!(create_sql("erno_dev"), "CREATE DATABASE erno_dev");
+        assert_eq!(
+            grant_sql("erno_dev", "app"),
+            "GRANT ALL ON SCHEMA public TO app"
+        );
     }
 }
