@@ -26,6 +26,7 @@ cargo install erno-cli
 | [`erno build`](#build) | Build every package, in dependency order |
 | [`erno lint`](#lint) | Format-check, lint, and typecheck every package |
 | [`erno test`](#test) | Run each package's tests, then e2e |
+| [`erno clean`](#clean) | Reset local build artifacts and databases |
 | [`erno upgrade`](/cli/upgrade/) | Inventory and update Erno-managed packages |
 | [`erno deploy`](/cli/deploy/) | Scaffold Docker/deploy files and install releases |
 
@@ -280,6 +281,27 @@ erno test --api -- health
 ```
 
 Runs each selected package's `test` steps. Ensures the test database from `api/config/test.toml` exists first when any selected package sets `database = true` or is the e2e package. The e2e package is special-cased: the CLI allocates two free ports, boots the API against the test database, waits for `/liveness`, runs Playwright, and tears the API down. See [Testing](/api/testing/).
+
+---
+
+## clean
+
+```sh
+erno clean
+erno clean --dry-run
+erno clean --yes
+```
+
+A full local reset of the current project. Walks up from the current directory until `erno.toml` or `api/Cargo.toml` is found, prints what it would remove, then asks `[y/N]`. `--yes` skips the prompt. A non-interactive run without `--yes` refuses. `--dry-run` prints the plan and exits.
+
+Deletes:
+
+- `.erno/` (dev log, lock, Prometheus / Loki / Tempo data)
+- package caches: `target`, `node_modules`, `dist`, `.angular`, `.astro`, Playwright `test-results` / `playwright-report`
+
+Drops the local development and test databases named in each package's `config/development.toml` and `config/test.toml`, then recreates them empty so the next `erno dev` can migrate and re-seed. Does not drop the app's PostgreSQL role.
+
+Leaves source, checked-in config, `.env`, `config/local.toml`, deploy secrets, and `~/.erno/config.toml`. Refuses if `erno dev` is still running.
 
 ---
 
