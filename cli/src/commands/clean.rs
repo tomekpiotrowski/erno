@@ -1,11 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::IsTerminal;
 use std::path::Path;
+use std::process::Command;
 
 use clap::Args;
+use tokio_postgres::NoTls;
 
 use crate::commands::dev::{parse_table_string, resolve_project_root, running_pid};
-use crate::commands::packages::Package;
+use crate::commands::packages::{load_packages, Package};
+use crate::global_config::GlobalConfig;
 use crate::ui;
 
 const ARTIFACTS: &[&str] = &[
@@ -126,6 +130,123 @@ fn should_proceed(yes: bool, is_tty: bool) -> Result<Proceed, String> {
     Ok(Proceed::Ask)
 }
 
+fn confirm_question(dirs: usize, dbs: usize) -> &'static str {
+    match (dirs > 0, dbs > 0) {
+        (true, true) => "Remove these artifacts and drop the local databases?",
+        (true, false) => "Remove these artifacts?",
+        (false, true) => "Drop the local databases?",
+        (false, false) => "Continue?",
+    }
+}
+
+fn count_label(n: usize, one: &str, many: &str) -> String {
+    if n == 1 {
+        format!("1 {one}")
+    } else {
+        format!("{n} {many}")
+    }
+}
+
+fn applied_summary(dirs: usize, dbs: usize) -> String {
+    match (dirs, dbs) {
+        (0, n) => format!("reset {}", count_label(n, "database", "databases")),
+        (n, 0) => format!("removed {}", count_label(n, "artifact", "artifacts")),
+        (d, b) => format!(
+            "removed {}, reset {}",
+            count_label(d, "artifact", "artifacts"),
+            count_label(b, "database", "databases")
+        ),
+    }
+}
+
+fn postgres_ready() -> Result<(), String> {
+    match Command::new("pg_isready").status() {
+        Ok(status) if status.success() => Ok(()),
+        Ok(_) => Err("PostgreSQL is not running (`pg_isready` failed)\n\
+             Start it — e.g.: sudo service postgresql start"
+            .into()),
+        Err(_) => Err("PostgreSQL client tools not found (`pg_isready`)\n\
+             Install PostgreSQL: https://www.postgresql.org/download/"
+            .into()),
+    }
+}
+
+fn with_db(admin_url: &str, db: &str) -> String {
+    match admin_url.rfind('/') {
+        Some(pos) => format!("{}/{}", &admin_url[..pos], db),
+        None => format!("{admin_url}/{db}"),
+    }
+}
+
+fn db_err(error: &tokio_postgres::Error) -> String {
+    error
+        .as_db_error()
+        .map(|d| d.message().to_string())
+        .unwrap_or_else(|| error.to_string())
+}
+
+async fn connect(url: &str) -> Result<tokio_postgres::Client, String> {
+    let (client, connection) = tokio_postgres::connect(url, NoTls)
+        .await
+        .map_err(|e| e.to_string())?;
+    tokio::spawn(async move {
+        let _ = connection.await;
+    });
+    Ok(client)
+}
+
+async fn drop_database(client: &tokio_postgres::Client, name: &str) -> Result<(), String> {
+    if client.execute(&drop_sql(name), &[]).await.is_ok() {
+        return Ok(());
+    }
+    client
+        .execute(&format!("DROP DATABASE IF EXISTS {name}"), &[])
+        .await
+        .map(|_| ())
+        .map_err(|e| db_err(&e))
+}
+
+async fn grant_public(admin_url: &str, db: &str, user: &str) -> Result<(), String> {
+    let client = connect(&with_db(admin_url, db)).await?;
+    client
+        .execute(&grant_sql(db, user), &[])
+        .await
+        .map(|_| ())
+        .map_err(|e| db_err(&e))
+}
+
+async fn reset_databases(admin_url: &str, dbs: &[PlannedDatabase]) -> Result<(), String> {
+    let client = connect(admin_url)
+        .await
+        .map_err(|e| format!("could not connect as admin: {e}"))?;
+    let mut failed = false;
+    for db in dbs {
+        if let Err(e) = drop_database(&client, &db.name).await {
+            ui::warn(format!("could not drop {}: {e}", db.name));
+            failed = true;
+            continue;
+        }
+        match client.execute(&create_sql(&db.name), &[]).await {
+            Ok(_) => ui::ok(&db.name),
+            Err(e) => {
+                ui::warn(format!("could not create {}: {}", db.name, db_err(&e)));
+                failed = true;
+                continue;
+            }
+        }
+        if let Some(user) = &db.user {
+            if let Err(e) = grant_public(admin_url, &db.name, user).await {
+                ui::warn(format!("could not grant schema on {}: {e}", db.name));
+            }
+        }
+    }
+    if failed {
+        Err("could not reset every local database".into())
+    } else {
+        Ok(())
+    }
+}
+
 fn collect_databases(root: &Path, packages: &[Package]) -> Result<Vec<PlannedDatabase>, String> {
     let mut found: BTreeMap<String, PlannedDatabase> = BTreeMap::new();
     for base in package_bases(packages) {
@@ -174,12 +295,75 @@ pub struct CleanArgs {
     pub yes: bool,
 }
 
-pub async fn handle_clean(_args: CleanArgs) -> ui::Cmd {
+pub async fn handle_clean(args: CleanArgs) -> ui::Cmd {
     let root = resolve_project_root(None)?;
     if let Some(pid) = running_pid(&root) {
         return Err(format!("erno dev is already running (pid {pid}). Stop it first.").into());
     }
+
+    let packages = load_packages(&root)?;
+    let dirs = collect_dirs(&root, &packages);
+    let dbs = collect_databases(&root, &packages)?;
+
     ui::section(ui::icon::CLEAN, "Clean");
+    if dirs.is_empty() && dbs.is_empty() {
+        ui::finished(ui::icon::DONE, "already clean");
+        return Ok(());
+    }
+    ui::blank();
+    for dir in &dirs {
+        ui::info(dir);
+    }
+    for db in &dbs {
+        ui::info(&db.name);
+    }
+
+    if args.dry_run {
+        ui::finished(
+            ui::icon::DONE,
+            format!("dry run: {}", applied_summary(dirs.len(), dbs.len())),
+        );
+        return Ok(());
+    }
+
+    match should_proceed(args.yes, std::io::stdin().is_terminal())? {
+        Proceed::Yes => {}
+        Proceed::Ask => {
+            if !ui::confirm(confirm_question(dirs.len(), dbs.len()), false) {
+                ui::warn("cancelled");
+                return Ok(());
+            }
+        }
+    }
+
+    if !dbs.is_empty() {
+        postgres_ready()?;
+        let admin_url = GlobalConfig::load()
+            .map_err(|_| {
+                "local databases are configured but ~/.erno/config.toml was not found.\n\
+                 Run `erno setup`, then retry."
+                    .to_string()
+            })?
+            .postgres
+            .admin_url;
+        reset_databases(&admin_url, &dbs).await?;
+    }
+
+    let mut dir_failed = false;
+    for result in remove_dirs(&root, &dirs) {
+        match result {
+            Ok(rel) => ui::ok(rel),
+            Err(e) => {
+                ui::warn(e);
+                dir_failed = true;
+            }
+        }
+    }
+    if dir_failed {
+        return Err("could not remove every artifact".into());
+    }
+
+    ui::finished(ui::icon::DONE, applied_summary(dirs.len(), dbs.len()));
     Ok(())
 }
 
@@ -423,6 +607,24 @@ mod tests {
     fn a_non_tty_without_yes_refuses() {
         let err = should_proceed(false, false).unwrap_err();
         assert!(err.contains("--yes"), "{err}");
+    }
+
+    #[test]
+    fn confirm_question_names_what_will_be_removed() {
+        assert!(confirm_question(1, 1).contains("artifacts"));
+        assert!(confirm_question(1, 1).contains("databases"));
+        assert_eq!(confirm_question(2, 0), "Remove these artifacts?");
+        assert_eq!(confirm_question(0, 2), "Drop the local databases?");
+    }
+
+    #[test]
+    fn applied_summary_counts_artifacts_and_databases() {
+        assert_eq!(applied_summary(1, 0), "removed 1 artifact");
+        assert_eq!(
+            applied_summary(3, 2),
+            "removed 3 artifacts, reset 2 databases"
+        );
+        assert_eq!(applied_summary(0, 1), "reset 1 database");
     }
 
     #[test]
