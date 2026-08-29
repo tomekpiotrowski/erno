@@ -4,7 +4,7 @@ use std::path::Path;
 
 use clap::Args;
 
-use crate::commands::dev::{parse_table_string, resolve_project_root};
+use crate::commands::dev::{parse_table_string, resolve_project_root, running_pid};
 use crate::commands::packages::Package;
 use crate::ui;
 
@@ -97,6 +97,22 @@ fn grant_sql(_name: &str, user: &str) -> String {
     format!("GRANT ALL ON SCHEMA public TO {user}")
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Proceed {
+    Yes,
+    Ask,
+}
+
+fn should_proceed(yes: bool, is_tty: bool) -> Result<Proceed, String> {
+    if yes {
+        return Ok(Proceed::Yes);
+    }
+    if !is_tty {
+        return Err("refusing to clean without --yes in a non-interactive terminal".into());
+    }
+    Ok(Proceed::Ask)
+}
+
 fn collect_databases(root: &Path, packages: &[Package]) -> Result<Vec<PlannedDatabase>, String> {
     let mut found: BTreeMap<String, PlannedDatabase> = BTreeMap::new();
     for base in package_bases(packages) {
@@ -146,7 +162,10 @@ pub struct CleanArgs {
 }
 
 pub async fn handle_clean(_args: CleanArgs) -> ui::Cmd {
-    let _root = resolve_project_root(None)?;
+    let root = resolve_project_root(None)?;
+    if let Some(pid) = running_pid(&root) {
+        return Err(format!("erno dev is already running (pid {pid}). Stop it first.").into());
+    }
     ui::section(ui::icon::CLEAN, "Clean");
     Ok(())
 }
@@ -374,5 +393,22 @@ mod tests {
             grant_sql("erno_dev", "app"),
             "GRANT ALL ON SCHEMA public TO app"
         );
+    }
+
+    #[test]
+    fn yes_flag_skips_the_prompt() {
+        assert_eq!(should_proceed(true, false).unwrap(), Proceed::Yes);
+        assert_eq!(should_proceed(true, true).unwrap(), Proceed::Yes);
+    }
+
+    #[test]
+    fn a_tty_without_yes_asks() {
+        assert_eq!(should_proceed(false, true).unwrap(), Proceed::Ask);
+    }
+
+    #[test]
+    fn a_non_tty_without_yes_refuses() {
+        let err = should_proceed(false, false).unwrap_err();
+        assert!(err.contains("--yes"), "{err}");
     }
 }

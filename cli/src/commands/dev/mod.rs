@@ -23,6 +23,7 @@ use clap::Args;
 use tokio::process::Command;
 
 use banner::spawn_readiness_watcher;
+pub(crate) use lock::running_pid;
 use log::LogSink;
 pub(crate) use ports::parse_table_string;
 use process::{spawn_labeled, Supervisor};

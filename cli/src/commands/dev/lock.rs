@@ -41,6 +41,16 @@ impl Drop for DevLock {
     }
 }
 
+/// Pid of a live `erno dev` for this project, if one holds `.erno/dev.lock`.
+pub fn running_pid(root: &Path) -> Option<u32> {
+    let pid = read_pid(&root.join(".erno").join("dev.lock"))?;
+    if pid_is_alive(pid) {
+        Some(pid)
+    } else {
+        None
+    }
+}
+
 pub fn read_pid(path: &Path) -> Option<u32> {
     let text = fs::read_to_string(path).ok()?;
     parse_pid(&text)
@@ -114,5 +124,43 @@ mod tests {
     fn current_process_is_alive() {
         assert!(pid_is_alive(std::process::id()));
         assert!(!pid_is_alive(0));
+    }
+
+    fn lock_tree(suffix: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "erno-lock-{}-{}-{suffix}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join(".erno")).unwrap();
+        dir
+    }
+
+    #[test]
+    fn running_pid_is_none_without_a_lock() {
+        let dir = lock_tree("missing");
+        assert_eq!(running_pid(&dir), None);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn running_pid_ignores_a_stale_lock() {
+        let dir = lock_tree("stale");
+        fs::write(dir.join(".erno/dev.lock"), "pid=999999\n").unwrap();
+        assert_eq!(running_pid(&dir), None);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn running_pid_reports_a_live_process() {
+        let dir = lock_tree("live");
+        let pid = std::process::id();
+        fs::write(dir.join(".erno/dev.lock"), format!("pid={pid}\n")).unwrap();
+        assert_eq!(running_pid(&dir), Some(pid));
+        let _ = fs::remove_dir_all(&dir);
     }
 }
