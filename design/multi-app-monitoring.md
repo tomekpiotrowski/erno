@@ -4,8 +4,44 @@
 |---|---|
 | **Author** | TBD |
 | **Date** | 2026-08-27 |
-| **Status** | Draft |
+| **Status** | Implemented, with four decisions overridden — see below |
 | **Audience** | Erno maintainers |
+
+:::caution[Read this as a record, not as documentation]
+Every PR in the plan at the end is merged. The reasoning here still holds and
+the rejected alternatives are still worth knowing, but four decisions were made
+differently once the code existed, so parts of this document describe a design
+that was not built. **The narrative docs under `docs/src/content/docs/monitoring/`
+are the current truth.**
+
+What changed, and why:
+
+1. **The collector moved to its own repository** (`erno-monitoring`), rather than
+   staying in this one as the Overview and Goals say. What the document called a
+   separate deployment was true of the process and of nothing else: the
+   collector's 10,700 lines lived in `api/src/error_reporting/collector/`, inside
+   the library every application links, and `monitoring/` was a 106-line shell
+   around them. Moving the code out first made the repository split a move rather
+   than an untangling.
+
+2. **A third crate holds the wire contract.** `erno-error-reporting-types` carries
+   `Source`, `Level`, `Frame`, `CapturedError`, the ingest headers and
+   `is_in_app` — what both halves must agree on. The document assumed one repo,
+   so it never needed one.
+
+3. **The collector is laid out as an ordinary Erno application** — collector in
+   `api/`, console in `app/` — so `erno dev` runs it with no special case. Key
+   Decision 9's flat layout and its `handle_dev` branch were only necessary while
+   the collector was a subdirectory of this repository.
+
+4. **`erno deploy --target` is gone.** Key Decision 8 and PR 7 assume a flag
+   choosing between an application and a monitoring tree, and a `production.images`
+   mechanism for a standalone ops repo. Neither survived the split: the collector
+   deploys from its own repository, which builds its own images, and the tree
+   already says which it is — only the collector's `api/config/*.toml` declares
+   `[collector]`. A flag that must agree with the repository you are standing in
+   is a way to deploy the wrong chart into the wrong cluster.
+:::
 
 ## Overview
 

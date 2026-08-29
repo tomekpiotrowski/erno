@@ -715,7 +715,7 @@ error_reporting:
     }
 
     /// Each target owns its whole repository now, so both read the same paths.
-    /// The old split existed to stop `deploy init --target monitoring` writing
+    /// The old split existed to stop a monitoring `deploy init` writing
     /// over an application's chart when the two shared a tree.
     #[test]
     fn both_targets_use_the_same_layout() {
