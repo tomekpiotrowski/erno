@@ -1,4 +1,4 @@
-use std::path::{absolute, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 /// Walk `start` and its parents looking for an Erno project (`erno.toml`, or an
 /// `api/Cargo.toml` for projects that have not declared a manifest).
@@ -33,16 +33,6 @@ pub fn resolve_project_root(explicit: Option<PathBuf>) -> Result<PathBuf, String
             start.display()
         )
     })
-}
-
-/// Make `path` absolute.
-///
-/// Child config flags are resolved against the child's current directory (this
-/// path), so a project-relative value would be joined twice.
-pub(crate) fn absolute_dir(path: &Path) -> PathBuf {
-    path.canonicalize()
-        .or_else(|_| absolute(path))
-        .unwrap_or_else(|e| panic!("cannot make {} absolute: {e}", path.display()))
 }
 
 #[cfg(test)]
@@ -101,22 +91,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(find_project_root(&nested).unwrap(), tmp.join("proj"));
-        let _ = fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn a_relative_project_name_becomes_an_absolute_dir() {
-        let path = absolute_dir(Path::new("teryon"));
-        assert_eq!(path, absolute(Path::new("teryon")).unwrap());
-        assert!(path.is_absolute(), "{}", path.display());
-        assert!(!path.ends_with("teryon/teryon"), "{}", path.display());
-    }
-
-    #[test]
-    fn absolute_dir_matches_canonicalize_when_the_path_exists() {
-        let tmp = temp_tree("abs");
-        fs::create_dir_all(&tmp).unwrap();
-        assert_eq!(absolute_dir(&tmp), tmp.canonicalize().unwrap());
         let _ = fs::remove_dir_all(&tmp);
     }
 }

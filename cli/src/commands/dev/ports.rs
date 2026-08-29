@@ -24,18 +24,20 @@ pub fn discover_urls(root: &Path, sel: &ServiceSelection) -> DevUrls {
         api: sel.api.then_some(api_url),
         app: sel.app.then_some(app_url),
         www: sel.www.then_some(www_url),
-        prometheus: None,
-        tempo: None,
-        loki: None,
-        // Filled in by `handle_dev` once it knows whether monitoring/ is
-        // present — but before the banner is pinned, since its height is fixed
-        // at that point.
+        // Filled in by `handle_dev`, but before the banner is pinned, since its
+        // height is fixed at that point.
         admin: None,
         extra: Vec::new(),
     }
 }
 
-pub fn ports_to_check(urls: &DevUrls) -> Vec<u16> {
+/// Every port `erno dev` is about to bind, including the extra ones a declared
+/// service names.
+///
+/// A service can listen on more than one — a trace store answers queries on the
+/// port in its `url` and receives on another — and one that came up without the
+/// second bound looks healthy and accepts nothing.
+pub fn ports_to_check(urls: &DevUrls, extras: &[super::selection::ExtraService]) -> Vec<u16> {
     let mut ports = Vec::new();
     if let Some(url) = &urls.api {
         ports.push(port_from_url(Some(url)).unwrap_or(3000));
@@ -46,18 +48,6 @@ pub fn ports_to_check(urls: &DevUrls) -> Vec<u16> {
     if let Some(url) = &urls.www {
         ports.push(port_from_url(Some(url)).unwrap_or(4321));
     }
-    if let Some(url) = &urls.prometheus {
-        ports.push(port_from_url(Some(url)).unwrap_or(9090));
-    }
-    if let Some(url) = &urls.tempo {
-        ports.push(port_from_url(Some(url)).unwrap_or(3200));
-        ports.push(super::tempo::OTLP_PORT);
-        ports.push(super::tempo::GRPC_PORT);
-    }
-    if let Some(url) = &urls.loki {
-        ports.push(port_from_url(Some(url)).unwrap_or(3100));
-        ports.push(super::loki::GRPC_PORT);
-    }
     if let Some(url) = &urls.admin {
         ports.push(port_from_url(Some(url)).unwrap_or(4300));
     }
@@ -65,6 +55,9 @@ pub fn ports_to_check(urls: &DevUrls) -> Vec<u16> {
         if let Some(port) = port_from_url(Some(url)) {
             ports.push(port);
         }
+    }
+    for extra in extras {
+        ports.extend(&extra.ports);
     }
     ports
 }
@@ -223,6 +216,32 @@ port = 3005
         );
     }
 
+    /// A service can listen on more than one port. One that came up without
+    /// its second bound looks healthy and accepts nothing.
+    #[test]
+    fn a_services_extra_ports_are_checked_too() {
+        let urls = DevUrls {
+            api: None,
+            app: None,
+            www: None,
+            admin: None,
+            extra: vec![("tempo".into(), "http://localhost:3200".into())],
+        };
+        let extras = [super::super::selection::ExtraService {
+            name: "tempo".into(),
+            dir: "telemetry/tempo".into(),
+            command: "tempo".into(),
+            args: vec![],
+            url: "http://localhost:3200".into(),
+            requires: Some("tempo".into()),
+            ports: vec![4318, 9095],
+        }];
+        let ports = ports_to_check(&urls, &extras);
+        assert!(ports.contains(&3200), "the url port");
+        assert!(ports.contains(&4318), "OTLP ingest");
+        assert!(ports.contains(&9095), "gRPC");
+    }
+
     #[test]
     fn extra_url_port_is_checked() {
         let sel = ServiceSelection {
@@ -235,46 +254,19 @@ port = 3005
             "vision".into(),
             "http://localhost:8765/tools/solve_studio/".into(),
         ));
-        assert!(ports_to_check(&urls).contains(&8765));
+        assert!(ports_to_check(&urls, &[]).contains(&8765));
     }
-
-    #[test]
-    fn tempo_and_loki_grpc_ports_are_checked() {
-        let mut urls = DevUrls {
-            api: None,
-            app: None,
-            www: None,
-            prometheus: None,
-            tempo: Some("http://localhost:3200".into()),
-            loki: Some("http://localhost:3100".into()),
-            admin: None,
-            extra: Vec::new(),
-        };
-        let ports = ports_to_check(&urls);
-        assert!(ports.contains(&3200));
-        assert!(ports.contains(&4318));
-        assert!(ports.contains(&9095));
-        assert!(ports.contains(&3100));
-        assert!(ports.contains(&9096));
-        urls.tempo = None;
-        urls.loki = None;
-        assert!(ports_to_check(&urls).is_empty());
-    }
-
     #[test]
     fn extra_url_without_a_port_is_skipped() {
         let mut urls = DevUrls {
             api: None,
             app: None,
             www: None,
-            prometheus: None,
-            tempo: None,
-            loki: None,
             admin: None,
             extra: vec![("local".into(), "http://localhost/tools/".into())],
         };
-        assert!(ports_to_check(&urls).is_empty());
+        assert!(ports_to_check(&urls, &[]).is_empty());
         urls.extra[0].1 = "http://localhost:8765/".into();
-        assert_eq!(ports_to_check(&urls), vec![8765]);
+        assert_eq!(ports_to_check(&urls, &[]), vec![8765]);
     }
 }

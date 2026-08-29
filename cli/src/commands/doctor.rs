@@ -88,10 +88,15 @@ async fn run_checks() -> Vec<CheckResult> {
         check_global_config(),
         check_postgres_admin().await,
         check_sea_orm_cli(),
-        check_prometheus(),
-        check_tempo(),
-        check_loki(),
     ];
+    // Prometheus, Tempo and Loki are the collector's backends, declared as its
+    // dev services. A product application needs none of them, so asking about
+    // them there would fail a doctor run over binaries nothing wants.
+    if crate::deploy::is_collector_tree() {
+        results.push(check_prometheus());
+        results.push(check_tempo());
+        results.push(check_loki());
+    }
     if deploy_dir_present() || std::path::Path::new("chart").is_dir() {
         results.push(check_kubectl());
         results.push(check_sops());
@@ -421,9 +426,8 @@ fn check_prometheus() -> CheckResult {
         None => CheckResult::fail(
             "prometheus",
             "not found",
-            "Install Prometheus for `erno dev`:\n\
-             https://prometheus.io/docs/prometheus/latest/installation/\n\
-             Or pass --no-prometheus to `erno dev`.",
+            "The collector's Prometheus. Install it:\n\
+             https://prometheus.io/docs/prometheus/latest/installation/",
         ),
         Some(v) => CheckResult::pass(
             "prometheus",
@@ -437,31 +441,89 @@ fn check_tempo() -> CheckResult {
         None => CheckResult::fail(
             "tempo",
             "not found",
-            "Install Tempo for `erno dev`:\n\
-             https://grafana.com/docs/tempo/latest/setup/\n\
-             Or pass --no-tempo to `erno dev`.",
+            "The collector's Tempo. Install it:\n\
+             https://grafana.com/docs/tempo/latest/setup/",
         ),
         Some(v) => CheckResult::pass("tempo", v.lines().next().unwrap_or(v.trim()).to_string()),
     }
 }
 
+/// What `loki` on PATH actually is.
+///
+/// Debian/Ubuntu ship an MCMC linkage-analysis binary also named `loki`. Its
+/// `-version` exits 0, so a plain success check calls it Grafana Loki and the
+/// collector's dev stack then restart-loops it with `-config.file`.
+#[derive(Debug, PartialEq, Eq)]
+enum LokiBinary {
+    Grafana { version: String },
+    Missing,
+    Other { summary: String },
+}
+
+fn probe_loki() -> LokiBinary {
+    classify_loki(loki_version_output().as_deref())
+}
+
+fn loki_version_output() -> Option<String> {
+    for arg in ["-version", "--version"] {
+        match std::process::Command::new("loki").arg(arg).output() {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+            Err(_) => continue,
+            Ok(out) => {
+                let text = format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&out.stdout),
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                if !text.trim().is_empty() {
+                    return Some(text);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn classify_loki(output: Option<&str>) -> LokiBinary {
+    match output {
+        None => LokiBinary::Missing,
+        Some(text) if is_grafana_loki(text) => LokiBinary::Grafana {
+            version: summarize_loki(text),
+        },
+        Some(text) => LokiBinary::Other {
+            summary: summarize_loki(text),
+        },
+    }
+}
+
+fn is_grafana_loki(text: &str) -> bool {
+    // Grafana dskit banner: "loki, version 3.4.2 (branch: HEAD, …)"
+    text.to_ascii_lowercase().contains("loki, version")
+}
+
+fn summarize_loki(text: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.contains("invalid option"))
+        .unwrap_or("unknown")
+        .to_string()
+}
+
 fn check_loki() -> CheckResult {
-    match super::dev::loki::probe() {
-        super::dev::loki::Binary::Grafana { version } => CheckResult::pass("loki", version),
-        super::dev::loki::Binary::Missing => CheckResult::fail(
+    match probe_loki() {
+        LokiBinary::Grafana { version } => CheckResult::pass("loki", version),
+        LokiBinary::Missing => CheckResult::fail(
             "loki",
             "not found",
-            "Install Grafana Loki for `erno dev`:\n\
-             https://grafana.com/docs/loki/latest/setup/install/\n\
-             Or pass --no-loki to `erno dev`.",
+            "The collector's Loki. Install it:\n\
+             https://grafana.com/docs/loki/latest/setup/install/",
         ),
-        super::dev::loki::Binary::Other { summary } => CheckResult::fail(
+        LokiBinary::Other { summary } => CheckResult::fail(
             "loki",
             format!("not Grafana Loki ({summary})"),
             "Debian/Ubuntu's `loki` package is MCMC linkage analysis, not Grafana Loki.\n\
-             Install Grafana Loki for `erno dev`:\n\
-             https://grafana.com/docs/loki/latest/setup/install/\n\
-             Or pass --no-loki to `erno dev`.",
+             Install Grafana Loki:\n\
+             https://grafana.com/docs/loki/latest/setup/install/",
         ),
     }
 }

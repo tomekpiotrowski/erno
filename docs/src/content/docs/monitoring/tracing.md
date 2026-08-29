@@ -46,12 +46,16 @@ exporter drops.
 
 ## Topology
 
-**Development.** `erno dev` starts Tempo next to Prometheus (`127.0.0.1:3200`
-query, `127.0.0.1:4318` OTLP/HTTP) and sets `APP_TRACING__OTEL__ENDPOINT` on
-the API (and the collector) so traces flow even when `[tracing.otel]` is
-empty in `development.toml`. Skip with `--no-tempo`. The config it writes is
-Tempo 3.0 (`live_store` / `backend_scheduler`); a 2.x binary that still
-expects `ingester` / `compactor` will not start.
+**Development.** Tempo is a component of the collector, declared in
+erno-monitoring's `erno.toml`, so `cd erno-monitoring && erno dev` starts it on
+`127.0.0.1:3200` (query) and `127.0.0.1:4318` (OTLP/HTTP) alongside the
+collector and console. A product application's `erno dev` starts nothing of the
+sort and exports nothing: `[tracing.otel]` is empty in a generated
+`development.toml`. Set `endpoint` there to send an app's dev traces to a Tempo
+you are running.
+
+The checked-in config is Tempo 3.0 (`live_store` / `backend_scheduler`); a 2.x
+binary that still expects `ingester` / `compactor` will not start.
 
 **Production.** Tempo 3.0 lives in the monitoring release (`grafana/tempo:3.0.3`,
 `live_store` / `backend_scheduler`, same shape as `erno dev`). Applications

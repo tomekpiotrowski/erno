@@ -13,7 +13,7 @@ mod render;
 
 pub use addons::{handle_setup, IngressProvider};
 pub use config::Layout;
-pub use project::{read_github_repo, read_project_name, validate_project_root};
+pub use project::{is_collector_tree, read_github_repo, read_project_name, validate_project_root};
 
 use apply::{
     apply_and_prune, deployment_names, diff_argv, get_deployments_argv, rollback_failed_apply, run,

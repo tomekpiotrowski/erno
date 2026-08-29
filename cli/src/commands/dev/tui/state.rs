@@ -4,9 +4,6 @@ use std::time::Instant;
 use super::super::banner::{listed_services, state_named, BannerSnapshot, DevUrls, ServiceState};
 use super::super::log::{classify_wire_line, is_error_line, LogLine, WireKind};
 use super::devapi::{DevJob, MigrationStatus, MockEmail};
-use super::loki::LokiLine;
-use super::prom::PromSnapshot;
-use super::tempo::{Span, TraceHit};
 
 #[derive(Clone, Debug)]
 pub struct ServiceRow {
@@ -37,16 +34,10 @@ pub struct TuiState {
     pub quit: bool,
     pub toast: String,
     pub lens: LensMode,
-    pub traces: Vec<TraceHit>,
-    pub selected_trace: Option<String>,
-    pub spans: Vec<Span>,
-    pub loki_lines: Vec<LokiLine>,
-    pub prom: PromSnapshot,
     pub emails: Vec<MockEmail>,
     pub jobs: Vec<DevJob>,
     pub migrations: MigrationStatus,
     pub wide_wire: bool,
-    pub tempo_query: String,
     /// Request / reload / error marks keyed by service, taken from child logs.
     pub wire_ticks: HashMap<String, Vec<WireTick>>,
     /// Last log `seq` ingested into `wire_ticks`. `None` until the first
@@ -67,7 +58,6 @@ pub struct WireTick {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LensMode {
     Service,
-    Trace,
     Mail,
     Jobs,
 }
@@ -103,16 +93,10 @@ impl TuiState {
             quit: false,
             toast: String::new(),
             lens: LensMode::Service,
-            traces: Vec::new(),
-            selected_trace: None,
-            spans: Vec::new(),
-            loki_lines: Vec::new(),
-            prom: PromSnapshot::default(),
             emails: Vec::new(),
             jobs: Vec::new(),
             migrations: MigrationStatus::default(),
             wide_wire: false,
-            tempo_query: "{}".into(),
             wire_ticks: HashMap::new(),
             log_cursor: None,
             force_redraw: false,
@@ -198,7 +182,7 @@ impl TuiState {
     }
 
     pub fn log_row_count(&self) -> usize {
-        self.visible_traces().len() + self.visible_logs().len()
+        self.visible_logs().len()
     }
 
     pub fn max_log_offset(&self) -> usize {
@@ -244,27 +228,9 @@ impl TuiState {
         out
     }
 
-    pub fn visible_traces(&self) -> Vec<&TraceHit> {
-        self.traces
-            .iter()
-            .filter(|hit| match self.focus.and_then(|i| self.services.get(i)) {
-                Some(svc) => trace_belongs_to(&hit.service, &svc.name),
-                None => true,
-            })
-            .collect()
-    }
-
     pub fn elapsed(&self) -> String {
         fmt_elapsed(self.boot.elapsed().as_secs())
     }
-}
-
-/// Tempo labels the API by its OTEL resource (`erno` by default), not the TUI row `api`.
-pub fn trace_belongs_to(hit_service: &str, svc_name: &str) -> bool {
-    if hit_service.eq_ignore_ascii_case(svc_name) {
-        return true;
-    }
-    svc_name == "api" && hit_service.eq_ignore_ascii_case("erno")
 }
 
 pub fn service_meta(name: &str) -> (&'static str, &'static str) {
@@ -272,9 +238,6 @@ pub fn service_meta(name: &str) -> (&'static str, &'static str) {
         "api" => ("cargo run", "api/"),
         "app" => ("npm start", "app/"),
         "www" => ("npm run dev", "www/"),
-        "prom" => ("prometheus", ".erno/prometheus"),
-        "tempo" => ("tempo", ".erno/tempo"),
-        "loki" => ("loki", ".erno/loki"),
         "admin" => ("npm start", "admin/"),
         _ => ("", ""),
     }
@@ -324,9 +287,6 @@ mod tests {
         assert!(names.contains(&"api"));
         assert!(names.contains(&"app"));
         assert!(names.contains(&"www"));
-        assert!(names.contains(&"prom"));
-        assert!(names.contains(&"tempo"));
-        assert!(names.contains(&"loki"));
         assert_eq!(state.services[0].num, 1);
         assert!(state.focus.is_none());
         assert_eq!(state.target_service().unwrap().name, names[0]);
@@ -339,54 +299,6 @@ mod tests {
         assert_eq!(fmt_elapsed(65), "1m05s");
         assert_eq!(fmt_elapsed(3852), "1h04m");
     }
-
-    fn hit(service: &str, name: &str) -> TraceHit {
-        TraceHit {
-            trace_id: name.into(),
-            name: name.into(),
-            service: service.into(),
-            duration_ms: 1.0,
-            start_unix_nano: String::new(),
-        }
-    }
-
-    #[test]
-    fn traces_for_api_include_the_erno_otel_name() {
-        assert!(trace_belongs_to("erno", "api"));
-        assert!(trace_belongs_to("api", "api"));
-        assert!(!trace_belongs_to("erno", "app"));
-        assert!(trace_belongs_to("app", "app"));
-    }
-
-    #[test]
-    fn focused_service_hides_other_traces_and_logs() {
-        let urls = DevUrls::defaults(true, true, true);
-        let mut state = TuiState::new("teryon", &urls);
-        let app = state
-            .services
-            .iter()
-            .position(|s| s.name == "app")
-            .expect("app");
-        state.focus = Some(app);
-        state.logs = vec![
-            LogLine::new("api", "api-only"),
-            LogLine::new("app", "app-only"),
-        ];
-        state.traces = vec![hit("erno", "GET /x"), hit("app", "HMR")];
-        let logs: Vec<&str> = state
-            .visible_logs()
-            .iter()
-            .map(|l| l.line.as_str())
-            .collect();
-        let traces: Vec<&str> = state
-            .visible_traces()
-            .iter()
-            .map(|t| t.name.as_str())
-            .collect();
-        assert_eq!(logs, ["app-only"]);
-        assert_eq!(traces, ["HMR"]);
-    }
-
     #[test]
     fn visible_log_text_matches_the_file_log_and_strips_ansi() {
         let urls = DevUrls::defaults(true, true, true);

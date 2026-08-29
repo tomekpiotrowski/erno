@@ -48,7 +48,7 @@ To point the new project at this checkout instead of git (and copy `admin/` in):
 erno new my_app --erno-path /path/to/erno
 ```
 
-`erno dev` then also serves the operator console at http://localhost:4300 (password `admin`). Prometheus is required when the API is started; pass `--no-prometheus` to skip it.
+`erno dev` then also serves the operator console at http://localhost:4300 (password `admin`). Telemetry backends are the collector's, and live in the erno-monitoring repository.
 
 Docs: [getting started](docs/src/content/docs/getting-started.md) and the [CLI overview](docs/src/content/docs/cli/index.md). To read them locally, `cd docs && npm install && npm run dev`.
 

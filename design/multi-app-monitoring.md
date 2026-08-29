@@ -4,12 +4,12 @@
 |---|---|
 | **Author** | TBD |
 | **Date** | 2026-08-27 |
-| **Status** | Implemented, with four decisions overridden — see below |
+| **Status** | Implemented, with five decisions overridden — see below |
 | **Audience** | Erno maintainers |
 
 :::caution[Read this as a record, not as documentation]
 Every PR in the plan at the end is merged. The reasoning here still holds and
-the rejected alternatives are still worth knowing, but four decisions were made
+the rejected alternatives are still worth knowing, but five decisions were made
 differently once the code existed, so parts of this document describe a design
 that was not built. **The narrative docs under `docs/src/content/docs/monitoring/`
 are the current truth.**
@@ -41,6 +41,17 @@ What changed, and why:
    already says which it is — only the collector's `api/config/*.toml` declares
    `[collector]`. A flag that must agree with the repository you are standing in
    is a way to deploy the wrong chart into the wrong cluster.
+
+5. **`erno dev` no longer starts Prometheus, Tempo or Loki.** Key Decision 9 kept
+   them local for every application "so the TUI WIRE/logs views keep working".
+   Once the collector was a separate repository, requiring three telemetry
+   binaries on every product developer's `PATH` — a missing one being a hard
+   error — bought a dashboard for a collector that was not there. They are now
+   declared as components of the monitoring application in erno-monitoring's
+   `erno.toml`, which is what a backend of the collector is. The TUI panes they
+   fed (the trace waterfall, the p95/error header, the route table) were removed
+   rather than left rendering zeros; the monitoring console presents the same
+   data against the same stores.
 :::
 
 ## Overview

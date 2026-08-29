@@ -2,10 +2,7 @@ mod devapi;
 mod draw;
 mod editor;
 mod keys;
-mod loki;
-mod prom;
 mod state;
-mod tempo;
 
 use std::collections::HashMap;
 use std::io::{self, IsTerminal};
@@ -112,10 +109,6 @@ fn restore_terminal() {
 
 #[derive(Clone)]
 pub struct TuiOpts {
-    pub prometheus: Option<String>,
-    pub prometheus_token: Option<String>,
-    pub tempo: Option<String>,
-    pub loki: Option<String>,
     pub api: Option<String>,
 }
 
@@ -143,7 +136,6 @@ pub async fn run(
         .map_err(|e| e.to_string())?;
     let mut state = TuiState::new(project, urls);
     let (packet_tx, mut packet_rx) = tokio::sync::mpsc::channel(1);
-    let (want_tx, want_rx) = tokio::sync::watch::channel(FetchWant::from_state(&state));
     tokio::spawn(fetch_loop(
         FetchCtl {
             urls: urls.clone(),
@@ -152,7 +144,6 @@ pub async fn run(
             fetch: fetch_client,
         },
         packet_tx,
-        want_rx,
     ));
 
     let _guard = TuiGuard::enter()?;
@@ -177,15 +168,6 @@ pub async fn run(
         if state.quit {
             break;
         }
-        let _ = want_tx.send_if_modified(|cur| {
-            let next = FetchWant::from_state(&state);
-            if *cur == next {
-                false
-            } else {
-                *cur = next;
-                true
-            }
-        });
         while let Ok(packet) = packet_rx.try_recv() {
             apply_packet(&mut state, urls, packet);
         }
@@ -204,21 +186,6 @@ pub async fn run(
     Ok(())
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct FetchWant {
-    tempo_query: String,
-    selected_trace: Option<String>,
-}
-
-impl FetchWant {
-    fn from_state(state: &TuiState) -> Self {
-        Self {
-            tempo_query: state.tempo_query.clone(),
-            selected_trace: state.selected_trace.clone(),
-        }
-    }
-}
-
 struct FetchCtl {
     urls: DevUrls,
     opts: TuiOpts,
@@ -228,35 +195,17 @@ struct FetchCtl {
 
 struct FetchPacket {
     snap: banner::BannerSnapshot,
-    prom: Option<prom::PromSnapshot>,
-    traces: Option<Vec<tempo::TraceHit>>,
-    spans: Option<Vec<tempo::Span>>,
-    loki: Option<Vec<loki::LokiLine>>,
     emails: Option<Vec<devapi::MockEmail>>,
     jobs: Option<Vec<devapi::DevJob>>,
     migrations: Option<devapi::MigrationStatus>,
 }
 
 struct FetchClocks {
-    prom: Instant,
-    tempo: Instant,
     dev: Instant,
 }
 
 fn apply_packet(state: &mut TuiState, urls: &DevUrls, packet: FetchPacket) {
     state.apply_snapshot(urls, &packet.snap);
-    if let Some(prom) = packet.prom {
-        state.prom = prom;
-    }
-    if let Some(traces) = packet.traces {
-        state.traces = traces;
-    }
-    if let Some(spans) = packet.spans {
-        state.spans = spans;
-    }
-    if let Some(loki) = packet.loki {
-        state.loki_lines = loki;
-    }
     if let Some(emails) = packet.emails {
         state.emails = emails;
     }
@@ -281,74 +230,19 @@ async fn tick_local(
     }
 }
 
-async fn fetch_loop(
-    ctl: FetchCtl,
-    tx: tokio::sync::mpsc::Sender<FetchPacket>,
-    mut want_rx: tokio::sync::watch::Receiver<FetchWant>,
-) {
+async fn fetch_loop(ctl: FetchCtl, tx: tokio::sync::mpsc::Sender<FetchPacket>) {
     let aged = Instant::now()
         .checked_sub(Duration::from_secs(10))
         .unwrap_or_else(Instant::now);
-    let mut clocks = FetchClocks {
-        prom: aged,
-        tempo: aged,
-        dev: aged,
-    };
-    let mut prev_prom = prom::PromSnapshot::default();
+    let mut clocks = FetchClocks { dev: aged };
     loop {
-        let want = want_rx.borrow().clone();
         let snap = banner::probe_all(&ctl.probe, &ctl.urls).await;
         let mut packet = FetchPacket {
             snap,
-            prom: None,
-            traces: None,
-            spans: None,
-            loki: None,
             emails: None,
             jobs: None,
             migrations: None,
         };
-        if clocks.prom.elapsed() > Duration::from_secs(2) {
-            if let Some(base) = &ctl.opts.prometheus {
-                prev_prom = prom::fetch(
-                    &ctl.fetch,
-                    base,
-                    ctl.opts.prometheus_token.as_deref(),
-                    &prev_prom,
-                )
-                .await;
-                packet.prom = Some(prev_prom.clone());
-            }
-            clocks.prom = Instant::now();
-        }
-        if clocks.tempo.elapsed() > Duration::from_secs(1) {
-            if let Some(base) = &ctl.opts.tempo {
-                let selected = want.selected_trace.clone();
-                let loki_base = ctl.opts.loki.clone();
-                let (traces, spans, loki_lines) = tokio::join!(
-                    tempo::search(&ctl.fetch, base, &want.tempo_query, 60, 40),
-                    async {
-                        match &selected {
-                            Some(id) => tempo::get_trace(&ctl.fetch, base, id).await,
-                            None => Vec::new(),
-                        }
-                    },
-                    async {
-                        match (&selected, &loki_base) {
-                            (Some(id), Some(loki_url)) => {
-                                loki::range(&ctl.fetch, loki_url, &loki::build_logql(id), 3600)
-                                    .await
-                            }
-                            _ => Vec::new(),
-                        }
-                    },
-                );
-                packet.traces = Some(traces);
-                packet.spans = Some(spans);
-                packet.loki = Some(loki_lines);
-            }
-            clocks.tempo = Instant::now();
-        }
         if clocks.dev.elapsed() > Duration::from_secs(2) {
             if let Some(api) = &ctl.opts.api {
                 let (emails, jobs, migrations) = tokio::join!(
@@ -367,14 +261,7 @@ async fn fetch_loop(
             Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {}
             Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => break,
         }
-        tokio::select! {
-            _ = tokio::time::sleep(Duration::from_millis(200)) => {}
-            changed = want_rx.changed() => {
-                if changed.is_err() {
-                    break;
-                }
-            }
-        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
     }
 }
 
@@ -410,35 +297,16 @@ async fn handle_action(
                 let _ = open::open_browser(&url);
             }
         }
-        Action::Enter => {
-            if state.lens == LensMode::Jobs {
-                if let (Some(api), Some(j)) = (
-                    opts.api.as_deref(),
-                    state.jobs.iter().find(|j| j.status == "failed"),
-                ) {
-                    let id = j.id.clone();
-                    devapi::retry_job(client, api, &id).await;
-                    state.say(format!("retry {id}"));
-                }
-                return;
-            }
-            let traces = state.visible_traces();
-            if let Some(id) = traces.first().map(|t| t.trace_id.clone()) {
-                let idx = state.log_offset.min(traces.len().saturating_sub(1));
-                let id = traces.get(idx).map(|t| t.trace_id.clone()).unwrap_or(id);
-                state.selected_trace = Some(id);
-                state.lens = LensMode::Trace;
-            }
-        }
-        Action::Slowest => {
-            if let Some(hit) = state
-                .traces
-                .iter()
-                .max_by(|a, b| a.duration_ms.total_cmp(&b.duration_ms))
-            {
-                state.selected_trace = Some(hit.trace_id.clone());
-                state.lens = LensMode::Trace;
-                state.say(format!("slowest · {:.0}ms", hit.duration_ms));
+        // Retries the first failed job, from the jobs lens. Nothing else binds
+        // Enter now that traces are gone.
+        Action::Enter if state.lens == LensMode::Jobs => {
+            if let (Some(api), Some(j)) = (
+                opts.api.as_deref(),
+                state.jobs.iter().find(|j| j.status == "failed"),
+            ) {
+                let id = j.id.clone();
+                devapi::retry_job(client, api, &id).await;
+                state.say(format!("retry {id}"));
             }
         }
         Action::Editor => {
@@ -482,8 +350,25 @@ async fn handle_action(
     }
 }
 
+/// A `file:line` to open, taken from a panic in the visible log.
+///
+/// Read from the child output the TUI already has rather than from a log store:
+/// `erno dev` no longer runs one, and a panic is on stdout regardless.
 fn editor_target(state: &TuiState) -> Option<(String, u32)> {
-    loki::panic_frames(&state.loki_lines).into_iter().next()
+    state
+        .visible_logs()
+        .iter()
+        .find_map(|l| panic_site(&l.line))
+}
+
+/// `…/src/foo.rs:42:9` out of a panic line.
+fn panic_site(line: &str) -> Option<(String, u32)> {
+    let at = line.find("panicked at ")? + "panicked at ".len();
+    let rest = line[at..].trim();
+    let mut parts = rest.split(':');
+    let file = parts.next()?.trim().to_string();
+    let number = parts.next()?.trim().parse().ok()?;
+    (!file.is_empty()).then_some((file, number))
 }
 
 fn copy_visible_log(state: &mut TuiState) {

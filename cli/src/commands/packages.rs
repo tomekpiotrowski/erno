@@ -121,6 +121,19 @@ pub struct DevService {
     #[serde(default)]
     pub args: Vec<String>,
     pub url: String,
+    /// A binary that must be on `PATH` before this service is started.
+    ///
+    /// Without it a missing or misnamed binary is a restart loop with the same
+    /// spawn error scrolling past, rather than one line naming what to install.
+    #[serde(default)]
+    pub requires: Option<String>,
+    /// Ports to check are free, beyond the one in `url`.
+    ///
+    /// For a service that listens on more than one: Tempo answers queries on
+    /// its `url` but receives OTLP on another port, and a Tempo that came up
+    /// without that port bound looks healthy and accepts nothing.
+    #[serde(default)]
+    pub ports: Vec<u16>,
     /// `false` means opt in with `--all` (naming the package is not enough).
     #[serde(default = "default_true")]
     pub default: bool,

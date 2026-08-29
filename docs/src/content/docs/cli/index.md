@@ -22,7 +22,7 @@ cargo install erno-cli
 | [`erno setup`](#setup) | Configure `~/.erno/config.toml` (PostgreSQL admin credentials) |
 | [`erno doctor`](#doctor) | Verify that your environment is ready to develop Erno apps |
 | [`erno new <name>`](#new) | Scaffold a new full-stack Erno project |
-| [`erno dev`](#dev) | Start the API, app, www, Prometheus, and admin SPA |
+| [`erno dev`](#dev) | Start the API, app, www, and admin SPA |
 | [`erno build`](#build) | Build every package, in dependency order |
 | [`erno lint`](#lint) | Format-check, lint, and typecheck every package |
 | [`erno test`](#test) | Run each package's tests, then e2e |
@@ -98,16 +98,16 @@ erno dev --all
 
 Starts the project’s dev servers (`api/` + `app/`, plus `www/` when present). Walks up from the current directory looking for `api/Cargo.toml`, so you can run it from `api/`, `app/`, or any subdirectory. Child tools are told to keep colour even though their stdout is piped — and told to drop it when you pass `--no-color`.
 
-On an interactive colour TTY, `erno dev` opens a dashboard instead of the pinned banner. It queries Prometheus, Tempo and Loki (the same stores as the monitoring console) plus `/dev/emails`, `/dev/jobs` and `/dev/migrations`. `--no-ui`, `--verbose`, `--quiet`, `--no-color`, `ERNO_STICKY=0`, a pipe, and terminals smaller than 80×24 keep the banner. `q`, Esc, and Ctrl+C quit and stop the children. A hard kill (`kill -9`) can leave the terminal in the alternate screen; `reset` recovers.
+On an interactive colour TTY, `erno dev` opens a dashboard instead of the pinned banner. It shows child output, the WIRE pane built from it, and `/dev/emails`, `/dev/jobs` and `/dev/migrations` from the API. Traces, metrics and stored logs belong to the [monitoring console](/monitoring/), which reads them from the collector's own stores. `--no-ui`, `--verbose`, `--quiet`, `--no-color`, `ERNO_STICKY=0`, a pipe, and terminals smaller than 80×24 keep the banner. `q`, Esc, and Ctrl+C quit and stop the children. A hard kill (`kill -9`) can leave the terminal in the alternate screen; `reset` recovers.
 
 | Key | Action |
 |-----|--------|
 | `1–9` / `0` | Focus a service / all |
 | `↑↓` | Scroll the log (pauses follow) |
 | `c` | Copy the visible log to the clipboard |
-| `⏎` | Open the selected Tempo trace in the lens |
+| `⏎` | Retry the first failed job, in the jobs lens |
 | `r` / `o` | Restart / open the focused service URL |
-| `s` / `f` | Slowest traces / failures only |
+| `f` | Failures only |
 | `m` / `M` | Apply / revert one migration |
 | `e` | Open `$EDITOR` at a panic `file:line` |
 | `E` / `J` / `Tab` | Mail / jobs / cycle lens |
@@ -149,7 +149,6 @@ erno dev --android --target emulator-5554
 | API | `GET /readiness` (`/liveness` while migrating) | `[server].port` / `api_url` in `api/config/development.toml` |
 | Product app | HTTP | `app_url` or `angular.json` serve port (4200) |
 | Marketing | HTTP | `--port` in `www/package.json` `dev` script (4321) |
-| Prometheus | `GET /-/ready` | `http://localhost:9090` |
 | Admin SPA | HTTP | `http://localhost:4300` (password `admin`) |
 | Extra `[[package.dev]]` | HTTP on the declared `url` | From `erno.toml` |
 
@@ -160,15 +159,16 @@ A second `erno dev` in the same project is rejected via `.erno/dev.lock` (stale 
   🌐 www    http://localhost:4321  ✅ ready
   📱 app    http://localhost:4200  ⏳ starting
   🦀 api    http://localhost:3000  🔄 migrating
-  📊 prom   http://localhost:9090  ✅ ready
   🧰 admin  http://localhost:4300  ✅ ready      password: admin
 ```
 
 Child output is filtered down to what the banner cannot tell you: errors and anything waiting on an answer. Startup and progress chatter goes to `.erno/dev.log`, and `--verbose` streams the raw multiplex.
 
-The API's own developer surfaces are not listed — they are always at `/dev/emails` and `/dev/jobs` on the API's origin. Newly captured mock emails are printed as `[mail] subject → to`. In an interactive terminal the banner is pinned to the bottom of the screen and updated in place as services come up, with log output scrolling above it; on Ctrl+C the last copy is left in the scrollback. When output is piped, under `--no-color`, `--quiet`, or `--verbose`, on a terminal too small to hold the banner, or with `ERNO_STICKY=0`, it is printed once instead and each later state change (`starting` → `ready`) is reported as a single row naming the service. If one process exits, it is restarted (with backoff) without taking the others down. The API is rebuilt automatically when `api/` source files change (no `cargo-watch` needed). Ctrl+C sends SIGTERM, then SIGKILL after two seconds. Prometheus is required when the API is started (`prometheus` must be on `PATH`). Pass `--no-prometheus` to skip — the banner then omits `prom`. A missing binary is an error, not a silent skip. Tempo (`tempo` on `PATH`, query :3200, OTLP :4318) and Grafana Loki (`loki` on `PATH`, :3100) follow the same rule; `--no-tempo` and `--no-loki` skip them independently. Debian/Ubuntu's `loki` package is not Grafana Loki — `erno doctor` will say so.
+The API's own developer surfaces are not listed — they are always at `/dev/emails` and `/dev/jobs` on the API's origin. Newly captured mock emails are printed as `[mail] subject → to`. In an interactive terminal the banner is pinned to the bottom of the screen and updated in place as services come up, with log output scrolling above it; on Ctrl+C the last copy is left in the scrollback. When output is piped, under `--no-color`, `--quiet`, or `--verbose`, on a terminal too small to hold the banner, or with `ERNO_STICKY=0`, it is printed once instead and each later state change (`starting` → `ready`) is reported as a single row naming the service. If one process exits, it is restarted (with backoff) without taking the others down. The API is rebuilt automatically when `api/` source files change (no `cargo-watch` needed). Ctrl+C sends SIGTERM, then SIGKILL after two seconds.
 
-Before spawning anything, `erno dev` checks that PostgreSQL is running (when the API is selected), that `prometheus` / `tempo` / `loki` are on `PATH` (unless the matching `--no-*` flag), and that each selected service’s port is free. If a port is held by a leftover `cargo`/`node`/`erno` process, it offers to kill it.
+`erno dev` starts no telemetry backends. Prometheus, Tempo and Loki are the collector's, and are declared as its components in the [erno-monitoring](/monitoring/) repository — an application should not carry the thing that watches it. A generated app exports nothing in development: `[tracing.otel]` is empty, so there is no exporter retrying a port nothing is listening on. Point it at a collector you are running if you want its traces there.
+
+Before spawning anything, `erno dev` checks that PostgreSQL is running (when the API is selected), that every `[[package.dev]]` service's `requires` binary is on `PATH`, and that each selected service’s port is free — including any extra `ports` a service declares beyond the one in its `url`. If a port is held by a leftover `cargo`/`node`/`erno` process, it offers to kill it.
 
 ---
 
@@ -296,7 +296,7 @@ A full local reset of the current project. Walks up from the current directory u
 
 Deletes:
 
-- `.erno/` (dev log, lock, Prometheus / Loki / Tempo data)
+- `.erno/` (dev log, run lock)
 - package caches: `target`, `node_modules`, `dist`, `.angular`, `.astro`, Playwright `test-results` / `playwright-report`
 
 Drops the local development and test databases named in each package's `config/development.toml` and `config/test.toml`, then recreates them empty so the next `erno dev` can migrate and re-seed. Does not drop the app's PostgreSQL role.

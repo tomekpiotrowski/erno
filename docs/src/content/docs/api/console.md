@@ -50,4 +50,6 @@ There is no `/stats` or `/performance` on the API. Charts query Prometheus.
 
 ## Local run
 
-`erno dev` starts the API, Prometheus (if on `PATH`), and the admin SPA when `admin/` is present (project copy or Erno path checkout). Open `http://localhost:4300` (admin / admin).
+`erno dev` starts the API and the admin SPA when `admin/` is present (project copy or Erno path checkout). Open `http://localhost:4300` (admin / admin).
+
+The charts need a Prometheus behind the `/prometheus` proxy, and `erno dev` does not start one — point the proxy at a Prometheus that scrapes the app if you want them locally. Every other page works without it.

@@ -65,9 +65,9 @@ target = ""
 scheme = "https"
 ```
 
-In development `erno dev` writes a config that scrapes the application it
-started. The collector is its own deployment and is scraped by the Prometheus in
-its own release.
+In development the collector's own Prometheus scrapes the collector, and nothing
+else: an application's `erno dev` starts no Prometheus, so nothing scrapes it
+locally. Point a running Prometheus at the app's `/metrics` if you want it.
 
 ## What is instrumented
 

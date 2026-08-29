@@ -1,7 +1,7 @@
 use std::io::IsTerminal;
 use std::process::Command;
 
-use super::loki::Binary;
+use super::selection::ExtraService;
 use crate::ui;
 
 const FRIENDLY_COMMANDS: &[&str] = &[
@@ -20,29 +20,50 @@ const FRIENDLY_COMMANDS: &[&str] = &[
     "loki",
 ];
 
-pub fn run_preflight(
-    check_db: bool,
-    check_prometheus: bool,
-    check_tempo: bool,
-    check_loki: bool,
-    ports: &[u16],
-) -> Result<(), String> {
+// The three telemetry binaries above: `erno dev` no longer starts them, but
+// they stay auto-killable when they squat a port it wants. A stale Tempo left
+// behind by the monitoring app is exactly the case worth offering to clear.
+
+pub fn run_preflight(check_db: bool, extras: &[ExtraService], ports: &[u16]) -> Result<(), String> {
     if check_db {
         check_postgres()?;
     }
-    if check_prometheus {
-        check_prometheus_binary()?;
-    }
-    if check_tempo {
-        check_tempo_binary()?;
-    }
-    if check_loki {
-        check_loki_binary()?;
+    for extra in extras {
+        if let Some(binary) = extra.requires.as_deref() {
+            check_required_binary(&extra.name, binary)?;
+        }
     }
     for port in ports {
         check_port(*port)?;
     }
     Ok(())
+}
+
+/// A binary a declared service says it needs.
+///
+/// Checked before anything is spawned, because the alternative is a supervisor
+/// restarting a command that will never exist, with the same spawn error
+/// scrolling past and nothing naming what to install.
+fn check_required_binary(service: &str, binary: &str) -> Result<(), String> {
+    if binary_on_path(binary) {
+        return Ok(());
+    }
+    Err(format!(
+        "{binary} not found on PATH, and `{service}` needs it\n\
+         Install it, or drop that [[package.dev]] from erno.toml."
+    ))
+}
+
+fn binary_on_path(binary: &str) -> bool {
+    Command::new(binary)
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+        || Command::new(binary)
+            .arg("-version")
+            .output()
+            .is_ok_and(|o| o.status.success())
 }
 
 fn check_postgres() -> Result<(), String> {
@@ -54,42 +75,6 @@ fn check_postgres() -> Result<(), String> {
                        Start it — e.g.: sudo service postgresql start"
             .to_string()),
         Ok(_) => Ok(()),
-    }
-}
-
-fn check_prometheus_binary() -> Result<(), String> {
-    if super::prometheus::binary_on_path() {
-        return Ok(());
-    }
-    Err("prometheus not found on PATH\n\
-         Install Prometheus: https://prometheus.io/docs/prometheus/latest/installation/\n\
-         Or pass --no-prometheus to start without the scrape server."
-        .to_string())
-}
-
-fn check_tempo_binary() -> Result<(), String> {
-    if super::tempo::binary_on_path() {
-        return Ok(());
-    }
-    Err("tempo not found on PATH\n\
-         Install Tempo: https://grafana.com/docs/tempo/latest/setup/\n\
-         Or pass --no-tempo to start without the trace store."
-        .to_string())
-}
-
-fn check_loki_binary() -> Result<(), String> {
-    match super::loki::probe() {
-        Binary::Grafana { .. } => Ok(()),
-        Binary::Missing => Err("loki not found on PATH\n\
-             Install Grafana Loki: https://grafana.com/docs/loki/latest/setup/install/\n\
-             Or pass --no-loki to start without the log store."
-            .into()),
-        Binary::Other { summary } => Err(format!(
-            "`loki` on PATH is not Grafana Loki (got {summary})\n\
-             Debian/Ubuntu ships a different program named loki (MCMC linkage analysis).\n\
-             Install Grafana Loki: https://grafana.com/docs/loki/latest/setup/install/\n\
-             Or pass --no-loki to start without the log store."
-        )),
     }
 }
 
@@ -227,6 +212,38 @@ fn kill_pid(pid: u32) -> bool {
 mod tests {
     use super::*;
 
+    fn service(name: &str, requires: Option<&str>) -> ExtraService {
+        ExtraService {
+            name: name.into(),
+            dir: name.into(),
+            command: name.into(),
+            args: vec![],
+            url: "http://localhost:1".into(),
+            requires: requires.map(str::to_string),
+            ports: vec![],
+        }
+    }
+
+    /// A declared service names the binary it needs, so a missing one is one
+    /// line rather than a supervisor restarting a command that will never
+    /// exist.
+    #[test]
+    fn a_declared_service_names_the_binary_it_is_missing() {
+        let err = run_preflight(
+            false,
+            &[service("tempo", Some("definitely-not-a-real-binary"))],
+            &[],
+        )
+        .expect_err("should refuse");
+        assert!(err.contains("definitely-not-a-real-binary"), "{err}");
+        assert!(err.contains("tempo"), "names the service too: {err}");
+    }
+
+    #[test]
+    fn a_service_that_requires_nothing_is_not_checked() {
+        run_preflight(false, &[service("www", None)], &[]).expect("nothing to check");
+    }
+
     #[test]
     fn default_kill_for_dev_tools_only() {
         assert!(should_default_kill("cargo"));
@@ -241,13 +258,21 @@ mod tests {
         assert!(!should_default_kill("postgres"));
     }
 
+    /// Retried, because the freed port is an ephemeral one the OS is free to
+    /// hand to anything else on the machine the moment we let go of it — which
+    /// it occasionally does, mid-suite, and failed the build.
     #[test]
     fn port_in_use_detects_bound_listener() {
-        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let port = listener.local_addr().unwrap().port();
-        assert!(port_in_use(port));
-        drop(listener);
-        assert!(!port_in_use(port));
+        for attempt in 0..5 {
+            let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+            let port = listener.local_addr().unwrap().port();
+            assert!(port_in_use(port));
+            drop(listener);
+            if !port_in_use(port) {
+                return;
+            }
+            assert!(attempt < 4, "every freed port was taken again");
+        }
     }
 
     #[test]

@@ -48,10 +48,12 @@ process pushes OTLP, the same way it pushes traces.
 
 ## Topology
 
-**Development.** `erno dev` starts Grafana Loki on `127.0.0.1:3100`. Skip with
-`--no-loki`. The binary on `PATH` must be Grafana Loki (`loki, version …`).
-Debian/Ubuntu's `loki` package is a different program (MCMC linkage analysis)
-and will be rejected.
+**Development.** Loki is a component of the collector, declared in
+erno-monitoring's `erno.toml`, so `cd erno-monitoring && erno dev` starts it on
+`127.0.0.1:3100`. A product application's `erno dev` starts nothing of the sort.
+The binary on `PATH` must be Grafana Loki (`loki, version …`); Debian/Ubuntu's
+`loki` package is a different program (MCMC linkage analysis) and is rejected,
+by preflight there and by `erno doctor` in that tree.
 
 **Production.** Loki lives in the monitoring release with `auth_enabled` — its
 name for tenancy, not for authentication — so each project's logs sit under its

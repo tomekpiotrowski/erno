@@ -90,11 +90,6 @@ pub fn apply(state: &mut TuiState, action: Action) {
             state.failures_only = !state.failures_only;
             state.log_offset = 0;
             state.force_redraw = true;
-            state.tempo_query = if state.failures_only {
-                "{ status=error }".into()
-            } else {
-                "{}".into()
-            };
         }
         Action::Restart => {
             if let Some(name) = state.target_service().map(|s| s.name.clone()) {
@@ -106,22 +101,15 @@ pub fn apply(state: &mut TuiState, action: Action) {
                 state.say(format!("open {url}"));
             }
         }
-        Action::Enter => {
-            if let Some(t) = selected_trace(state) {
-                state.selected_trace = Some(t);
-                state.lens = LensMode::Trace;
-            }
-        }
-        Action::Slowest => {
-            state.tempo_query = "{ duration > 500ms }".into();
-            state.failures_only = false;
-            state.say("slowest in window");
-        }
-        Action::Editor | Action::Copy | Action::Migrate | Action::Revert => {}
+        Action::Enter
+        | Action::Slowest
+        | Action::Editor
+        | Action::Copy
+        | Action::Migrate
+        | Action::Revert => {}
         Action::CycleLens => {
             state.lens = match state.lens {
-                LensMode::Service => LensMode::Trace,
-                LensMode::Trace => LensMode::Mail,
+                LensMode::Service => LensMode::Mail,
                 LensMode::Mail => LensMode::Jobs,
                 LensMode::Jobs => LensMode::Service,
             };
@@ -132,15 +120,6 @@ pub fn apply(state: &mut TuiState, action: Action) {
         Action::Quit => state.quit = true,
         Action::None => {}
     }
-}
-
-fn selected_trace(state: &TuiState) -> Option<String> {
-    let traces = state.visible_traces();
-    if traces.is_empty() {
-        return None;
-    }
-    let i = state.log_offset.min(traces.len().saturating_sub(1));
-    Some(traces[i].trace_id.clone())
 }
 
 #[cfg(test)]

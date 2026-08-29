@@ -41,9 +41,6 @@ pub struct DevUrls {
     pub api: Option<String>,
     pub app: Option<String>,
     pub www: Option<String>,
-    pub prometheus: Option<String>,
-    pub tempo: Option<String>,
-    pub loki: Option<String>,
     pub admin: Option<String>,
     /// Extra `[[package.dev]]` services: (name, url), declaration order.
     pub extra: Vec<(String, String)>,
@@ -56,9 +53,6 @@ impl DevUrls {
             api: start_api.then(|| "http://localhost:3000".to_string()),
             app: start_app.then(|| "http://localhost:4200".to_string()),
             www: start_www.then(|| "http://localhost:4321".to_string()),
-            prometheus: start_api.then(|| super::prometheus::LISTEN_URL.to_string()),
-            tempo: start_api.then(|| super::tempo::LISTEN_URL.to_string()),
-            loki: start_api.then(|| super::loki::LISTEN_URL.to_string()),
             admin: start_api.then(|| super::ADMIN_URL.to_string()),
             extra: Vec::new(),
         }
@@ -79,24 +73,6 @@ impl DevUrls {
             .as_deref()
             .map(|u| format!("{}/liveness", u.trim_end_matches('/')))
     }
-
-    pub fn prometheus_ready(&self) -> Option<String> {
-        self.prometheus
-            .as_deref()
-            .map(|u| format!("{}/-/ready", u.trim_end_matches('/')))
-    }
-
-    pub fn tempo_ready(&self) -> Option<String> {
-        self.tempo
-            .as_deref()
-            .map(|u| format!("{}/ready", u.trim_end_matches('/')))
-    }
-
-    pub fn loki_ready(&self) -> Option<String> {
-        self.loki
-            .as_deref()
-            .map(|u| format!("{}/ready", u.trim_end_matches('/')))
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -104,9 +80,6 @@ pub struct BannerSnapshot {
     pub api: Option<ServiceState>,
     pub app: Option<ServiceState>,
     pub www: Option<ServiceState>,
-    pub prometheus: Option<ServiceState>,
-    pub tempo: Option<ServiceState>,
-    pub loki: Option<ServiceState>,
     pub admin: Option<ServiceState>,
     pub extra: Vec<ServiceState>,
 }
@@ -144,15 +117,6 @@ fn banner_rows(urls: &DevUrls, snap: &BannerSnapshot) -> Vec<BannerRow> {
     }
     if let (Some(url), Some(state)) = (urls.api.as_deref(), snap.api) {
         push("api", url, state, None);
-    }
-    if let (Some(url), Some(state)) = (urls.prometheus.as_deref(), snap.prometheus) {
-        push("prom", url, state, None);
-    }
-    if let (Some(url), Some(state)) = (urls.tempo.as_deref(), snap.tempo) {
-        push("tempo", url, state, None);
-    }
-    if let (Some(url), Some(state)) = (urls.loki.as_deref(), snap.loki) {
-        push("loki", url, state, None);
     }
     if let (Some(url), Some(state)) = (urls.admin.as_deref(), snap.admin) {
         push("admin", url, state, Some("password: admin"));
@@ -281,16 +245,13 @@ pub struct Transition {
 }
 
 /// The banner's built-in services, in banner order.
-const SERVICES: [&str; 7] = ["www", "app", "api", "prom", "tempo", "loki", "admin"];
+const SERVICES: [&str; 4] = ["www", "app", "api", "admin"];
 
 fn transitions(urls: &DevUrls, prev: &BannerSnapshot, next: &BannerSnapshot) -> Vec<Transition> {
     let pairs = [
         (prev.www, next.www),
         (prev.app, next.app),
         (prev.api, next.api),
-        (prev.prometheus, next.prometheus),
-        (prev.tempo, next.tempo),
-        (prev.loki, next.loki),
         (prev.admin, next.admin),
     ];
     let mut out: Vec<Transition> = SERVICES
@@ -369,9 +330,6 @@ pub fn starting_snapshot(urls: &DevUrls) -> BannerSnapshot {
         api: urls.api.as_ref().map(|_| ServiceState::Starting),
         app: urls.app.as_ref().map(|_| ServiceState::Starting),
         www: urls.www.as_ref().map(|_| ServiceState::Starting),
-        prometheus: urls.prometheus.as_ref().map(|_| ServiceState::Starting),
-        tempo: urls.tempo.as_ref().map(|_| ServiceState::Starting),
-        loki: urls.loki.as_ref().map(|_| ServiceState::Starting),
         admin: urls.admin.as_ref().map(|_| ServiceState::Starting),
         extra: urls.extra.iter().map(|_| ServiceState::Starting).collect(),
     }
@@ -413,9 +371,6 @@ pub fn state_named(snap: &BannerSnapshot, urls: &DevUrls, name: &str) -> Option<
         "www" => snap.www,
         "app" => snap.app,
         "api" => snap.api,
-        "prom" => snap.prometheus,
-        "tempo" => snap.tempo,
-        "loki" => snap.loki,
         "admin" => snap.admin,
         other => urls
             .extra
@@ -427,10 +382,7 @@ pub fn state_named(snap: &BannerSnapshot, urls: &DevUrls, name: &str) -> Option<
 }
 
 pub async fn probe_all(client: &Client, urls: &DevUrls) -> BannerSnapshot {
-    let prom_ready = urls.prometheus_ready();
-    let tempo_ready = urls.tempo_ready();
-    let loki_ready = urls.loki_ready();
-    let (api, app, www, prometheus, tempo, loki, admin, extra) = tokio::join!(
+    let (api, app, www, admin, extra) = tokio::join!(
         async {
             match urls.api.as_deref() {
                 Some(_) => {
@@ -452,24 +404,6 @@ pub async fn probe_all(client: &Client, urls: &DevUrls) -> BannerSnapshot {
             }
         },
         async {
-            match &prom_ready {
-                Some(url) => Some(probe_http(client, url).await),
-                None => None,
-            }
-        },
-        async {
-            match &tempo_ready {
-                Some(url) => Some(probe_http(client, url).await),
-                None => None,
-            }
-        },
-        async {
-            match &loki_ready {
-                Some(url) => Some(probe_http(client, url).await),
-                None => None,
-            }
-        },
-        async {
             match urls.admin.as_deref() {
                 Some(url) => Some(probe_head(client, url).await),
                 None => None,
@@ -487,9 +421,6 @@ pub async fn probe_all(client: &Client, urls: &DevUrls) -> BannerSnapshot {
         api,
         app,
         www,
-        prometheus,
-        tempo,
-        loki,
         admin,
         extra,
     }
@@ -563,9 +494,6 @@ mod tests {
             api: urls.api.as_ref().map(|_| state),
             app: urls.app.as_ref().map(|_| state),
             www: urls.www.as_ref().map(|_| state),
-            prometheus: urls.prometheus.as_ref().map(|_| state),
-            tempo: urls.tempo.as_ref().map(|_| state),
-            loki: urls.loki.as_ref().map(|_| state),
             admin: urls.admin.as_ref().map(|_| state),
             extra: urls.extra.iter().map(|_| state).collect(),
         }
@@ -578,9 +506,6 @@ mod tests {
             api: Some(ServiceState::Ready),
             app: Some(ServiceState::Starting),
             www: Some(ServiceState::Ready),
-            prometheus: Some(ServiceState::Ready),
-            tempo: Some(ServiceState::Ready),
-            loki: Some(ServiceState::Ready),
             admin: Some(ServiceState::Ready),
             extra: vec![],
         };
@@ -588,7 +513,6 @@ mod tests {
         assert!(text.contains("http://localhost:3000"));
         assert!(text.contains("http://localhost:4200"));
         assert!(text.contains("http://localhost:4321"));
-        assert!(text.contains("http://localhost:9090"));
         assert!(text.contains("http://localhost:4300"));
         assert!(text.contains("ready"));
         assert!(text.contains("starting"));
@@ -630,9 +554,6 @@ mod tests {
             api: Some(ServiceState::Migrating),
             app: Some(ServiceState::Starting),
             www: None,
-            prometheus: Some(ServiceState::Starting),
-            tempo: Some(ServiceState::Starting),
-            loki: Some(ServiceState::Starting),
             admin: None,
             extra: vec![],
         };
@@ -701,9 +622,6 @@ mod tests {
             api: Some(ServiceState::Ready),
             app: Some(ServiceState::Starting),
             www: Some(ServiceState::Ready),
-            prometheus: Some(ServiceState::Ready),
-            tempo: Some(ServiceState::Ready),
-            loki: Some(ServiceState::Ready),
             admin: Some(ServiceState::Migrating),
             extra: vec![],
         };
@@ -720,7 +638,7 @@ mod tests {
                         .map(|byte| ui::display_width(&l[..byte]))
                 })
                 .collect();
-            assert_eq!(offsets.len(), 7, "expected a state on every row:\n{text}");
+            assert_eq!(offsets.len(), 4, "expected a state on every row:\n{text}");
             assert!(
                 offsets.windows(2).all(|w| w[0] == w[1]),
                 "state column ragged: {offsets:?}\n{text}"
@@ -733,8 +651,6 @@ mod tests {
         let urls = DevUrls::defaults(true, false, false);
         let text = render_banner_when(ui::Face::PLAIN, &urls, &starting_snapshot(&urls));
         assert!(text.contains("api"));
-        assert!(text.contains("prom"));
-        assert!(text.contains("http://localhost:9090"));
         assert!(!text.contains("app"));
         assert!(!text.contains("www"));
     }
@@ -767,9 +683,6 @@ mod tests {
                 api: Some(ServiceState::Ready),
                 app: Some(ServiceState::Ready),
                 www: Some(ServiceState::Migrating),
-                prometheus: Some(ServiceState::Ready),
-                tempo: Some(ServiceState::Ready),
-                loki: Some(ServiceState::Ready),
                 admin: Some(ServiceState::Ready),
                 extra: vec![],
             },
@@ -812,9 +725,6 @@ mod tests {
             api: Some(ServiceState::Ready),
             app: None,
             www: None,
-            prometheus: Some(ServiceState::Ready),
-            tempo: Some(ServiceState::Ready),
-            loki: Some(ServiceState::Ready),
             admin: None,
             extra: vec![],
         };
@@ -838,14 +748,13 @@ mod tests {
         let after = snapshot(ServiceState::Ready, &urls);
         let text = render_transitions(ui::Face::PLAIN, &transitions(&urls, &before, &after), &[]);
         let offsets: Vec<usize> = text.lines().filter_map(|l| l.find("ready")).collect();
-        assert_eq!(offsets.len(), 7);
+        assert_eq!(offsets.len(), 4);
         assert!(
             offsets.windows(2).all(|w| w[0] == w[1]),
             "state column ragged: {offsets:?}\n{text}"
         );
-        // `tempo` and `admin` are the widest names, so every row is padded to
-        // five columns.
-        assert!(text.contains("tempo  ready"));
+        // `admin` is the widest name, so every row is padded to five columns.
+        assert!(text.contains("admin  ready"));
         assert!(text.contains("api    ready"));
     }
 
@@ -873,37 +782,6 @@ mod tests {
             text,
         );
     }
-
-    #[test]
-    fn banner_omits_prometheus_when_disabled() {
-        let mut urls = DevUrls::defaults(true, false, false);
-        urls.prometheus = None;
-        let text = render_banner_when(ui::Face::PLAIN, &urls, &starting_snapshot(&urls));
-        assert!(text.contains("api"));
-        assert!(!text.contains("prom"));
-        assert!(!text.contains("9090"));
-    }
-
-    #[test]
-    fn banner_omits_tempo_when_disabled() {
-        let mut urls = DevUrls::defaults(true, false, false);
-        urls.tempo = None;
-        let text = render_banner_when(ui::Face::PLAIN, &urls, &starting_snapshot(&urls));
-        assert!(text.contains("api"));
-        assert!(!text.contains("tempo"));
-        assert!(!text.contains("3200"));
-    }
-
-    #[test]
-    fn banner_omits_loki_when_disabled() {
-        let mut urls = DevUrls::defaults(true, false, false);
-        urls.loki = None;
-        let text = render_banner_when(ui::Face::PLAIN, &urls, &starting_snapshot(&urls));
-        assert!(text.contains("api"));
-        assert!(!text.contains("loki"));
-        assert!(!text.contains("3100"));
-    }
-
     #[test]
     fn extra_service_row_follows_admin() {
         let mut urls = DevUrls::defaults(true, false, false);

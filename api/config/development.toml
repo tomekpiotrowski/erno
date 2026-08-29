@@ -4,9 +4,12 @@ app_url = "http://localhost:4200"
 [tracing]
 log_level = "info"
 
+# Off in development: nothing local receives OTLP, and a configured endpoint
+# with nothing behind it is an exporter retrying a dead port for the life of the
+# process. Point these at the collector's Tempo and Loki if you are running it.
 [tracing.otel]
-endpoint = "http://127.0.0.1:4318"
-logs_endpoint = "http://127.0.0.1:3100/otlp"
+endpoint = ""
+logs_endpoint = ""
 sample_ratio = 1.0
 log_level = "info"
 

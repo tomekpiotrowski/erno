@@ -57,14 +57,16 @@ every application deployment two large tables it never writes to.
 
 ## Ports in development
 
-`erno dev` and the config templates assume:
+An application's `erno dev` starts the first four. The rest are the collector's,
+started by `erno dev` in the erno-monitoring repository where they are declared
+as its components:
 
 | Process | Port |
 |---|---|
 | Application API | 3000 |
-| Monitoring collector | 3001 |
 | Application SPA | 4200 |
 | Admin console | 4300 |
+| Monitoring collector | 3001 |
 | Monitoring console | 4400 |
 | Prometheus | 9090 |
 | Loki | 3100 |

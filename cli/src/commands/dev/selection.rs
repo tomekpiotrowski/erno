@@ -15,6 +15,10 @@ pub struct ExtraService {
     pub command: String,
     pub args: Vec<String>,
     pub url: String,
+    /// Binary that must be on `PATH`, checked before anything is spawned.
+    pub requires: Option<String>,
+    /// Ports to check are free, beyond the one in `url`.
+    pub ports: Vec<u16>,
 }
 
 /// Extra `[[package.dev]]` processes to start, in declaration order.
@@ -63,6 +67,8 @@ pub fn extra_services(
                     command: step.command.clone(),
                     args: step.args.clone(),
                     url: step.url.clone(),
+                    requires: step.requires.clone(),
+                    ports: step.ports.clone(),
                 });
             }
         }
@@ -207,6 +213,8 @@ mod tests {
             command: command.into(),
             args: vec![],
             url: url.into(),
+            requires: None,
+            ports: vec![],
             default,
         }
     }

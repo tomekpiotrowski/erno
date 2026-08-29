@@ -60,6 +60,11 @@ sample_ratio = 1.0
 log_level = "info"
 ```
 
+Both are **empty** in a generated `development.toml`, and `erno dev` starts no
+Tempo or Loki: the stores belong to the collector, which is a separate
+deployment. Fill them in to send a development run's traces and logs to a
+collector you are running.
+
 See [tracing](/monitoring/tracing/) and [logs](/monitoring/logs/) for the
 stores and the console.
 

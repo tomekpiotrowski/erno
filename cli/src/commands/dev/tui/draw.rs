@@ -4,9 +4,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
-use super::prom::spark;
 use super::state::{log_window, LensMode, ServiceRow, TuiState};
-use super::tempo::{flatten, n1_insight};
 
 const ACCENT: Color = Color::Rgb(145, 132, 217);
 const DIM: Color = Color::Rgb(117, 121, 140);
@@ -91,8 +89,6 @@ fn render_header(frame: &mut Frame, area: Rect, state: &TuiState) {
         .filter(|s| s.state.label() == "ready")
         .count();
     let status = format!("{ready}/{} up", state.services.len());
-    let p95 = format!("p95 {:.0}ms", state.prom.p95_ms);
-    let err = format!("err {:.2}/s", state.prom.err_per_s);
     let title = Line::from(vec![
         Span::styled("◈ erno dev", Style::default().fg(ACCENT)),
         Span::raw("  "),
@@ -101,12 +97,6 @@ fn render_header(frame: &mut Frame, area: Rect, state: &TuiState) {
         Span::styled(status, Style::default().fg(OK)),
         Span::raw("  "),
         Span::styled(state.elapsed(), Style::default().fg(DIM)),
-        Span::raw("  "),
-        Span::styled(p95, Style::default().fg(DIM)),
-        Span::raw("  "),
-        Span::styled(err, Style::default().fg(ERR)),
-        Span::raw("  "),
-        Span::styled(spark(&state.prom.req_hist), Style::default().fg(ACCENT)),
     ]);
     frame.render_widget(
         Paragraph::new(title).block(Block::default().borders(Borders::BOTTOM)),
@@ -147,15 +137,6 @@ fn render_services(frame: &mut Frame, area: Rect, state: &TuiState) {
             Style::default().fg(DIM),
         )));
     }
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "BACKING",
-        Style::default().fg(DIM).add_modifier(Modifier::BOLD),
-    )));
-    lines.push(Line::from(Span::styled(
-        format!("postgres  ●  pool {:.0}", state.prom.pool),
-        Style::default().fg(DIM),
-    )));
     if !state.emails.is_empty() {
         lines.push(Line::from(Span::styled(
             format!("mail      {} held", state.emails.len()),
@@ -205,10 +186,6 @@ fn render_log(frame: &mut Frame, area: Rect, state: &TuiState) {
     let inner_w = area.width.saturating_sub(2) as usize;
     let inner_h = area.height.saturating_sub(2) as usize;
     let mut rows: Vec<Line> = Vec::new();
-    for hit in state.visible_traces() {
-        let ms = format!("{:.0}ms", hit.duration_ms);
-        rows.push(log_row(&hit.service, &hit.name, Some(&ms), inner_w));
-    }
     for l in state.visible_logs() {
         rows.push(log_row(&l.label, &l.line, None, inner_w));
     }
@@ -285,7 +262,6 @@ fn plain_text(s: &str) -> String {
 fn render_lens(frame: &mut Frame, area: Rect, state: &TuiState) {
     let (title, body) = match state.lens {
         LensMode::Service => service_lens(state),
-        LensMode::Trace => trace_lens(state),
         LensMode::Mail => mail_lens(state),
         LensMode::Jobs => jobs_lens(state),
     };
@@ -312,7 +288,7 @@ fn service_lens(state: &TuiState) -> (String, Vec<Line<'static>>) {
         );
     };
     let pid = svc.pid.map(|p| p.to_string()).unwrap_or_else(|| "—".into());
-    let mut lines = vec![
+    let lines = vec![
         Line::from(Span::styled(
             svc.name.clone(),
             Style::default().fg(Color::White),
@@ -322,95 +298,8 @@ fn service_lens(state: &TuiState) -> (String, Vec<Line<'static>>) {
         fact_owned("watch", svc.watch.clone()),
         fact_owned("state", svc.state.label().to_string()),
         fact_owned("url", svc.url.clone()),
-        Line::from(Span::styled(
-            format!(
-                "p50 {}  p95 {}",
-                spark(&state.prom.p50_hist),
-                spark(&state.prom.p95_hist)
-            ),
-            Style::default().fg(ACCENT),
-        )),
     ];
-    if !state.prom.routes.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "ROUTES",
-            Style::default().fg(DIM).add_modifier(Modifier::BOLD),
-        )));
-        for r in &state.prom.routes {
-            lines.push(Line::from(Span::styled(
-                format!("{}  {}  {}", r.path, r.calls, r.ms),
-                Style::default().fg(DIM),
-            )));
-        }
-    }
     (format!("LENS  {}", svc.name), lines)
-}
-
-fn trace_lens(state: &TuiState) -> (String, Vec<Line<'static>>) {
-    let id = state.selected_trace.as_deref().unwrap_or("—");
-    let mut lines = Vec::new();
-    let rows = flatten(&state.spans);
-    let total = rows
-        .first()
-        .map(|(_, s)| s.duration_ms)
-        .filter(|d| *d > 0.0)
-        .unwrap_or(1.0);
-    for (depth, sp) in rows {
-        let indent = " ".repeat(depth);
-        let w = ((sp.duration_ms / total) * 18.0).round().clamp(1.0, 18.0) as usize;
-        let off = ((sp.start_ms / total) * 18.0).round().clamp(0.0, 17.0) as usize;
-        let bar = format!("{}{}", " ".repeat(off), "█".repeat(w));
-        let color = if sp.status == "error" { ERR } else { ACCENT };
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!(
-                    "{indent}{:<16}",
-                    truncate(&format!("{} {}", sp.service, sp.name), 16)
-                ),
-                Style::default().fg(color),
-            ),
-            Span::styled(bar, Style::default().fg(color)),
-            Span::styled(
-                format!(" {:>5.0}ms", sp.duration_ms),
-                Style::default().fg(DIM),
-            ),
-        ]));
-        if let Some(kind) = sp.attributes.get("kind") {
-            lines.push(Line::from(Span::styled(
-                format!("{indent}  kind={kind}"),
-                Style::default().fg(DIM),
-            )));
-        }
-        for ev in &sp.events {
-            if let Some(sql) = ev.attributes.get("db.statement") {
-                lines.push(Line::from(Span::styled(
-                    format!("{indent}  {sql}"),
-                    Style::default().fg(DIM),
-                )));
-            }
-        }
-    }
-    if let Some(n1) = n1_insight(&state.spans) {
-        lines.push(Line::from(Span::styled(
-            format!("↳ {n1}"),
-            Style::default().fg(WARN),
-        )));
-    }
-    for l in state.loki_lines.iter().take(4) {
-        if l.line.to_ascii_lowercase().contains("panic") {
-            lines.push(Line::from(Span::styled(
-                format!("{} {}", l.service, l.line),
-                Style::default().fg(ERR),
-            )));
-        }
-    }
-    if lines.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "select a trace ⏎",
-            Style::default().fg(DIM),
-        )));
-    }
-    (format!("LENS  {id}"), lines)
 }
 
 fn mail_lens(state: &TuiState) -> (String, Vec<Line<'static>>) {
@@ -504,7 +393,7 @@ fn wire_lane(svc: &ServiceRow, state: &TuiState, width: usize) -> String {
 
 fn render_footer(frame: &mut Frame, area: Rect, state: &TuiState, wide: bool) {
     let keys = if wide {
-        "1-9 focus  0 all  ↑↓ log  c copy  ⏎ trace  r restart  o open  m/M migrate  e edit  p pause  w wire  q quit"
+        "1-9 focus  0 all  ↑↓ log  c copy  r restart  o open  m/M migrate  p pause  w wire  q quit"
     } else {
         "1-9  r  o  m  q"
     };
@@ -569,7 +458,6 @@ mod tests {
     use crate::commands::dev::banner::DevUrls;
     use crate::commands::dev::log::LogLine;
     use crate::commands::dev::tui::state::WireTick;
-    use crate::commands::dev::tui::tempo::TraceHit;
 
     fn buffer_text(backend: &TestBackend) -> String {
         let buf = backend.buffer();
@@ -595,7 +483,7 @@ mod tests {
         let text = buffer_text(terminal.backend());
         assert!(text.contains("erno dev"), "{text}");
         assert!(text.contains("teryon"), "{text}");
-        for name in ["api", "app", "www", "prom", "tempo", "loki"] {
+        for name in ["api", "app", "www"] {
             assert!(text.contains(name), "missing {name} in:\n{text}");
         }
         assert!(text.contains("LOG"), "{text}");
@@ -609,88 +497,6 @@ mod tests {
         assert!(text.contains("MIGRATIONS"), "{text}");
         assert!(text.contains("c copy"), "{text}");
     }
-
-    fn hit(service: &str, name: &str) -> TraceHit {
-        TraceHit {
-            trace_id: name.into(),
-            name: name.into(),
-            service: service.into(),
-            duration_ms: 12.0,
-            start_unix_nano: String::new(),
-        }
-    }
-
-    #[test]
-    fn focused_log_does_not_keep_other_services() {
-        let urls = DevUrls::defaults(true, true, true);
-        let mut state = TuiState::new("teryon", &urls);
-        let app = state
-            .services
-            .iter()
-            .position(|s| s.name == "app")
-            .expect("app");
-        state.focus = Some(app);
-        state.logs = vec![
-            LogLine::new("api", "api-only-line"),
-            LogLine::new("app", "app-only-line"),
-        ];
-        state.traces = vec![hit("erno", "GET /secret"), hit("app", "vite-hmr")];
-        let backend = TestBackend::new(160, 40);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| render(f, &state)).unwrap();
-        let text = buffer_text(terminal.backend());
-        assert!(text.contains("app-only-line"), "{text}");
-        assert!(text.contains("vite-hmr"), "{text}");
-        assert!(!text.contains("api-only-line"), "{text}");
-        assert!(!text.contains("GET /secret"), "{text}");
-    }
-
-    fn service_index(state: &TuiState, name: &str) -> usize {
-        state
-            .services
-            .iter()
-            .position(|s| s.name == name)
-            .unwrap_or_else(|| panic!("{name}"))
-    }
-
-    #[test]
-    fn switching_focus_overwrites_the_previous_log_cells() {
-        let urls = DevUrls::defaults(true, true, true);
-        let mut state = TuiState::new("teryon", &urls);
-        state.focus = Some(service_index(&state, "api"));
-        state.logs = (0..40)
-            .map(|i| {
-                LogLine::new(
-                    "api",
-                    format!("\x1b[31mUNIQUE-API-LINE-{i:02}\x1b[0m compiling leftover"),
-                )
-            })
-            .collect();
-        state.traces = vec![hit("erno", "UNIQUE-API-TRACE")];
-        let backend = TestBackend::new(160, 40);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| render(f, &state)).unwrap();
-        let first = buffer_text(terminal.backend());
-        assert!(first.contains("UNIQUE-API-LINE"), "{first}");
-
-        state.focus = Some(service_index(&state, "app"));
-        state
-            .logs
-            .push(LogLine::new("app", "app-only-after-switch"));
-        terminal.draw(|f| render(f, &state)).unwrap();
-        let second = buffer_text(terminal.backend());
-        assert!(second.contains("app-only-after-switch"), "{second}");
-        assert!(
-            !second.contains("UNIQUE-API-LINE"),
-            "api log cells survived the switch:\n{second}"
-        );
-        assert!(
-            !second.contains("UNIQUE-API-TRACE"),
-            "api trace cells survived the switch:\n{second}"
-        );
-        assert!(!second.contains("compiling leftover"), "{second}");
-    }
-
     #[test]
     fn log_offset_does_not_drop_lines_that_fit() {
         let urls = DevUrls::defaults(true, true, true);

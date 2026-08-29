@@ -2,17 +2,14 @@ mod banner;
 mod device;
 mod lock;
 mod log;
-pub(crate) mod loki;
 mod mail;
 mod open;
 mod ports;
 mod preflight;
 mod process;
 mod project;
-mod prometheus;
 mod seed;
 mod selection;
-mod tempo;
 mod tui;
 mod watch;
 
@@ -60,15 +57,6 @@ pub struct DevArgs {
     /// Device / emulator id for --ios or --android (only needed when several are attached)
     #[arg(long, value_name = "ID")]
     pub target: Option<String>,
-    /// Skip Prometheus (otherwise required when starting the API)
-    #[arg(long)]
-    pub no_prometheus: bool,
-    /// Skip Tempo (otherwise required when starting the API)
-    #[arg(long)]
-    pub no_tempo: bool,
-    /// Skip Loki (otherwise required when starting the API)
-    #[arg(long)]
-    pub no_loki: bool,
     /// Do not start the operator admin SPA
     #[arg(long)]
     pub no_admin: bool,
@@ -119,15 +107,6 @@ pub async fn handle_dev(root: Option<PathBuf>, args: DevArgs) -> ui::Cmd {
     // from the first frame — the pinned region's height cannot change later.
     let admin_dir = (!args.no_admin).then(|| find_admin_dir(&root)).flatten();
     let mut urls = ports::discover_urls(&root, &sel);
-    if sel.api && !args.no_prometheus {
-        urls.prometheus = Some(prometheus::LISTEN_URL.to_string());
-    }
-    if sel.api && !args.no_tempo {
-        urls.tempo = Some(tempo::LISTEN_URL.to_string());
-    }
-    if sel.api && !args.no_loki {
-        urls.loki = Some(loki::LISTEN_URL.to_string());
-    }
     urls.extra = extras
         .iter()
         .map(|e| (e.name.clone(), e.url.clone()))
@@ -201,13 +180,7 @@ pub async fn handle_dev(root: Option<PathBuf>, args: DevArgs) -> ui::Cmd {
         ));
     }
 
-    preflight::run_preflight(
-        sel.api,
-        sel.api && !args.no_prometheus,
-        sel.api && !args.no_tempo,
-        sel.api && !args.no_loki,
-        &ports::ports_to_check(&urls),
-    )?;
+    preflight::run_preflight(sel.api, &extras, &ports::ports_to_check(&urls, &extras))?;
 
     if sel.app {
         ensure_npm_deps(&app_dir, "app")?;
@@ -262,19 +235,16 @@ pub async fn handle_dev(root: Option<PathBuf>, args: DevArgs) -> ui::Cmd {
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
-    let otel = local_otel_vars(urls.tempo.is_some(), urls.loki.is_some());
     let api = sel.api.then(|| {
         let api_dir_spawn = api_dir.clone();
         let api_sink = sink.clone();
         let cors_env = cors_env.clone();
-        let otel = otel.clone();
         Supervisor::start("api", shutdown_rx.clone(), move || {
             let mut cmd = Command::new("cargo");
             cmd.arg("run");
             if let Some(origins) = cors_env.as_deref() {
                 cmd.env("ERNO_DEV_CORS_ORIGINS", origins);
             }
-            apply_local_otel(&mut cmd, &otel);
             spawn_labeled(cmd, &api_dir_spawn, "api", api_sink.clone())
         })
     });
@@ -308,49 +278,6 @@ pub async fn handle_dev(root: Option<PathBuf>, args: DevArgs) -> ui::Cmd {
             spawn_labeled(cmd, &app_dir_spawn, "app", app_sink.clone())
         })
     });
-
-    let api_port = urls
-        .api
-        .as_deref()
-        .and_then(|u| ports::port_from_url(Some(u)))
-        .unwrap_or(3000);
-    // `run_preflight` above already exited if the binary was missing under this
-    // exact condition, so there is no second check here.
-    let prometheus = if sel.api && !args.no_prometheus {
-        let metrics_toml =
-            std::fs::read_to_string(root.join("api/config/development.toml")).unwrap_or_default();
-        let scrape_token = ports::parse_table_string(&metrics_toml, "metrics", "auth_token");
-        let dir = prometheus::prepare_dir(&root, api_port, scrape_token.as_deref())
-            .map_err(|e| format!("could not prepare the Prometheus data dir: {e}"))?;
-        let prom_sink = sink.clone();
-        Some(Supervisor::start("prom", shutdown_rx.clone(), move || {
-            prometheus::spawn(&dir, prom_sink.clone())
-        }))
-    } else {
-        None
-    };
-
-    let tempo = if sel.api && !args.no_tempo {
-        let dir = tempo::prepare_dir(&root)
-            .map_err(|e| format!("could not prepare the Tempo data dir: {e}"))?;
-        let sink = sink.clone();
-        Some(Supervisor::start("tempo", shutdown_rx.clone(), move || {
-            tempo::spawn(&dir, sink.clone())
-        }))
-    } else {
-        None
-    };
-
-    let loki = if sel.api && !args.no_loki {
-        let dir = loki::prepare_dir(&root)
-            .map_err(|e| format!("could not prepare the Loki data dir: {e}"))?;
-        let sink = sink.clone();
-        Some(Supervisor::start("loki", shutdown_rx.clone(), move || {
-            loki::spawn(&dir, sink.clone())
-        }))
-    } else {
-        None
-    };
 
     let admin = match admin_dir {
         Some(admin_dir) => {
@@ -402,15 +329,6 @@ pub async fn handle_dev(root: Option<PathBuf>, args: DevArgs) -> ui::Cmd {
         if let Some(s) = www.clone() {
             supervisors.insert("www".into(), s);
         }
-        if let Some(s) = prometheus.clone() {
-            supervisors.insert("prom".into(), s);
-        }
-        if let Some(s) = tempo.clone() {
-            supervisors.insert("tempo".into(), s);
-        }
-        if let Some(s) = loki.clone() {
-            supervisors.insert("loki".into(), s);
-        }
         if let Some(s) = admin.clone() {
             supervisors.insert("admin".into(), s);
         }
@@ -420,14 +338,7 @@ pub async fn handle_dev(root: Option<PathBuf>, args: DevArgs) -> ui::Cmd {
             }
         }
         let project = root.file_name().and_then(|s| s.to_str()).unwrap_or("erno");
-        let metrics_toml =
-            std::fs::read_to_string(root.join("api/config/development.toml")).unwrap_or_default();
-        let scrape_token = ports::parse_table_string(&metrics_toml, "metrics", "auth_token");
         let opts = tui::TuiOpts {
-            prometheus: urls.prometheus.clone(),
-            prometheus_token: scrape_token,
-            tempo: urls.tempo.clone(),
-            loki: urls.loki.clone(),
             api: urls.api.clone(),
         };
         if let Err(e) = tui::run(&urls, sink.clone(), project, supervisors, opts).await {
@@ -450,15 +361,6 @@ pub async fn handle_dev(root: Option<PathBuf>, args: DevArgs) -> ui::Cmd {
     }
     if let Some(www) = www {
         www.shutdown().await;
-    }
-    if let Some(prometheus) = prometheus {
-        prometheus.shutdown().await;
-    }
-    if let Some(tempo) = tempo {
-        tempo.shutdown().await;
-    }
-    if let Some(loki) = loki {
-        loki.shutdown().await;
     }
     if let Some(admin) = admin {
         admin.shutdown().await;
@@ -495,32 +397,6 @@ fn find_admin_dir(root: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Env that turns on OTEL export to the Tempo/Loki `erno dev` just started.
-///
-/// `APP_TRACING__OTEL__*` overrides `config/development.toml`, so a project
-/// that never set `[tracing.otel]` still feeds the WIRE pane.
-fn local_otel_vars(tempo: bool, loki: bool) -> Vec<(&'static str, &'static str)> {
-    let mut vars = Vec::new();
-    if tempo {
-        vars.push(("APP_TRACING__OTEL__ENDPOINT", "http://127.0.0.1:4318"));
-        vars.push(("APP_TRACING__OTEL__SAMPLE_RATIO", "1"));
-    }
-    if loki {
-        vars.push((
-            "APP_TRACING__OTEL__LOGS_ENDPOINT",
-            "http://127.0.0.1:3100/otlp",
-        ));
-        vars.push(("APP_TRACING__OTEL__LOG_LEVEL", "info"));
-    }
-    vars
-}
-
-fn apply_local_otel(cmd: &mut Command, vars: &[(&'static str, &'static str)]) {
-    for (k, v) in vars {
-        cmd.env(k, v);
-    }
-}
-
 fn ensure_npm_deps(dir: &Path, label: &str) -> Result<(), String> {
     if dir.join("node_modules").exists() {
         return Ok(());
@@ -534,58 +410,5 @@ fn ensure_npm_deps(dir: &Path, label: &str) -> Result<(), String> {
         Err(e) => Err(format!("could not run npm install in {label}/: {e}")),
         Ok(s) if !s.success() => Err(format!("npm install failed in {label}/")),
         _ => Ok(()),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn local_otel_points_at_dev_tempo_and_loki() {
-        let both = local_otel_vars(true, true);
-        assert!(both.contains(&("APP_TRACING__OTEL__ENDPOINT", "http://127.0.0.1:4318")));
-        assert!(both.contains(&("APP_TRACING__OTEL__SAMPLE_RATIO", "1")));
-        assert!(both.contains(&(
-            "APP_TRACING__OTEL__LOGS_ENDPOINT",
-            "http://127.0.0.1:3100/otlp"
-        )));
-        assert!(local_otel_vars(false, false).is_empty());
-        assert_eq!(local_otel_vars(true, false).len(), 2);
-    }
-
-    #[test]
-    fn telemetry_argv_is_absolute_when_the_project_root_is_a_relative_name() {
-        use std::path::absolute;
-
-        let root = PathBuf::from("teryon");
-        let prom = prometheus::spawn_args(&root.join(".erno/prometheus"));
-        let loki = loki::spawn_args(&root.join(".erno/loki"));
-        let tempo = tempo::spawn_args(&root.join(".erno/tempo"));
-
-        assert_eq!(
-            flag_path(&prom, "--config.file="),
-            absolute(root.join(".erno/prometheus/prometheus.yml")).unwrap()
-        );
-        assert_eq!(
-            flag_path(&prom, "--storage.tsdb.path="),
-            absolute(root.join(".erno/prometheus/data")).unwrap()
-        );
-        assert_eq!(
-            flag_path(&loki, "-config.file="),
-            absolute(root.join(".erno/loki/loki.yaml")).unwrap()
-        );
-        assert_eq!(
-            flag_path(&tempo, "-config.file="),
-            absolute(root.join(".erno/tempo/tempo.yaml")).unwrap()
-        );
-    }
-
-    fn flag_path(args: &[String], prefix: &str) -> PathBuf {
-        let arg = args
-            .iter()
-            .find(|a| a.starts_with(prefix))
-            .unwrap_or_else(|| panic!("missing {prefix} in {args:?}"));
-        PathBuf::from(arg.strip_prefix(prefix).unwrap())
     }
 }
