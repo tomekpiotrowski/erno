@@ -103,6 +103,19 @@ enum Proceed {
     Ask,
 }
 
+fn remove_dirs(root: &Path, rels: &[String]) -> Vec<Result<String, String>> {
+    rels.iter()
+        .map(|rel| {
+            let path = root.join(rel);
+            match fs::remove_dir_all(&path) {
+                Ok(()) => Ok(rel.clone()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(rel.clone()),
+                Err(e) => Err(format!("{rel}: {e}")),
+            }
+        })
+        .collect()
+}
+
 fn should_proceed(yes: bool, is_tty: bool) -> Result<Proceed, String> {
     if yes {
         return Ok(Proceed::Yes);
@@ -410,5 +423,26 @@ mod tests {
     fn a_non_tty_without_yes_refuses() {
         let err = should_proceed(false, false).unwrap_err();
         assert!(err.contains("--yes"), "{err}");
+    }
+
+    #[test]
+    fn remove_dirs_deletes_artifacts_and_leaves_source() {
+        let root = temp("remove");
+        touch_file(&root, ".erno/dev.log", "log");
+        touch_file(&root, "api/target/foo", "obj");
+        touch_file(&root, "api/src/lib.rs", "fn main() {}");
+
+        let results = remove_dirs(&root, &[".erno".into(), "api/target".into()]);
+        assert!(results.iter().all(|r| r.is_ok()), "{results:?}");
+        assert!(!root.join(".erno").exists());
+        assert!(!root.join("api/target").exists());
+        assert_eq!(
+            fs::read_to_string(root.join("api/src/lib.rs")).unwrap(),
+            "fn main() {}"
+        );
+
+        let missing = remove_dirs(&root, &["app/node_modules".into()]);
+        assert!(missing.iter().all(|r| r.is_ok()), "{missing:?}");
+        let _ = fs::remove_dir_all(&root);
     }
 }
