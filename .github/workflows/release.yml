@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Which version number to bump
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: patch
+
+# One release at a time. The dispatch is the button on the Actions tab.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: Tag and publish
+    needs: ci
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Bump version
+        id: bump
+        run: bash .github/scripts/bump-version.sh "${{ inputs.bump }}"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Build and pack erno-angular
+        working-directory: app
+        run: |
+          npm ci
+          npm run build -- erno-angular
+          (cd dist/erno-angular && npm pack)
+
+      - name: Commit, tag, and push
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml app/projects/erno-angular/package.json
+          git commit --allow-empty -m "Release ${TAG}"
+          git tag -a "${TAG}" -m "${TAG}"
+          git push origin HEAD:main
+          git push origin "${TAG}"
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.bump.outputs.version }}
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          tgz="app/dist/erno-angular/erno-angular-${VERSION}.tgz"
+          gh release create "${TAG}" "$tgz" \
+            --title "${TAG}" \
+            --generate-notes

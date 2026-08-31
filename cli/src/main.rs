@@ -3,6 +3,7 @@ mod deploy;
 mod global_config;
 mod ng;
 mod ui;
+mod version;
 
 use clap::{Args, Parser, Subcommand};
 
@@ -44,7 +45,7 @@ enum Commands {
         /// Directory to create the project in (default: current directory)
         #[arg(long)]
         path: Option<String>,
-        /// Local path to the erno repository root (default: uses git reference)
+        /// Local path to the erno repository root (default: this CLI's GitHub tag)
         #[arg(long, value_name = "PATH")]
         erno_path: Option<String>,
         /// Capacitor bundle ID (default: com.example.<name>)

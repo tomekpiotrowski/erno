@@ -10,9 +10,9 @@ The `erno` CLI is the recommended way to create and manage Erno projects. It sca
 ## Installation
 
 ```sh
-cargo install --path cli      # from the erno repo
-# or, once published:
-cargo install erno-cli
+cargo install --git https://github.com/tomekpiotrowski/erno --tag v0.1.0 --path cli --locked
+# or, from a clone of the erno repo:
+cargo install --path cli
 ```
 
 ## Commands
@@ -459,22 +459,20 @@ After scaffolding, `erno new` asks whether to start `erno dev` (default yes on a
 
 ### Erno dependency
 
-Without `--erno-path`, the generated `api/Cargo.toml` and `app/package.json` reference published packages:
+Without `--erno-path`, the generated `api/Cargo.toml` and `app/package.json` pin this CLI's GitHub tag:
 
 ```toml
-erno = { git = "https://github.com/tomekpiotrowski/erno" }
+erno = { git = "https://github.com/tomekpiotrowski/erno", tag = "v0.1.0" }
 ```
 ```json
-"erno-angular": "^0.0.1"
+"erno-angular": "https://github.com/tomekpiotrowski/erno/releases/download/v0.1.0/erno-angular-0.1.0.tgz"
 ```
 
-With `--erno-path /path/to/erno`, both are pointed at local sources:
+With `--erno-path /path/to/erno`, both are pointed at local sources. The CLI packs `app/dist/erno-angular` into a tarball first, so the generated app does not symlink the dist directory (a symlink pulls in a second Angular runtime):
 
 ```toml
 erno = { path = "/path/to/erno/api" }
 ```
 ```json
-"erno-angular": "file:/path/to/erno/app/dist/erno-angular-0.0.1.tgz"
+"erno-angular": "file:/path/to/erno/app/dist/erno-angular/erno-angular-0.1.0.tgz"
 ```
-
-The CLI packs `app/dist/erno-angular` into a tarball before wiring it into the generated app, which avoids duplicate Angular runtimes from a symlinked `file:` dependency.

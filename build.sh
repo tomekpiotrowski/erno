@@ -60,14 +60,14 @@ run_test() {
     step "Testing error-reporting-types"
     cargo test -p erno-error-reporting-types
     # api tests need PostgreSQL at postgres://erno:erno@localhost/erno
-    # (api/config/test.toml). cli has no tests yet.
+    # (api/config/test.toml).
     step "Testing api"
     cargo test -p erno --all-features
     step "Testing cli"
     cargo test -p erno-cli
     ensure_node_modules app
     step "Testing app (erno-angular)"
-    (cd app && npm test -- --watch=false)
+    (cd app && npm test)
 }
 
 run_check() {

@@ -109,11 +109,10 @@ pub async fn handle_new(
         &bundle_id,
         &erno_angular_dep,
         angular_version.as_deref(),
-        erno_path,
     );
     // ionic start installs base deps before we patch package.json, so
     // erno-angular and other additions are not yet in node_modules.
-    install_app_deps(&dest, erno_angular_dep.starts_with("file:"));
+    install_app_deps(&dest);
     create_www(&dest, name);
     install_www_deps(&dest);
     create_e2e(&dest);
@@ -166,26 +165,62 @@ pub fn decide_start_dev(dev: bool, no_dev: bool, is_tty: bool) -> Result<bool, S
 // ── Erno dependency resolution ────────────────────────────────────────────────
 
 fn resolve_erno_deps(erno_path: Option<&str>) -> (String, String) {
-    const ERNO_GIT: &str = "https://github.com/tomekpiotrowski/erno";
     match erno_path {
         Some(p) => {
             let (repo_root, api_path) = resolve_local_erno_paths(p);
-            let angular_dist = repo_root.join("app/dist/erno-angular");
-            if !angular_dist.join("package.json").is_file() {
-                ui::abort(&format!(
-                    "could not find a built erno-angular package at {}\n\
-                     Run `cd {}/app && npm install && npm run build -- erno-angular` first.",
-                    angular_dist.display(),
-                    repo_root.display()
-                ));
-            }
+            let tarball = pack_local_erno_angular(&repo_root);
             (
                 format!(r#"{{ path = "{}" }}"#, api_path.display()),
-                format!("file:{}", angular_dist.display()),
+                format!("file:{}", tarball.display()),
             )
         }
-        None => (format!(r#"{{ git = "{ERNO_GIT}" }}"#), "^0.0.1".to_string()),
+        None => (
+            crate::version::erno_git_dep(),
+            crate::version::erno_angular_tarball_url(),
+        ),
     }
+}
+
+/// Pack `app/dist/erno-angular` so the generated app depends on a tarball
+/// rather than a directory symlink (which pulls in a second Angular runtime).
+fn pack_local_erno_angular(repo_root: &Path) -> PathBuf {
+    let dist = repo_root.join("app/dist/erno-angular");
+    let pkg_path = dist.join("package.json");
+    if !pkg_path.is_file() {
+        ui::abort(&format!(
+            "could not find a built erno-angular package at {}\n\
+             Run `cd {}/app && npm install && npm run build -- erno-angular` first.",
+            dist.display(),
+            repo_root.display()
+        ));
+    }
+    let version = fs::read_to_string(&pkg_path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|pkg| pkg.get("version")?.as_str().map(str::to_string))
+        .unwrap_or_else(|| {
+            ui::abort(&format!(
+                "could not read version from {}",
+                pkg_path.display()
+            ))
+        });
+    let status = Command::new("npm")
+        .arg("pack")
+        .current_dir(&dist)
+        .status()
+        .unwrap_or_else(|e| ui::abort(&format!("failed to run npm pack: {e}")));
+    if !status.success() {
+        ui::abort("npm pack of erno-angular failed");
+    }
+    let tarball = dist.join(format!("erno-angular-{version}.tgz"));
+    if !tarball.is_file() {
+        ui::abort(&format!("npm pack did not write {}", tarball.display()));
+    }
+    ui::ok(format!(
+        "packed {}",
+        tarball.file_name().unwrap().to_string_lossy()
+    ));
+    tarball
 }
 
 fn resolve_local_erno_paths(path: &str) -> (PathBuf, PathBuf) {
@@ -349,15 +384,10 @@ fn create_api(
 
 // ── Install app npm dependencies ─────────────────────────────────────────────
 
-fn install_app_deps(dest: &Path, use_install_links: bool) {
+fn install_app_deps(dest: &Path) {
     let app = dest.join("app");
     let mut cmd = std::process::Command::new("npm");
     cmd.arg("install");
-    if use_install_links {
-        // file: directory deps are symlinked by default; --install-links copies
-        // them instead, which avoids the duplicate Angular runtime (NG0203).
-        cmd.arg("--install-links");
-    }
     let status = cmd.current_dir(&app).status().unwrap_or_else(|e| {
         ui::abort(&format!("failed to run npm install: {e}"));
     });
@@ -504,7 +534,6 @@ fn patch_app(
     bundle_id: &str,
     erno_angular_dep: &str,
     angular_version: Option<&str>,
-    erno_path: Option<&str>,
 ) {
     let app = dest.join("app");
 
@@ -532,30 +561,6 @@ fn patch_app(
     // keeps that working without a global install or an npx fetch.
     pkg["devDependencies"]["@ionic/cli"] = serde_json::Value::String("^7.2.0".to_string());
 
-    // When erno-angular is installed as a symlink (file: directory dep), npm does
-    // not hoist its dependencies into the consumer's node_modules. Inject them
-    // here so they are present alongside the symlink.
-    if let Some(ep) = erno_path {
-        let (repo_root, _) = resolve_local_erno_paths(ep);
-        let lib_pkg_path = repo_root.join("app/dist/erno-angular/package.json");
-        if let Ok(content) = fs::read_to_string(&lib_pkg_path) {
-            if let Ok(lib_pkg) = serde_json::from_str::<serde_json::Value>(&content) {
-                if let Some(deps) = lib_pkg["dependencies"].as_object() {
-                    for (dep_name, dep_ver) in deps {
-                        // Angular packages are already present in the app; skip them.
-                        if dep_name.starts_with("@angular/") {
-                            continue;
-                        }
-                        // Only insert if not already declared by the app.
-                        if pkg["dependencies"][dep_name].is_null() {
-                            pkg["dependencies"][dep_name] = dep_ver.clone();
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     // Pin @angular/* versions to match what erno-angular was compiled against,
     // overriding whatever ng new chose based on the globally installed CLI.
     if let Some(ver) = angular_version {
@@ -574,26 +579,6 @@ fn patch_app(
         &pkg_path,
         &(serde_json::to_string_pretty(&pkg).unwrap() + "\n"),
     );
-
-    // When erno-angular is a symlink, the bundler (esbuild) by default follows
-    // symlinks and resolves imports from the real path — finding Angular in the
-    // Erno workspace's node_modules instead of the app's, which loads two
-    // Angular runtimes and causes NG0203. Setting preserveSymlinks=true tells
-    // esbuild to resolve from the symlink location (the app's node_modules),
-    // so only one Angular runtime is ever loaded.
-    if erno_angular_dep.starts_with("file:") {
-        let angular_json_path = app.join("angular.json");
-        if let Ok(aj_content) = fs::read_to_string(&angular_json_path) {
-            if let Ok(mut aj) = serde_json::from_str::<serde_json::Value>(&aj_content) {
-                let build_opts = &mut aj["projects"]["app"]["architect"]["build"]["options"];
-                build_opts["preserveSymlinks"] = serde_json::Value::Bool(true);
-                write(
-                    &angular_json_path,
-                    &(serde_json::to_string_pretty(&aj).unwrap() + "\n"),
-                );
-            }
-        }
-    }
 
     // Replace ionic-generated files with erno versions.
     write(&app.join("src/main.ts"), APP_MAIN_TS);
@@ -796,7 +781,7 @@ fn print_next_steps(name: &str, starting_dev: bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::decide_start_dev;
+    use super::{decide_start_dev, resolve_erno_deps};
 
     #[test]
     fn flags_override_tty() {
@@ -808,5 +793,19 @@ mod tests {
     #[test]
     fn non_tty_does_not_start_without_flag() {
         assert!(!decide_start_dev(false, false, false).unwrap());
+    }
+
+    #[test]
+    fn default_deps_are_tagged_git_and_tarball() {
+        let (dep, angular) = resolve_erno_deps(None);
+        let v = env!("CARGO_PKG_VERSION");
+        assert!(dep.contains("git = "), "{dep}");
+        assert!(dep.contains(&format!("tag = \"v{v}\"")), "{dep}");
+        assert_eq!(
+            angular,
+            format!(
+                "https://github.com/tomekpiotrowski/erno/releases/download/v{v}/erno-angular-{v}.tgz"
+            )
+        );
     }
 }

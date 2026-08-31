@@ -16,9 +16,9 @@ The fastest path to a working Erno app is the CLI: it scaffolds a Rust API, an I
 ## 1. Install the CLI
 
 ```sh
-cargo install --path cli      # from a clone of the erno repo
-# or, once published:
-cargo install erno-cli
+cargo install --git https://github.com/tomekpiotrowski/erno --tag v0.1.0 --path cli --locked
+# or, from a clone of this repo:
+cargo install --path cli
 ```
 
 ## 2. Configure your machine

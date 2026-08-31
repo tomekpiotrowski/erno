@@ -1,6 +1,6 @@
 [package]
 name = "erno-error-reporting-types"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 authors = ["Erno Contributors"]
 description = "The error-reporting contract shared by an Erno application and the collector that watches it"

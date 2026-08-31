@@ -21,9 +21,9 @@ Walk up from the current directory until `erno.toml` or `api/Cargo.toml` is foun
 | Node.js | `node --version` | none — **prerequisite**. Angular 22 needs `^22.22.3 \|\| ^24.15.0 \|\| ^26` |
 | `app` Angular | `app/package.json` `@angular/core` | `ng update` **one major at a time** |
 | `app` Ionic | `app/package.json` `@ionic/angular` | `npx --yes @ionic/migrate` |
-| `app` erno-angular | `app/package.json` | `npm install erno-angular@<this CLI>` after Angular/Ionic |
+| `app` erno-angular | `app/package.json` | rewrite to this CLI's GitHub Release tarball URL, then `npm install` |
 | `admin` Angular | `admin/package.json` | same `ng update` loop |
-| `api` erno crate | `api/Cargo.toml` | `cargo update -p erno` (git/crates.io). Path deps are reported, not rewritten |
+| `api` erno crate | `api/Cargo.toml` | rewrite the git `tag` to this CLI's version, then `cargo update -p erno`. Path deps are reported, not rewritten |
 
 Absent trees are omitted. A project with no `admin/` does not get an admin row.
 
@@ -34,7 +34,7 @@ Absent trees are omitted. A project with no `admin/` does not get an admin row.
 1. Refuse if Node is too old, git is missing, the directory is not a repo, or the worktree is dirty (unless `--force`). Missing git is reported as such, not as a dirty tree.
 2. App Angular majors, then Ionic, then erno-angular.
 3. Admin Angular majors.
-4. `cargo update -p erno`. If the crate moved, run `cargo run -- db migrate up` in `api/` afterwards — the command reminds you; it does not migrate.
+4. Pin `erno` to this CLI's git tag and `cargo update -p erno`. If the crate moved, run `cargo run -- db migrate up` in `api/` afterwards — the command reminds you; it does not migrate.
 
 Children run with `CI=true` so they cannot prompt. After the CLI has accepted the tree, `ng update` gets `--allow-dirty` and `@ionic/migrate` gets `--force`, because each earlier step in the same run writes files. Git remains the undo; the command does not commit.
 

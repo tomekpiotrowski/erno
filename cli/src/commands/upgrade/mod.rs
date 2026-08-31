@@ -10,9 +10,7 @@ use crate::commands::dev::resolve_project_root;
 use crate::commands::packages::run_prefixed;
 use crate::ui;
 
-pub use plan::{
-    angular_majors, plan_upgrade, GitStatus, ProjectSnapshot, StepKind, TARGET_ERNO_ANGULAR,
-};
+pub use plan::{angular_majors, plan_upgrade, GitStatus, ProjectSnapshot, StepKind};
 
 #[derive(Args, Debug, Default)]
 pub struct UpgradeArgs {
@@ -78,7 +76,7 @@ pub async fn handle_upgrade(args: UpgradeArgs) -> ui::Cmd {
         matches!(
             s.kind,
             StepKind::ErnoCrate {
-                spec: plan::CrateSpec::Git
+                spec: plan::CrateSpec::Git { .. }
             } | StepKind::ErnoCrate {
                 spec: plan::CrateSpec::Version(_)
             }
@@ -170,10 +168,14 @@ fn execute_step(root: &Path, step: &plan::UpgradeStep) -> bool {
         }
         StepKind::Ionic { dir, .. } => ionic_migrate(&root.join(dir)),
         StepKind::ErnoAngular { .. } => {
+            let pkg = root.join("app/package.json");
+            let url = crate::version::erno_angular_tarball_url();
+            if !rewrite_json_dep(&pkg, "erno-angular", &url) {
+                return false;
+            }
             let dir = root.join("app");
             let mut cmd = Command::new("npm");
-            cmd.args(["install", &format!("erno-angular@{TARGET_ERNO_ANGULAR}")])
-                .current_dir(&dir);
+            cmd.arg("install").current_dir(&dir);
             apply_ci(&mut cmd);
             run_prefixed(&mut cmd, "app")
         }
@@ -182,7 +184,15 @@ fn execute_step(root: &Path, step: &plan::UpgradeStep) -> bool {
                 ui::warn("path dependency — update the erno checkout, then rebuild");
                 true
             }
-            plan::CrateSpec::Git | plan::CrateSpec::Version(_) => {
+            plan::CrateSpec::Git { .. } | plan::CrateSpec::Version(_) => {
+                let cargo = root.join("api/Cargo.toml");
+                let Ok(src) = fs::read_to_string(&cargo) else {
+                    return false;
+                };
+                let tag = crate::version::erno_tag();
+                if fs::write(&cargo, plan::rewrite_erno_to_git_tag(&src, &tag)).is_err() {
+                    return false;
+                }
                 let dir = root.join("api");
                 let mut cmd = Command::new("cargo");
                 cmd.args(["update", "-p", "erno"]).current_dir(&dir);
@@ -230,6 +240,20 @@ fn apply_ci(cmd: &mut Command) {
     cmd.env("CI", "true")
         .env("NG_CLI_ANALYTICS", "false")
         .stdin(Stdio::null());
+}
+
+fn rewrite_json_dep(path: &Path, name: &str, value: &str) -> bool {
+    let Ok(src) = fs::read_to_string(path) else {
+        return false;
+    };
+    let Ok(mut pkg) = serde_json::from_str::<serde_json::Value>(&src) else {
+        return false;
+    };
+    pkg["dependencies"][name] = serde_json::Value::String(value.to_string());
+    let Ok(out) = serde_json::to_string_pretty(&pkg) else {
+        return false;
+    };
+    fs::write(path, out + "\n").is_ok()
 }
 
 #[cfg(test)]

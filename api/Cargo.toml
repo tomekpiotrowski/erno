@@ -1,13 +1,12 @@
 [package]
 name = "erno"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 authors = ["Erno Contributors"]
 description = "Shared infrastructure library for building REST APIs with Axum"
 license = "MIT"
-repository = "https://github.com/yourusername/erno"
-homepage = "https://github.com/yourusername/erno"
-documentation = "https://docs.rs/erno"
+repository = "https://github.com/tomekpiotrowski/erno"
+homepage = "https://github.com/tomekpiotrowski/erno"
 readme = "README.md"
 keywords = ["axum", "web", "api", "framework", "jobs"]
 categories = ["web-programming", "asynchronous"]

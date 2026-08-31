@@ -24,7 +24,7 @@ The Angular app has its own three types (unit, feature, e2e). See [Getting start
 
 ```toml
 [dev-dependencies]
-erno = { git = "https://github.com/tomekpiotrowski/erno", features = ["test-utils"] }
+erno = { git = "https://github.com/tomekpiotrowski/erno", tag = "v0.1.0", features = ["test-utils"] }
 ```
 
 ```rust

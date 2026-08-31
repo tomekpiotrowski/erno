@@ -2,9 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main]
   pull_request:
-    branches: [ main, develop ]
+    branches: [main]
+  workflow_call:
 
 env:
   CARGO_TERM_COLOR: always
@@ -22,7 +23,7 @@ jobs:
     name: Format and lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -42,20 +43,19 @@ jobs:
           POSTGRES_USER: erno
           POSTGRES_PASSWORD: erno
           POSTGRES_DB: erno
-        ports: [ '5432:5432' ]
+        ports: ['5432:5432']
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
-      # The collector has its own database; see monitoring/config/test.toml.
-      - name: Create the collector's test database
-        run: PGPASSWORD=erno createdb -h localhost -U erno erno_monitoring_test
+      - name: Test error-reporting-types
+        run: cargo test -p erno-error-reporting-types
 
       - name: Test api
         run: cargo test -p erno --all-features
@@ -63,21 +63,51 @@ jobs:
       - name: Test cli
         run: cargo test -p erno-cli
 
-      # Deliberately `cd`s rather than using `-p`: monitoring/.cargo/config.toml
-      # sets RUST_TEST_THREADS=1, and cargo finds that by walking up from the
-      # working directory. The suite deadlocks against itself in parallel.
-      - name: Test monitoring
-        run: cargo test
-        working-directory: monitoring
-
   docs:
     name: Documentation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Check documentation
         run: cargo doc -p erno --no-deps --all-features
         env:
           RUSTDOCFLAGS: -D warnings
+
+  app:
+    name: erno-angular
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Install
+        run: npm ci
+        working-directory: app
+      - name: Build
+        run: npm run build -- erno-angular
+        working-directory: app
+      - name: Test
+        run: npm test
+        working-directory: app
+
+  admin:
+    name: Admin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: admin/package-lock.json
+      - name: Install
+        run: npm ci
+        working-directory: admin
+      - name: Build
+        run: npm run build
+        working-directory: admin

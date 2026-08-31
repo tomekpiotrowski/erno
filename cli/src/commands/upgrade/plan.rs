@@ -9,8 +9,6 @@ use serde_json::Value as Json;
 pub const TARGET_ANGULAR_MAJOR: u32 = 22;
 /// Ionic major this CLI scaffolds and upgrades toward.
 pub const TARGET_IONIC_MAJOR: u32 = 9;
-/// `erno-angular` version this CLI was built against.
-pub const TARGET_ERNO_ANGULAR: &str = "0.0.1";
 
 /// Angular 22's Node floor: `^22.22.3 || ^24.15.0 || ^26`.
 pub fn node_is_supported(major: u32, minor: u32, patch: u32) -> bool {
@@ -52,7 +50,7 @@ impl GitStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CrateSpec {
-    Git,
+    Git { tag: Option<String> },
     Version(String),
     Path(String),
 }
@@ -159,13 +157,13 @@ fn scan_app(pkg_json: &str) -> Vec<UpgradeStep> {
     };
     if let Some(from) = dep_raw(&pkg, "erno-angular") {
         let local = from.starts_with("file:") || from.starts_with('/') || from.starts_with('.');
-        if !local && (angular_behind || ionic_behind || version_name(&from) != TARGET_ERNO_ANGULAR)
-        {
+        let target = crate::version::erno_angular_tarball_url();
+        if !local && (angular_behind || ionic_behind || from != target) {
             steps.push(UpgradeStep {
                 label: "app erno-angular".into(),
                 current: from.clone(),
-                target: TARGET_ERNO_ANGULAR.into(),
-                how: format!("npm install erno-angular@{TARGET_ERNO_ANGULAR}"),
+                target: target.clone(),
+                how: format!("npm install {target}"),
                 kind: StepKind::ErnoAngular { from },
             });
         }
@@ -187,6 +185,7 @@ fn scan_admin(pkg_json: &str) -> Vec<UpgradeStep> {
 
 fn scan_api(cargo_toml: &str) -> Option<UpgradeStep> {
     let spec = parse_erno_dep(cargo_toml)?;
+    let target_tag = crate::version::erno_tag();
     match spec {
         CrateSpec::Path(p) => Some(UpgradeStep {
             label: "api erno".into(),
@@ -197,20 +196,24 @@ fn scan_api(cargo_toml: &str) -> Option<UpgradeStep> {
                 spec: CrateSpec::Path(p),
             },
         }),
-        CrateSpec::Git => Some(UpgradeStep {
-            label: "api erno".into(),
-            current: "git".into(),
-            target: "latest".into(),
-            how: "cargo update -p erno".into(),
-            kind: StepKind::ErnoCrate {
-                spec: CrateSpec::Git,
-            },
-        }),
+        CrateSpec::Git { tag } if tag.as_deref() == Some(target_tag.as_str()) => None,
+        CrateSpec::Git { tag } => {
+            let current = tag.clone().unwrap_or_else(|| "git (unpinned)".into());
+            Some(UpgradeStep {
+                label: "api erno".into(),
+                current,
+                target: target_tag.clone(),
+                how: format!("pin git tag {target_tag}"),
+                kind: StepKind::ErnoCrate {
+                    spec: CrateSpec::Git { tag },
+                },
+            })
+        }
         CrateSpec::Version(v) => Some(UpgradeStep {
             label: "api erno".into(),
             current: v.clone(),
-            target: "latest".into(),
-            how: "cargo update -p erno".into(),
+            target: target_tag.clone(),
+            how: format!("switch to git tag {target_tag}"),
             kind: StepKind::ErnoCrate {
                 spec: CrateSpec::Version(v),
             },
@@ -281,10 +284,68 @@ pub fn parse_major(spec: &str) -> Option<u32> {
     major.parse().ok()
 }
 
-fn version_name(spec: &str) -> String {
-    spec.trim()
-        .trim_start_matches(['^', '~', '=', 'v'])
-        .to_string()
+fn quoted_after(table: &str, key: &str) -> Option<String> {
+    let rest = table.split(key).nth(1)?;
+    let rest = rest.trim_start_matches([' ', '=', '"', '\''].as_slice());
+    let value: String = rest
+        .chars()
+        .take_while(|c| *c != '"' && *c != '\'')
+        .collect();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+/// Rewrite every `erno = { git = … }` (and `erno = "…"` / `{ version = "…" }`)
+/// line to pin `git` + `tag`, preserving `features` when present.
+pub fn rewrite_erno_to_git_tag(cargo_toml: &str, tag: &str) -> String {
+    let git = crate::version::ERNO_GIT;
+    let mut out = String::new();
+    for (i, line) in cargo_toml.lines().enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        out.push_str(&rewrite_erno_line(line, git, tag));
+    }
+    if cargo_toml.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
+fn rewrite_erno_line(line: &str, git: &str, tag: &str) -> String {
+    let trimmed = line.trim_start();
+    let Some(rest) = trimmed.strip_prefix("erno") else {
+        return line.to_string();
+    };
+    let rest = rest.trim_start().trim_start_matches('=').trim();
+    if rest.starts_with('{') {
+        if rest.contains("path") {
+            return line.to_string();
+        }
+        let features = quoted_list_after(rest, "features");
+        let indent = &line[..line.len() - trimmed.len()];
+        return match features {
+            Some(f) => {
+                format!(r#"{indent}erno = {{ git = "{git}", tag = "{tag}", features = [{f}] }}"#)
+            }
+            None => format!(r#"{indent}erno = {{ git = "{git}", tag = "{tag}" }}"#),
+        };
+    }
+    if rest.starts_with('"') {
+        let indent = &line[..line.len() - trimmed.len()];
+        return format!(r#"{indent}erno = {{ git = "{git}", tag = "{tag}" }}"#);
+    }
+    line.to_string()
+}
+
+fn quoted_list_after(table: &str, key: &str) -> Option<String> {
+    let rest = table.split(key).nth(1)?;
+    let start = rest.find('[')?;
+    let end = rest[start + 1..].find(']')?;
+    Some(rest[start + 1..start + 1 + end].trim().to_string())
 }
 
 pub fn parse_node(raw: Option<&str>) -> Option<(u32, u32, u32)> {
@@ -325,7 +386,9 @@ fn parse_erno_dep(cargo_toml: &str) -> Option<CrateSpec> {
                     return Some(CrateSpec::Path(path));
                 }
                 if rest.contains("git") {
-                    return Some(CrateSpec::Git);
+                    return Some(CrateSpec::Git {
+                        tag: quoted_after(rest, "tag"),
+                    });
                 }
                 if rest.contains("version") {
                     let v = rest
@@ -352,21 +415,33 @@ fn parse_erno_dep(cargo_toml: &str) -> Option<CrateSpec> {
 mod tests {
     use super::*;
 
-    const APP_20: &str = r#"{
+    fn tarball() -> String {
+        crate::version::erno_angular_tarball_url()
+    }
+
+    fn app_20() -> String {
+        r#"{
       "dependencies": {
         "@angular/core": "^20.3.21",
         "@ionic/angular": "^8.8.7",
         "erno-angular": "^0.0.1"
       }
-    }"#;
+    }"#
+        .into()
+    }
 
-    const APP_CURRENT: &str = r#"{
-      "dependencies": {
+    fn app_current() -> String {
+        format!(
+            r#"{{
+      "dependencies": {{
         "@angular/core": "^22.1.3",
         "@ionic/angular": "^9.0.0",
-        "erno-angular": "0.0.1"
-      }
-    }"#;
+        "erno-angular": "{}"
+      }}
+    }}"#,
+            tarball()
+        )
+    }
 
     const ADMIN_20: &str = r#"{
       "dependencies": { "@angular/core": "^20.3.27" }
@@ -376,6 +451,16 @@ mod tests {
 [dependencies]
 erno = { git = "https://github.com/tomekpiotrowski/erno" }
 "#;
+
+    fn api_git_current() -> String {
+        format!(
+            r#"
+[dependencies]
+erno = {{ git = "https://github.com/tomekpiotrowski/erno", tag = "{}" }}
+"#,
+            crate::version::erno_tag()
+        )
+    }
 
     const API_PATH: &str = r#"
 [dependencies]
@@ -394,7 +479,7 @@ erno = { path = "/home/me/erno/api" }
     #[test]
     fn angular_20_app_lists_two_majors_ionic_and_erno_angular() {
         let mut s = snap();
-        s.app_package = Some(APP_20.into());
+        s.app_package = Some(app_20());
         s.admin_package = Some(ADMIN_20.into());
         s.api_cargo = Some(API_GIT.into());
         let plan = plan_upgrade(&s);
@@ -442,9 +527,9 @@ erno = { path = "/home/me/erno/api" }
     #[test]
     fn already_current_is_empty() {
         let mut s = snap();
-        s.app_package = Some(APP_CURRENT.into());
+        s.app_package = Some(app_current());
         s.admin_package = Some(r#"{"dependencies":{"@angular/core":"^22.1.3"}}"#.into());
-        // git erno crate still shows as updatable — exclude it for this case
+        s.api_cargo = Some(api_git_current());
         let plan = plan_upgrade(&s);
         assert!(plan.blocking.is_empty());
         assert!(plan.steps.is_empty(), "{:?}", plan.steps);
@@ -454,7 +539,7 @@ erno = { path = "/home/me/erno/api" }
     #[test]
     fn no_admin_omits_admin_row() {
         let mut s = snap();
-        s.app_package = Some(APP_20.into());
+        s.app_package = Some(app_20());
         let plan = plan_upgrade(&s);
         assert!(plan.steps.iter().all(|st| !st.label.starts_with("admin")));
     }
@@ -463,7 +548,7 @@ erno = { path = "/home/me/erno/api" }
     fn old_node_blocks() {
         let mut s = snap();
         s.node = Some("v22.17.1".into());
-        s.app_package = Some(APP_20.into());
+        s.app_package = Some(app_20());
         let plan = plan_upgrade(&s);
         assert_eq!(plan.blocking.len(), 1);
         assert!(plan.blocking[0].contains("too old"));
@@ -475,7 +560,7 @@ erno = { path = "/home/me/erno/api" }
     fn dirty_git_blocks_unless_force() {
         let mut s = snap();
         s.git = GitStatus::Dirty;
-        s.app_package = Some(APP_20.into());
+        s.app_package = Some(app_20());
         let plan = plan_upgrade(&s);
         assert!(plan.blocking.iter().any(|b| b.contains("dirty")));
         s.force = true;
@@ -534,5 +619,50 @@ erno = { path = "/home/me/erno/api" }
         assert!(node_is_supported(24, 15, 0));
         assert!(node_is_supported(26, 0, 0));
         assert!(!node_is_supported(20, 19, 2));
+    }
+
+    #[test]
+    fn unpinned_git_erno_is_a_tag_pin() {
+        let mut s = snap();
+        s.api_cargo = Some(API_GIT.into());
+        let plan = plan_upgrade(&s);
+        assert_eq!(plan.steps.len(), 1);
+        assert_eq!(plan.steps[0].target, crate::version::erno_tag());
+        assert!(plan.steps[0].how.contains("pin git tag"));
+    }
+
+    #[test]
+    fn parse_erno_dep_reads_tag() {
+        let spec = parse_erno_dep(
+            r#"erno = { git = "https://github.com/tomekpiotrowski/erno", tag = "v0.1.0" }"#,
+        );
+        match spec {
+            Some(CrateSpec::Git { tag }) => assert_eq!(tag.as_deref(), Some("v0.1.0")),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn rewrite_pins_git_tag_and_keeps_features() {
+        let tag = crate::version::erno_tag();
+        let out = rewrite_erno_to_git_tag(
+            r#"
+[dependencies]
+erno = { git = "https://github.com/tomekpiotrowski/erno" }
+
+[dev-dependencies]
+erno = { git = "https://github.com/tomekpiotrowski/erno", features = ["test-utils"] }
+"#,
+            &tag,
+        );
+        assert!(out.contains(&format!("tag = \"{tag}\"")), "{out}");
+        assert!(out.contains("features = [\"test-utils\"]"), "{out}");
+        assert_eq!(out.matches("tag =").count(), 2);
+    }
+
+    #[test]
+    fn rewrite_leaves_path_deps_alone() {
+        let src = r#"erno = { path = "/home/me/erno/api" }"#;
+        assert_eq!(rewrite_erno_to_git_tag(src, "v9.9.9"), src);
     }
 }
