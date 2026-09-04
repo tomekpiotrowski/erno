@@ -10,7 +10,7 @@ The `erno` CLI is the recommended way to create and manage Erno projects. It sca
 ## Installation
 
 ```sh
-cargo install --git https://github.com/tomekpiotrowski/erno --tag v0.2.0 --path cli --locked
+cargo install erno-cli --git https://github.com/tomekpiotrowski/erno --tag v0.2.0 --locked
 # or, from a clone of the erno repo:
 cargo install --path cli
 ```
