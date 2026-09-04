@@ -6,7 +6,35 @@ import { ERNO_CONFIG, ErnoConfig, ErnoErrorReportingConfig } from '../erno.confi
 import { ErnoErrorReporterService } from './erno-error-reporter.service';
 import { REDACTED } from './scrub';
 
-const ENDPOINT = 'https://monitoring.test/api/errors';
+const ENDPOINT = 'https://monitoring.test/api/otlp/v1/logs';
+
+interface OtlpAttr {
+  key: string;
+  value: { stringValue: string };
+}
+
+interface OtlpRecord {
+  body: { stringValue: string };
+  severityText: string;
+  attributes: OtlpAttr[];
+}
+
+function otlp(body: unknown): { resource: OtlpAttr[]; records: OtlpRecord[] } {
+  const payload = body as {
+    resourceLogs: Array<{
+      resource: { attributes: OtlpAttr[] };
+      scopeLogs: Array<{ logRecords: OtlpRecord[] }>;
+    }>;
+  };
+  return {
+    resource: payload.resourceLogs[0].resource.attributes,
+    records: payload.resourceLogs[0].scopeLogs[0].logRecords,
+  };
+}
+
+function attr(attributes: OtlpAttr[], key: string): string | undefined {
+  return attributes.find((item) => item.key === key)?.value.stringValue;
+}
 
 function configure(errorReporting: ErnoErrorReportingConfig | undefined) {
   const config: ErnoConfig = {
@@ -92,13 +120,13 @@ describe('ErnoErrorReporterService', () => {
     const { pending } = await startFlush(service);
 
     const request = http.expectOne(ENDPOINT);
-    expect(request.request.headers.get('X-Erno-Ingest-Key')).toBe('public-browser-token');
-    const body = request.request.body;
-    expect(body.release).toBe('1.2.3');
-    expect(body.environment).toBe('production');
-    expect(body.sdk.name).toBe('erno-angular');
-    expect(body.events[0].message).toContain(REDACTED);
-    expect(body.events[0].message).not.toContain('abcdef123456');
+    expect(request.request.headers.get('Authorization')).toBe('Bearer public-browser-token');
+    const { resource, records } = otlp(request.request.body);
+    expect(attr(resource, 'service.version')).toBe('1.2.3');
+    expect(attr(resource, 'deployment.environment.name')).toBe('production');
+    expect(attr(resource, 'telemetry.sdk.name')).toBe('erno-angular');
+    expect(records[0].body.stringValue).toContain(REDACTED);
+    expect(records[0].body.stringValue).not.toContain('abcdef123456');
     request.flush({ accepted: 1, dropped: 0 });
     await pending;
     http.verify();
@@ -114,8 +142,9 @@ describe('ErnoErrorReporterService', () => {
     const { pending } = await startFlush(service);
 
     const request = http.expectOne(ENDPOINT);
-    expect(request.request.body.events).toHaveLength(1);
-    expect(request.request.body.events[0].context.duplicates).toBe(49);
+    const { records } = otlp(request.request.body);
+    expect(records).toHaveLength(1);
+    expect(attr(records[0].attributes, 'duplicates')).toBe('49');
     request.flush({});
     await pending;
     http.verify();
@@ -130,9 +159,10 @@ describe('ErnoErrorReporterService', () => {
     const { pending } = await startFlush(service);
 
     const request = http.expectOne(ENDPOINT);
-    expect(request.request.body.events.length).toBe(5);
+    const { records } = otlp(request.request.body);
+    expect(records.length).toBe(5);
     // The loss is recorded on the batch rather than being silent.
-    expect(request.request.body.events[0].context.dropped_locally).toBe(15);
+    expect(attr(records[0].attributes, 'dropped_locally')).toBe('15');
     request.flush({});
     await pending;
     http.verify();
@@ -163,7 +193,7 @@ describe('ErnoErrorReporterService', () => {
     const { pending } = await startFlush(service);
 
     const request = http.expectOne(ENDPOINT);
-    expect(request.request.body.events[0].message).toBe('rewritten');
+    expect(otlp(request.request.body).records[0].body.stringValue).toBe('rewritten');
     request.flush({});
     await pending;
   });
@@ -200,7 +230,7 @@ describe('ErnoErrorReporterService', () => {
     // The batch was requeued rather than lost.
     const { pending: second } = await startFlush(service);
     const retried = http.expectOne(ENDPOINT);
-    expect(retried.request.body.events[0].message).toBe('transient');
+    expect(otlp(retried.request.body).records[0].body.stringValue).toBe('transient');
     // A rejected payload is dropped, so nothing is requeued this time.
     retried.flush(null, { status: 400, statusText: 'Bad Request' });
     await second;
@@ -227,8 +257,9 @@ describe('ErnoErrorReporterService', () => {
     const { pending } = await startFlush(service);
 
     const request = http.expectOne(ENDPOINT);
-    expect(request.request.body.events[0].level).toBe('warning');
-    expect(request.request.body.events[0].message).toBe('something looked odd');
+    const { records } = otlp(request.request.body);
+    expect(records[0].severityText).toBe('warning');
+    expect(records[0].body.stringValue).toBe('something looked odd');
     request.flush({});
     await pending;
   });

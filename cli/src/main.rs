@@ -2,6 +2,7 @@ mod commands;
 mod deploy;
 mod global_config;
 mod ng;
+mod postgres;
 mod ui;
 mod version;
 

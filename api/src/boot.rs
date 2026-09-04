@@ -37,6 +37,27 @@ const ENVIRONMENT_VARIABLE: &str = "APP_ENVIRONMENT";
 ///
 /// Contains all the necessary components to start the application,
 /// including metadata, routing, job processing, and scheduling.
+/// Async work an application needs on the serve path, after migrations have
+/// completed and before anything serves traffic. An `Err` refuses the boot.
+///
+/// An application uses this for pre-serve work that needs the database (for
+/// an advisory lock that keeps replicas from racing) and that must fail
+/// loudly, which rules out running it as a side effect of building a router.
+pub type PostMigrateHook = Arc<
+    dyn Fn(
+            sea_orm::DatabaseConnection,
+        )
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send>>
+        + Send
+        + Sync,
+>;
+
+/// Async work an application runs after the server has stopped accepting and
+/// in-flight requests have finished — the drain hook. Monitoring uses this to
+/// flush its telemetry writers so a rolling deploy loses nothing buffered.
+pub type PostServeHook =
+    Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync>;
+
 pub struct BootConfig<ExtraConfig = ()> {
     pub app_info: AppInfo,
     pub app_router: fn(App<ExtraConfig>) -> Router,
@@ -50,6 +71,10 @@ pub struct BootConfig<ExtraConfig = ()> {
     /// layer so the caller can attach one of its own. Monitoring uses this so
     /// the collector has a single origin-set layer.
     pub skip_default_cors: bool,
+    /// Runs on the serve path once migrations are done; `Err` refuses to boot.
+    pub post_migrate: Option<PostMigrateHook>,
+    /// Runs after the server has stopped, inside the drain window.
+    pub post_serve: Option<PostServeHook>,
 }
 
 impl<ExtraConfig> BootConfig<ExtraConfig> {
@@ -70,7 +95,25 @@ impl<ExtraConfig> BootConfig<ExtraConfig> {
             user_data_deleter: None,
             metrics_collectors: crate::metrics::collector::CollectorRegistry::default(),
             skip_default_cors: false,
+            post_migrate: None,
+            post_serve: None,
         }
+    }
+
+    /// Register work to run after migrations, before serving. See
+    /// [`PostMigrateHook`].
+    #[must_use]
+    pub fn with_post_migrate(mut self, hook: PostMigrateHook) -> Self {
+        self.post_migrate = Some(hook);
+        self
+    }
+
+    /// Register drain work to run after the server has stopped. See
+    /// [`PostServeHook`].
+    #[must_use]
+    pub fn with_post_serve(mut self, hook: PostServeHook) -> Self {
+        self.post_serve = Some(hook);
+        self
     }
 
     /// Skip the framework `CorsLayer`. Monitoring sets this so it can attach
@@ -180,6 +223,8 @@ pub async fn boot<AppMigrator: MigratorTrait + 'static, ExtraConfig>(
         config.user_data_deleter,
         config.metrics_collectors,
         config.skip_default_cors,
+        config.post_migrate,
+        config.post_serve,
     )
     .await;
 }
@@ -257,6 +302,8 @@ pub async fn handle_command<AppMigrator: MigratorTrait + 'static, ExtraConfig>(
     user_data_deleter: Option<Arc<dyn UserDataDeleter>>,
     metrics_collectors: crate::metrics::collector::CollectorRegistry,
     skip_default_cors: bool,
+    post_migrate: Option<PostMigrateHook>,
+    post_serve: Option<PostServeHook>,
 ) where
     ExtraConfig: Clone + Default + DeserializeOwned + Send + Sync + 'static,
 {
@@ -294,6 +341,8 @@ pub async fn handle_command<AppMigrator: MigratorTrait + 'static, ExtraConfig>(
                 metrics_collectors,
                 app_info,
                 skip_default_cors,
+                post_migrate,
+                post_serve,
             )
             .await;
         }

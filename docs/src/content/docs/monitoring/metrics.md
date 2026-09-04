@@ -1,73 +1,38 @@
 ---
 title: Metrics
-description: Prometheus, moved into the monitoring deployment, and what Erno instruments.
+description: Pushed over OTLP into erno-monitoring, and what Erno instruments.
 sidebar:
   order: 7
 ---
 
-> **Source**: `api/src/metrics/`, `cli/src/deploy/render.rs`
+> **Source**: `api/src/metrics/`, `api/src/metrics/otlp_push.rs`
 
-## Prometheus moved
+## Pushed, not scraped
 
-It used to run inside the application's own deploy, which meant the thing
-doing the observing shared a failure domain with the thing being observed. It
-now belongs to the monitoring deployment.
+Metrics ride the same path as every other signal: the application **pushes**
+OTLP to erno-monitoring on an interval, authenticated by its ingest token, and
+the rows land in that application's store. Nothing reaches into the
+application's network, there is no scrape discovery to configure or to fail
+silently, and a project starts reporting metrics the moment its token works —
+the same moment its errors, traces and logs do.
 
-Two consequences:
-
-- **Scraping crosses the network.** `/metrics` is no longer reached in-cluster,
-  so `[metrics] auth_token` is required in practice — an internet-reachable
-  metrics endpoint should not be open.
-- **The collector is scraped too.** An operator needs to know when the thing
-  doing the watching is itself struggling.
-
-## One Prometheus, a job per project
-
-Projects are registered while Prometheus is running, so its scrape list cannot
-live in the chart. The collector renders one job per project — each with that
-project's own target, scheme and bearer, labelled `erno_project` — and writes
-them into the `{release}-prometheus-jobs` ConfigMap, which the Prometheus pod
-mounts and loads through `scrape_config_files`. It publishes on boot and after
-every project create, edit or delete.
-
-A project with no `scrape_target` is skipped rather than rendered empty:
-Prometheus refuses a job with no targets, and one unconfigured project would
-otherwise stop every other project being scraped.
-
-Two things it deliberately does not do:
-
-- **No HTTP service discovery.** The console's nginx proxies all of `/api/` to
-  the collector with no `auth_request`, because ingest has to stay ungated. An
-  SD endpoint there would hand every application's metrics bearer to anyone who
-  asked. There is no such route to forget to protect.
-- **No `POST /-/reload` from the collector.** kubelet can take a minute to
-  project a ConfigMap write, so a reload fired at write time returns 200 against
-  the file Prometheus already had — success, with nothing reloaded. A
-  config-reloader sidecar in the Prometheus pod watches the mount and reloads
-  once the change is really on disk.
-
-The collector's RBAC names that one ConfigMap: `get`, `update` and `patch`, in
-its own namespace, on nothing else.
-
-`erno_prometheus_jobs_patch_total{result="failed"}` is worth an alert. While it
-is failing, a newly registered project is never scraped and nothing else says so.
-
-### A fixed target
-
-`[production.scrape]` still exists for something that is not a project — a
-service outside Erno worth watching from the same Prometheus. It is optional,
-and empty by default.
+The pusher lives beside the Prometheus recorder the `metrics` crate macros
+already feed: on each interval it renders the recorder's state, computes
+**deltas** against the previous snapshot, and POSTs an OTLP batch to
+`{collector}/api/otlp/v1/metrics`. Delta temporality is a contract, not a
+preference — the collector's rollups fold delta counters and histograms with
+plain sums, and cumulative histograms are refused visibly. A process restart
+is a non-event: the first snapshot after it simply becomes the new baseline.
 
 ```toml
-# erno-monitoring: deploy/config.toml
-[production.scrape]
-target = ""
-scheme = "https"
+[tracing.otel]
+endpoint = "http://localhost:3001/api/otlp"  # the collector; one base for all signals
+token = "<project server token>"
+metrics_interval_seconds = 15                 # 0 disables the pusher
 ```
 
-In development the collector's own Prometheus scrapes the collector, and nothing
-else: an application's `erno dev` starts no Prometheus, so nothing scrapes it
-locally. Point a running Prometheus at the app's `/metrics` if you want it.
+`/metrics` still answers locally for a human with `curl`, but nothing scrapes
+it, so `[metrics] auth_token` is no longer a de-facto requirement.
 
 ## What is instrumented
 
@@ -129,10 +94,12 @@ dimension obvious at each call site.
 
 ## Dashboards
 
-**Performance** and **Statistics** moved from the admin console to the
-monitoring console, since that is where Prometheus now lives. The admin console
-links across to them. Per-request diagnosis is [tracing](/monitoring/tracing/);
-log search is [logs](/monitoring/logs/).
+**Performance** and **Statistics** live in the monitoring console, rendered
+through the collector's query facade: the console asks for finished panels and
+knows no metric names at all. Project-specific business panels are project
+*configuration* (`business_panels` on the project), not console code. The
+admin console links across. Per-request diagnosis is
+[tracing](/monitoring/tracing/); log search is [logs](/monitoring/logs/).
 
 The admin **Database** page still reads table-count gauges and stays where it
 is: it is about the application's own data rather than about its performance.

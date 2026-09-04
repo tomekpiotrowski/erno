@@ -124,14 +124,18 @@ impl ErrorReportingConfig {
         )
     }
 
-    /// Full URL of the ingest endpoint.
+    /// Full URL of the ingest endpoint: the collector's OTLP logs receiver.
     ///
-    /// Must stay in step with where the monitoring deployment mounts the
-    /// collector: the framework nests an app router under `/api`, so the
-    /// collector's ingest route lands at `/api/errors`.
+    /// Errors ride OTLP like every other signal — a log record carrying
+    /// `exception.*` attributes plus the lossless `erno.frames`. Must stay in
+    /// step with where the monitoring deployment mounts the collector: the
+    /// framework nests an app router under `/api`.
     #[must_use]
     pub fn ingest_endpoint(&self) -> String {
-        format!("{}/api/errors", self.collector_url.trim_end_matches('/'))
+        format!(
+            "{}/api/otlp/v1/logs",
+            self.collector_url.trim_end_matches('/')
+        )
     }
 
     /// Full URL for anonymising one user's stored events.
@@ -208,14 +212,14 @@ mod tests {
             toml::from_str(r#"collector_url = "https://m.test""#).expect("valid");
         assert!(config.is_active());
         assert_eq!(config.batch_size, 200);
-        assert_eq!(config.ingest_endpoint(), "https://m.test/api/errors");
+        assert_eq!(config.ingest_endpoint(), "https://m.test/api/otlp/v1/logs");
     }
 
     #[test]
     fn a_trailing_slash_does_not_double_up() {
         let config: ErrorReportingConfig =
             toml::from_str(r#"collector_url = "https://m.test/""#).expect("valid");
-        assert_eq!(config.ingest_endpoint(), "https://m.test/api/errors");
+        assert_eq!(config.ingest_endpoint(), "https://m.test/api/otlp/v1/logs");
     }
 
     #[test]

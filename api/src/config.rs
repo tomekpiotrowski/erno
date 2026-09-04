@@ -281,6 +281,14 @@ pub struct OtelConfig {
     /// Empty disables log export.
     #[serde(default)]
     pub log_level: String,
+    /// OTLP/HTTP metrics base URL. Empty inherits `endpoint`. The pusher
+    /// appends `/v1/metrics`. Metrics are pushed, never scraped: `/metrics`
+    /// still answers locally, but nothing needs to reach in for it.
+    #[serde(default)]
+    pub metrics_endpoint: String,
+    /// Seconds between metric pushes. `0` disables the pusher.
+    #[serde(default = "default_otel_metrics_interval")]
+    pub metrics_interval_seconds: u64,
     /// Tempo/Loki tenant, sent as `X-Scope-OrgID`.
     ///
     /// Only for a process that pushes to a multi-tenant store *directly*.
@@ -297,6 +305,20 @@ impl OtelConfig {
     #[must_use]
     pub fn traces_enabled(&self) -> bool {
         !self.endpoint.trim().is_empty()
+    }
+
+    /// OTLP/HTTP metrics base URL, if metric push is on.
+    #[must_use]
+    pub fn metrics_target(&self) -> Option<&str> {
+        if self.metrics_interval_seconds == 0 {
+            return None;
+        }
+        let target = if self.metrics_endpoint.trim().is_empty() {
+            self.endpoint.trim()
+        } else {
+            self.metrics_endpoint.trim()
+        };
+        (!target.is_empty()).then_some(target)
     }
 
     /// OTLP/HTTP logs base URL, if log export is on.
@@ -322,6 +344,10 @@ const fn default_otel_sample_ratio() -> f64 {
     0.1
 }
 
+const fn default_otel_metrics_interval() -> u64 {
+    15
+}
+
 impl Default for OtelConfig {
     fn default() -> Self {
         Self {
@@ -331,6 +357,8 @@ impl Default for OtelConfig {
             sample_ratio: default_otel_sample_ratio(),
             service_name: String::new(),
             log_level: String::new(),
+            metrics_endpoint: String::new(),
+            metrics_interval_seconds: default_otel_metrics_interval(),
             tenant: String::new(),
         }
     }

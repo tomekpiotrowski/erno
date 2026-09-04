@@ -15,13 +15,6 @@ use super::Target;
 pub const API_PORT: i32 = 3000;
 pub const COLLECTOR_PORT: i32 = 3001;
 pub const HTTP_PORT: i32 = 80;
-pub const PROMETHEUS_PORT: i32 = 9090;
-pub const TEMPO_PORT: i32 = 3200;
-pub const TEMPO_OTLP_PORT: i32 = 4318;
-pub const LOKI_PORT: i32 = 3100;
-pub const DEFAULT_PROMETHEUS_IMAGE: &str = "prom/prometheus:v2.55.1";
-pub const DEFAULT_TEMPO_IMAGE: &str = "grafana/tempo:3.0.3";
-pub const DEFAULT_LOKI_IMAGE: &str = "grafana/loki:3.4.2";
 
 /// Where the user-owned deploy files live for a target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,14 +88,6 @@ pub struct EnvConfig {
     pub tls: Tls,
     #[serde(default)]
     pub workloads: Workloads,
-    #[serde(default)]
-    pub scrape: Scrape,
-    #[serde(default)]
-    pub prometheus: Prometheus,
-    #[serde(default)]
-    pub tempo: Tempo,
-    #[serde(default)]
-    pub loki: Loki,
     #[serde(default)]
     pub ingress: Ingress,
     /// How `erno deploy setup` installs ingress-nginx: `cloud` (LoadBalancer,
@@ -180,37 +165,6 @@ impl Default for Workloads {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields, default)]
-pub struct Scrape {
-    pub target: String,
-    pub scheme: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Prometheus {
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    #[serde(default = "default_prom_image")]
-    pub image: String,
-    #[serde(default = "default_prom_retention")]
-    pub retention: String,
-    #[serde(default = "default_prom_storage")]
-    pub storage: String,
-}
-
-impl Default for Prometheus {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            image: default_prom_image(),
-            retention: default_prom_retention(),
-            storage: default_prom_storage(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(deny_unknown_fields, default)]
 pub struct Ingress {
     /// 0 omits the nginx limit-rps annotation. Monitoring defaults to 20.
     pub rate_limit_rps: u32,
@@ -231,6 +185,10 @@ pub struct Registry {
 pub struct AppSecrets {
     pub registry: Registry,
     pub api: AppApiSecrets,
+    /// Extra environment for the API container. Interpolated into
+    /// `deploy/extra/*.yaml` as `{{env.NAME}}`.
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -263,10 +221,18 @@ pub struct AppApiSecrets {
 pub struct MonitoringSecrets {
     pub registry: Registry,
     pub collector: CollectorSecrets,
+    /// Kept so existing secrets files with an `api:` section still parse;
+    /// nothing scrapes `/metrics` any more, so the renderer no longer reads
+    /// it.
     #[serde(default)]
+    #[allow(dead_code)]
     pub api: MonitoringApiSecrets,
     #[serde(default)]
     pub error_reporting: MonitoringErrorReportingSecrets,
+    /// Extra environment for the monitoring API container. Interpolated into
+    /// `deploy/extra/*.yaml` as `{{env.NAME}}`.
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -330,85 +296,6 @@ fn default_log_level() -> String {
 }
 fn default_admin_user() -> String {
     "admin".into()
-}
-fn default_prom_image() -> String {
-    DEFAULT_PROMETHEUS_IMAGE.into()
-}
-fn default_prom_retention() -> String {
-    "90d".into()
-}
-fn default_prom_storage() -> String {
-    "10Gi".into()
-}
-
-/// Trace store. Same knobs as Prometheus; default retention is shorter because
-/// traces are fatter than samples.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Tempo {
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    #[serde(default = "default_tempo_image")]
-    pub image: String,
-    #[serde(default = "default_tempo_retention")]
-    pub retention: String,
-    #[serde(default = "default_tempo_storage")]
-    pub storage: String,
-}
-
-impl Default for Tempo {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            image: default_tempo_image(),
-            retention: default_tempo_retention(),
-            storage: default_tempo_storage(),
-        }
-    }
-}
-
-/// Log store. Same knobs as Prometheus.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Loki {
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    #[serde(default = "default_loki_image")]
-    pub image: String,
-    #[serde(default = "default_loki_retention")]
-    pub retention: String,
-    #[serde(default = "default_loki_storage")]
-    pub storage: String,
-}
-
-impl Default for Loki {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            image: default_loki_image(),
-            retention: default_loki_retention(),
-            storage: default_loki_storage(),
-        }
-    }
-}
-
-fn default_tempo_image() -> String {
-    DEFAULT_TEMPO_IMAGE.into()
-}
-fn default_tempo_retention() -> String {
-    "72h".into()
-}
-fn default_tempo_storage() -> String {
-    "10Gi".into()
-}
-fn default_loki_image() -> String {
-    DEFAULT_LOKI_IMAGE.into()
-}
-fn default_loki_retention() -> String {
-    "7d".into()
-}
-fn default_loki_storage() -> String {
-    "10Gi".into()
 }
 
 pub fn parse_deploy_file(toml: &str) -> Result<DeployFile, String> {
@@ -681,6 +568,42 @@ error_reporting:
         assert!(!looks_like_helm_values(yaml));
         let s = parse_monitoring_secrets(yaml).unwrap();
         assert_eq!(s.error_reporting.ingest_token, "tok");
+        assert!(s.env.is_empty());
+    }
+
+    #[test]
+    fn extra_env_map_parses_on_both_secret_shapes() {
+        let app = parse_app_secrets(
+            r#"
+registry:
+  server: ghcr.io
+  username: u
+  password: p
+api:
+  database_url: postgres://u:p@h/db
+  jwt_secret: s
+env:
+  APP__CUSTOM: x
+"#,
+        )
+        .unwrap();
+        assert_eq!(app.env.get("APP__CUSTOM").map(String::as_str), Some("x"));
+
+        let mon = parse_monitoring_secrets(
+            r#"
+registry:
+  server: ghcr.io
+  username: u
+  password: p
+collector:
+  database_url: postgres://u:p@h/db
+  jwt_secret: s
+env:
+  APP__CUSTOM: y
+"#,
+        )
+        .unwrap();
+        assert_eq!(mon.env.get("APP__CUSTOM").map(String::as_str), Some("y"));
     }
 
     #[test]

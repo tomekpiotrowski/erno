@@ -583,6 +583,7 @@ mod tests {
         handler: Option<Arc<dyn crate::jobs::failure_handler::JobFailureHandler>>,
     ) -> crate::app::App {
         crate::app::App {
+            shutdown: crate::shutdown::Shutdown::never(),
             config: t.config.clone(),
             environment: t.environment,
             db: t.db.clone(),

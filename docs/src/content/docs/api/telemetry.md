@@ -20,7 +20,7 @@ means nothing is pushed.
 
 The `tracing` crate here is **structured logging**, not distributed traces.
 Distributed traces are OpenTelemetry spans exported to
-[Tempo](/monitoring/tracing/).
+[the trace store](/monitoring/tracing/).
 
 ## Logs (stdout)
 
@@ -49,21 +49,26 @@ Logs are emitted in compact, human-readable format with timestamps, level, and m
 
 When `[tracing.otel] endpoint` is set, server mode installs an OTLP/HTTP
 exporter (protobuf, no gRPC) and a tracing layer. HTTP requests, jobs and
-`OperationTimer` operations become spans. A separate log appender can push
-to Loki; its level is `[tracing.otel] log_level`, independent of stdout.
+`OperationTimer` operations become spans. A separate log appender pushes log
+records over the same protocol; its level is `[tracing.otel] log_level`,
+independent of stdout.
+
+Everything goes to one place: the collector's OTLP receiver, authenticated by
+the project's trusted server ingest token. The exporter appends
+`/v1/{traces,logs}` itself.
 
 ```toml
 [tracing.otel]
-endpoint = "http://127.0.0.1:4318"
-logs_endpoint = "http://127.0.0.1:3100/otlp"
+endpoint = "http://localhost:3001/api/otlp"   # the collector's `erno dev`
+token = "<project server token>"              # from `erno monitoring add`
 sample_ratio = 1.0
 log_level = "info"
 ```
 
-Both are **empty** in a generated `development.toml`, and `erno dev` starts no
-Tempo or Loki: the stores belong to the collector, which is a separate
-deployment. Fill them in to send a development run's traces and logs to a
-collector you are running.
+`endpoint` and `token` are **empty** in a generated `development.toml`, and
+`erno dev` starts no telemetry store of its own: the stores belong to the
+collector, which is a separate deployment. Fill them in to send a development
+run's traces and logs to a collector you are running.
 
 See [tracing](/monitoring/tracing/) and [logs](/monitoring/logs/) for the
 stores and the console.

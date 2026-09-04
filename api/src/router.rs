@@ -311,6 +311,7 @@ mod dev_inbox_tests {
     async fn production_does_not_serve_the_mock_inbox() {
         let t = setup_test::<Migrator, _>(test_boot(empty_router), no_fixtures).await;
         let app = App {
+            shutdown: crate::shutdown::Shutdown::never(),
             config: t.config.clone(),
             environment: Environment::Production,
             db: t.db.clone(),
@@ -347,6 +348,7 @@ mod dev_inbox_tests {
             use_tls: false,
         };
         let app = App {
+            shutdown: crate::shutdown::Shutdown::never(),
             config,
             environment: Environment::Development,
             db: t.db.clone(),

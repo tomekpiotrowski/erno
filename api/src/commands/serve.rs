@@ -40,6 +40,8 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait + 'static, ExtraCon
     metrics_collectors: crate::metrics::collector::CollectorRegistry,
     app_info: crate::app_info::AppInfo,
     skip_default_cors: bool,
+    post_migrate: Option<crate::boot::PostMigrateHook>,
+    post_serve: Option<crate::boot::PostServeHook>,
 ) where
     ExtraConfig: Clone + Send + Sync + 'static,
 {
@@ -71,6 +73,16 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait + 'static, ExtraCon
         }
         Err(_) => {
             error!("❌ Database setup channel closed unexpectedly");
+            liveness_server_task.abort();
+            return;
+        }
+    }
+
+    // Post-migration hook: the application's own pre-serve work. Failing
+    // here refuses the boot the same way a failed database setup does.
+    if let Some(hook) = post_migrate {
+        if let Err(e) = hook(db.clone()).await {
+            error!("\u{274c} Post-migration setup failed: {e}");
             liveness_server_task.abort();
             return;
         }
@@ -129,6 +141,17 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait + 'static, ExtraCon
 
     // Set up Prometheus metrics recorder
     let prometheus_handle = metrics::setup_metrics();
+
+    // Metrics are pushed, not scraped: the collector never reaches into the
+    // application's network. Inert without an OTLP endpoint.
+    if config.tracing.otel.metrics_target().is_some() {
+        let push_handle = prometheus_handle.clone();
+        let push_config = config.tracing.otel.clone();
+        let version = app_info.version.to_string();
+        tokio::spawn(async move {
+            metrics::otlp_push::push_loop(push_handle, push_config, version).await;
+        });
+    }
     let metrics_collectors = Arc::new(metrics_collectors);
 
     // Error reporting. The reporter is built before the App so the capture
@@ -184,6 +207,7 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait + 'static, ExtraCon
     crate::dev::migrations::install::<AppMigrator>();
 
     let app = App {
+        shutdown: shutdown.clone(),
         config: config.clone(),
         environment,
         db: db.clone(),
@@ -263,6 +287,15 @@ pub async fn handle_serve_command<AppMigrator: MigratorTrait + 'static, ExtraCon
             "Job workers did not stop within the drain timeout; \
              any job still running will be reclaimed by the stuck-job sweeper"
         ),
+    }
+
+    // The application's own drain — e.g. the collector flushing its telemetry
+    // writers so a rolling deploy loses nothing buffered.
+    if let Some(hook) = post_serve {
+        match tokio::time::timeout(crate::shutdown::DRAIN_TIMEOUT, hook()).await {
+            Ok(()) => info!("✅ Application drain finished"),
+            Err(_) => tracing::warn!("Application drain did not finish within the timeout"),
+        }
     }
 
     // Then the error reporter, so the errors that caused the shutdown are

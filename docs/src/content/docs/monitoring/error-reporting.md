@@ -27,7 +27,7 @@ overstatement.
 
 ## The ingest endpoint
 
-`POST /api/errors` on the monitoring deployment.
+the collector's OTLP logs endpoint (`POST /api/otlp/v1/logs`) as log records carrying `exception.*` attributes.
 
 ```jsonc
 {
@@ -53,7 +53,7 @@ overstatement.
 `source` is **never** taken from the wire — the collector assigns it from the
 credential presented. When a request span is active, the reporter also sets
 `context.trace_id` so the Issues page can open the
-[Tempo waterfall](/monitoring/tracing/).
+[trace waterfall](/monitoring/tracing/).
 
 ### Oversized input is truncated, not rejected
 
@@ -122,9 +122,9 @@ purpose, not a side effect of registering.
 
 CORS origins default to `hosts.app`, `hosts.admin` and `hosts.www` from
 `deploy/config.toml` plus the development ports, and add `capacitor://localhost`
-and `ionic://localhost` when the app has a `capacitor.config.ts`. Pass
-`--scrape-target host:port` to have Prometheus scrape the application's
-`/metrics`; without it errors, uptime and alerts still work and metrics do not.
+and `ionic://localhost` when the app has a `capacitor.config.ts`. Metrics need
+no registration step of their own: they push over OTLP with the same token the
+moment `[tracing.otel]` points at the collector.
 
 Companions:
 
@@ -151,7 +151,7 @@ as **404**, the same answer as one that does not exist.
 ```
 GET|POST         /api/collector/projects
 GET|PATCH|DELETE /api/collector/projects/{slug}
-POST             /api/collector/projects/{slug}/tokens/{server,browser,scrape}
+POST             /api/collector/projects/{slug}/tokens/{server,browser}
 GET              /api/collector/projects/{slug}/issues[/counts|/{id}|/{id}/events|/{id}/series]
 POST             /api/collector/projects/{slug}/issues/{id}/{resolve,ignore,unresolve}
 GET              /api/collector/projects/{slug}/{series,releases,health}
@@ -168,16 +168,17 @@ Three things stay un-nested, on purpose:
 | `GET /api/collector/issues/counts` | Same, and the console's nginx `auth_request` probes this exact path with no slug baked into the image. |
 | `POST /releases`, `POST /health`, `DELETE /users/{id}/events` | Machine routes. The project comes from the presenting ingest token, so an application cannot record against another. |
 
-`PATCH` can change the name, CORS origins, scrape settings, retention and status
-fields. It **cannot change the slug**: that is the Tempo and Loki `X-Scope-OrgID`
-and the directory name of the published status document, so a rename would
-orphan a tenant and a URL. A rename is a new project.
+`PATCH` can change the name, CORS origins, retention, business panels and
+status fields. It **cannot change the slug**: that names the published status
+document's directory and every deep link, so a rename would orphan a URL. A
+rename is a new project. (Telemetry is keyed by the project's UUID, so the
+slug could become renameable later without splitting history.)
 
 `DELETE` requires `?force=1`. It cascades in Postgres to every issue, event,
 release, health row, uptime check, status component and alert rule recorded
-against the project, which is not something a console should offer as one click.
-Tempo and Loki tenants are **not** reaped — their data lives in a store the
-collector does not own.
+against the project, which is not something a console should offer as one
+click. Telemetry rows get a best-effort delete; whatever it misses ages
+out through each row's own retention.
 
 Browsers are cross-origin. The collector CORS layer is the union of
 `project.cors_origins` and `[cors] allowed_origins` (the extras: console
@@ -193,7 +194,7 @@ and so can only ever limit by IP.
 | `error_ingest` | Per IP, identity-blind ceiling | 300/10s · 1500/60s · 15000/h |
 | `error_ingest_server` | `token:server:{project_id}` | 100/10s · 600/60s · 10000/h |
 | `error_ingest_browser` | `ip:{ip}:{project_id}` | 10/10s · 30/60s · 200/h |
-| `otlp_auth` | nginx `auth_request` for Tempo/Loki ingest | **exempt** — all pushes share the console pod's IP |
+| OTLP ingest | `Authorization: Bearer`, same tiers as above on the logs path | server pushes are per-token, browser per IP+project |
 
 The browser tier is loose on purpose. A corporate NAT or a university campus
 puts hundreds of real users behind one IPv4, so a tight limit would blackhole a

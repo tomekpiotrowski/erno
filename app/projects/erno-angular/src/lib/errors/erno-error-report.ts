@@ -37,6 +37,77 @@ export interface ErnoErrorEnvelope {
   sdk: { name: string; version: string };
 }
 
+
+/** One OTLP attribute, string-valued. */
+interface OtlpAttribute {
+  key: string;
+  value: { stringValue: string };
+}
+
+const OTLP_SEVERITY: Record<ErnoErrorLevel, number> = {
+  warning: 13,
+  error: 17,
+  fatal: 21,
+};
+
+/**
+ * The envelope as an OTLP/JSON logs request — the wire form the collector
+ * accepts. Errors ride OTLP like every other signal: `exception.*` semconv
+ * attributes plus the lossless `erno.frames`, release and environment on the
+ * resource, and the browser token as a bearer.
+ */
+export function otlpLogsFromEnvelope(envelope: ErnoErrorEnvelope): unknown {
+  const attr = (key: string, value: string): OtlpAttribute => ({
+    key,
+    value: { stringValue: value },
+  });
+  const records = envelope.events.map((event) => {
+    const attributes: OtlpAttribute[] = [attr('exception.type', event.type)];
+    if (event.stack) {
+      attributes.push(attr('exception.stacktrace', event.stack));
+    }
+    if (event.frames?.length) {
+      attributes.push(attr('erno.frames', JSON.stringify(event.frames)));
+    }
+    if (event.fingerprint?.length) {
+      attributes.push(attr('erno.fingerprint', JSON.stringify(event.fingerprint)));
+    }
+    for (const [key, value] of Object.entries(event.context ?? {})) {
+      const mapped = key === 'file' ? 'code.filepath' : key;
+      attributes.push(attr(mapped, typeof value === 'string' ? value : JSON.stringify(value)));
+    }
+    const nanos = event.timestamp
+      ? String(Date.parse(event.timestamp)) + '000000'
+      : String(Date.now()) + '000000';
+    return {
+      timeUnixNano: nanos,
+      severityNumber: OTLP_SEVERITY[event.level] ?? 17,
+      severityText: event.level,
+      body: { stringValue: event.message },
+      attributes,
+    };
+  });
+
+  const resourceAttributes: OtlpAttribute[] = [
+    attr('telemetry.sdk.name', envelope.sdk.name),
+    attr('telemetry.sdk.version', envelope.sdk.version),
+  ];
+  if (envelope.release) {
+    resourceAttributes.push(attr('service.version', envelope.release));
+  }
+  if (envelope.environment) {
+    resourceAttributes.push(attr('deployment.environment.name', envelope.environment));
+  }
+  return {
+    resourceLogs: [
+      {
+        resource: { attributes: resourceAttributes },
+        scopeLogs: [{ logRecords: records }],
+      },
+    ],
+  };
+}
+
 /** Frames kept per report; the collector caps this too. */
 const MAX_FRAMES = 50;
 

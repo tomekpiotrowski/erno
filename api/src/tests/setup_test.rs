@@ -243,6 +243,7 @@ where
     let websocket_connections = Connections::new();
 
     let app = App {
+        shutdown: crate::shutdown::Shutdown::never(),
         config: app_config.clone(),
         environment,
         db: db.clone(),
@@ -383,6 +384,7 @@ impl TestUtils {
         J::Arguments: serde::Serialize + serde::de::DeserializeOwned,
     {
         let app = App {
+            shutdown: crate::shutdown::Shutdown::never(),
             config: self.config.clone(),
             environment: self.environment,
             db: self.db.clone(),

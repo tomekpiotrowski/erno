@@ -72,6 +72,23 @@ pub fn never() -> Shutdown {
 }
 
 impl Shutdown {
+    /// A handle that never fires — for non-serving paths (tests, one-shot
+    /// commands) that build an [`crate::app::App`] without a signal listener.
+    #[must_use]
+    pub fn never() -> Self {
+        let (tx, rx) = watch::channel(false);
+        // Leak the sender so the channel never closes; a leaked watch sender
+        // is one allocation for the life of the process.
+        std::mem::forget(tx);
+        Self(rx)
+    }
+
+    /// Whether shutdown has already been requested.
+    #[must_use]
+    pub fn is_triggered(&self) -> bool {
+        *self.0.borrow()
+    }
+
     /// Resolve when shutdown has been requested.
     ///
     /// Returns immediately if it already has, so a task started late does not

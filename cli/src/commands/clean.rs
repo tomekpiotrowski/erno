@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::IsTerminal;
 use std::path::Path;
-use std::process::Command;
 
 use clap::Args;
 use tokio_postgres::NoTls;
@@ -160,11 +159,12 @@ fn applied_summary(dirs: usize, dbs: usize) -> String {
 }
 
 fn postgres_ready() -> Result<(), String> {
-    match Command::new("pg_isready").status() {
+    match crate::postgres::pg_isready().status() {
         Ok(status) if status.success() => Ok(()),
-        Ok(_) => Err("PostgreSQL is not running (`pg_isready` failed)\n\
-             Start it — e.g.: sudo service postgresql start"
-            .into()),
+        Ok(_) => Err(format!(
+            "PostgreSQL is not running (`pg_isready` failed)\n{}",
+            crate::postgres::start_hint()
+        )),
         Err(_) => Err("PostgreSQL client tools not found (`pg_isready`)\n\
              Install PostgreSQL: https://www.postgresql.org/download/"
             .into()),

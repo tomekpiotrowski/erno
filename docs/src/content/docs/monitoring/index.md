@@ -13,8 +13,8 @@ infrastructure separate from the application it watches.
 
 The separation is the point. Monitoring that lives inside the deployment it
 monitors goes down with it, which is precisely when you need it. That was
-already true before any of this existed — `erno deploy` put Prometheus inside
-the application's own chart.
+already true before any of this existed, when the telemetry stores lived
+inside the application's own chart.
 
 ## What it does today
 
@@ -24,32 +24,39 @@ the application's own chart.
 | [Releases](/monitoring/releases/) | Deploy tracking, and what each deploy introduced |
 | [Subsystem health](/monitoring/subsystem-health/) | Job queue, sync and heartbeat liveness per instance |
 | [Uptime checks](/monitoring/uptime/) | Synthetic probes with flap damping |
-| [Alerts](/monitoring/alerts/) | Rule engine over errors, uptime and health |
+| [Alerts](/monitoring/alerts/) | Rule engine over errors, uptime, health and metrics |
 | [Status page](/monitoring/status-page/) | Published document plus a standalone page |
-| [Metrics](/monitoring/metrics/) | Prometheus, plus Erno subsystem timings |
-| [Tracing](/monitoring/tracing/) | Sampled request trees in Tempo |
-| [Logs](/monitoring/logs/) | Loki. Grep, not issue grouping |
-| APM | Prometheus aggregates + Tempo traces + Loki logs in this console. RUM is future work |
+| [Metrics](/monitoring/metrics/) | Pushed over OTLP, Erno subsystem timings included |
+| [Tracing](/monitoring/tracing/) | Sampled request trees, with a server-side N+1 insight |
+| [Logs](/monitoring/logs/) | Grep, not issue grouping |
+| APM | Metric aggregates + traces + logs in this console. RUM is future work |
 
-Prometheus, Tempo and Loki run **here** rather than in the application's
-chart, so they do not share a failure domain with what they observe. Grafana
-is not in the stack.
+Every signal arrives over **one protocol** — OTLP, authenticated by the
+project's ingest token — and lands in **one store** erno-monitoring owns,
+running in its release rather than in the application's chart so it does not
+share a failure domain with what it observes. Postgres holds the control
+plane (projects, issues, rules, incidents); the store holds the telemetry
+(spans, logs, metric points, error events, uptime results), each row stamped
+with its own per-project retention. Neither Grafana nor a per-signal store
+zoo is in the stack.
 
 ## Architecture
 
 One Rust binary, which is an ordinary Erno application. It calls
-`boot::<MonitorMigrator, MonitorConfig>(...)` and mounts the collector half of
-`erno::error_reporting`; everything underneath — config loading, migrations,
-the job queue, the mailer, metrics, health checks, operator Basic auth — comes
-from the library. That is what makes running monitoring as a separate service
-cheap rather than a second framework to maintain.
+`boot::<MonitorMigrator, MonitorConfig>(...)`, receives every signal on
+`/api/otlp/v1/{traces,logs,metrics}`, and serves the console through a typed
+query facade — the browser never speaks a query language. Everything
+underneath — config loading, migrations, the job queue, the mailer, metrics,
+health checks, operator Basic auth — comes from the library. That is what
+makes running monitoring as a separate service cheap rather than a second
+framework to maintain.
 
 The library is split along the deployment seam:
 
 | Half | Contents | Mounted by |
 |---|---|---|
-| `erno-monitoring` | Ingest, grouping, storage, operator queries | The monitoring binary only |
-| `error_reporting::reporter` | The handle applications hold, the HTTP sender, the capture hooks | Every Erno application |
+| `erno-monitoring` | OTLP ingest, grouping, storage, the query facade | The monitoring binary only |
+| `error_reporting::reporter` | The handle applications hold, the OTLP sender, the capture hooks | Every Erno application |
 
 Collector migrations are deliberately **absent** from `erno_migrations()`. They
 belong to the monitoring database; adding them to the framework list would give
@@ -66,14 +73,8 @@ as its components:
 | Application API | 3000 |
 | Application SPA | 4200 |
 | Admin console | 4300 |
-| Monitoring collector | 3001 |
+| Monitoring API (incl. OTLP ingest) | 3001 |
 | Monitoring console | 4400 |
-| Prometheus | 9090 |
-| Loki | 3100 |
-| Loki (gRPC) | 9096 |
-| Tempo (query) | 3200 |
-| Tempo (OTLP/HTTP) | 4318 |
-| Tempo (gRPC) | 9095 |
 
 The console has a page per service: Issues, Releases, System, Uptime,
 Performance, Logs, Statistics, Alerts and Status page.

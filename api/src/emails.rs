@@ -257,6 +257,7 @@ mod tests {
     async fn send_html_email_inserts_sent_outbox_row() {
         let t = setup_test::<Migrator, _>(test_boot(test_router), no_fixtures).await;
         let app = crate::app::App {
+            shutdown: crate::shutdown::Shutdown::never(),
             config: t.config.clone(),
             environment: t.environment,
             db: t.db.clone(),

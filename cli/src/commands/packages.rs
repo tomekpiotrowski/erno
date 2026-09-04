@@ -267,7 +267,6 @@ fn conventional(root: &Path) -> Vec<Package> {
         packages.push(rust_package("api", "api"));
     }
 
-    // The collector: its own crate, its own test database.
     for (name, dir) in [("app", "app"), ("www", "www"), ("admin", "admin")] {
         if let Some(package) = npm_package(root, name, dir) {
             packages.push(package);

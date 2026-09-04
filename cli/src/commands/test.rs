@@ -287,10 +287,15 @@ fn database_user(url: &str) -> Option<String> {
 }
 
 async fn ensure_test_database(config: &Path) -> Result<(), String> {
-    let ready = Command::new("pg_isready").status();
+    let ready = crate::postgres::pg_isready().status();
     match ready {
         Ok(s) if s.success() => {}
-        _ => return Err("PostgreSQL is not running (`pg_isready` failed)".into()),
+        _ => {
+            return Err(format!(
+                "PostgreSQL is not running (`pg_isready` failed)\n{}",
+                crate::postgres::start_hint()
+            ))
+        }
     }
     let url = test_database_url(config)
         .ok_or_else(|| format!("could not read [database].url from {}", config.display()))?;

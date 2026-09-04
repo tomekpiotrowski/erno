@@ -188,6 +188,9 @@ pub async fn handle_dev(root: Option<PathBuf>, args: DevArgs) -> ui::Cmd {
     if sel.www {
         ensure_npm_deps(&www_dir, "www")?;
     }
+    if let Some(admin_dir) = &admin_dir {
+        ensure_npm_deps(admin_dir, "admin")?;
+    }
 
     let sink = Arc::new(LogSink::new(&root));
     if !ui::verbose() {
@@ -235,6 +238,23 @@ pub async fn handle_dev(root: Option<PathBuf>, args: DevArgs) -> ui::Cmd {
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
+    // Declared extras before the API: a boot hook may need those services
+    // listening, and a store that is not up yet is a process exit rather than
+    // a retry. Starting them first is what turns `erno.toml` `url`/`ports`
+    // into something the API can actually reach.
+    let extra_supervisors: Vec<Supervisor> = extras
+        .into_iter()
+        .map(|svc| {
+            let dir = root.join(svc.dir);
+            let extra_sink = sink.clone();
+            Supervisor::start(svc.name.clone(), shutdown_rx.clone(), move || {
+                let mut cmd = Command::new(&svc.command);
+                cmd.args(&svc.args);
+                spawn_labeled(cmd, &dir, svc.name.clone(), extra_sink.clone())
+            })
+        })
+        .collect();
+
     let api = sel.api.then(|| {
         let api_dir_spawn = api_dir.clone();
         let api_sink = sink.clone();
@@ -281,7 +301,6 @@ pub async fn handle_dev(root: Option<PathBuf>, args: DevArgs) -> ui::Cmd {
 
     let admin = match admin_dir {
         Some(admin_dir) => {
-            ensure_npm_deps(&admin_dir, "admin")?;
             let admin_sink = sink.clone();
             Some(Supervisor::start("admin", shutdown_rx.clone(), move || {
                 let mut cmd = Command::new("npm");
@@ -304,19 +323,6 @@ pub async fn handle_dev(root: Option<PathBuf>, args: DevArgs) -> ui::Cmd {
             spawn_labeled(cmd, &www_dir_spawn, "www", www_sink.clone())
         })
     });
-
-    let extra_supervisors: Vec<Supervisor> = extras
-        .into_iter()
-        .map(|svc| {
-            let dir = root.join(svc.dir);
-            let extra_sink = sink.clone();
-            Supervisor::start(svc.name.clone(), shutdown_rx.clone(), move || {
-                let mut cmd = Command::new(&svc.command);
-                cmd.args(&svc.args);
-                spawn_labeled(cmd, &dir, svc.name.clone(), extra_sink.clone())
-            })
-        })
-        .collect();
 
     if use_tui {
         let mut supervisors = std::collections::HashMap::new();
@@ -402,8 +408,11 @@ fn ensure_npm_deps(dir: &Path, label: &str) -> Result<(), String> {
         return Ok(());
     }
     ui::info(format!("Installing {label} npm dependencies..."));
+    // bun 1.4's streaming extract fails on optional native packages such as
+    // lightningcss-linux-x64-gnu. Harmless when `npm` is actually npm.
     let status = std::process::Command::new("npm")
         .arg("install")
+        .env("BUN_FEATURE_FLAG_DISABLE_STREAMING_INSTALL", "1")
         .current_dir(dir)
         .status();
     match status {

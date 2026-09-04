@@ -62,6 +62,62 @@ pub async fn release_lock(db: &DatabaseConnection, key: i64) -> Result<bool, DbE
         .unwrap_or(false))
 }
 
+/// [`run_with_advisory_lock`], but co-operative: the task is raced against
+/// `shutdown` and the runner exits — releasing the lock — instead of
+/// restarting, so a draining pod hands the singleton to another replica
+/// rather than holding it to the death.
+pub async fn run_singleton_until_shutdown<F, Fut>(
+    db: DatabaseConnection,
+    lock_key: i64,
+    task_name: &str,
+    mut shutdown: crate::shutdown::Shutdown,
+    task_fn: F,
+) where
+    F: Fn(DatabaseConnection) -> Fut,
+    Fut: Future<Output = ()>,
+{
+    loop {
+        if shutdown.is_triggered() {
+            return;
+        }
+        match try_acquire_lock(&db, lock_key).await {
+            Ok(true) => {
+                debug!("🔒 Acquired advisory lock for {}", task_name);
+                tokio::select! {
+                    () = task_fn(db.clone()) => {
+                        // The task returned on its own — a crash for an
+                        // infinite loop. Release and retry after a pause.
+                        let _ = release_lock(&db, lock_key).await;
+                        error!("💥 {} stopped unexpectedly - restarting in 10s...", task_name);
+                        tokio::select! {
+                            () = sleep(Duration::from_secs(10)) => {}
+                            () = shutdown.recv() => return,
+                        }
+                    }
+                    () = shutdown.recv() => {
+                        let _ = release_lock(&db, lock_key).await;
+                        debug!("🔓 Released advisory lock for {} on shutdown", task_name);
+                        return;
+                    }
+                }
+            }
+            Ok(false) => {
+                tokio::select! {
+                    () = sleep(Duration::from_secs(30)) => {}
+                    () = shutdown.recv() => return,
+                }
+            }
+            Err(e) => {
+                warn!("Could not try the advisory lock for {}: {}", task_name, e);
+                tokio::select! {
+                    () = sleep(Duration::from_secs(30)) => {}
+                    () = shutdown.recv() => return,
+                }
+            }
+        }
+    }
+}
+
 /// Runs a task with advisory lock protection
 /// Only one instance across all application instances will run the task at a time
 pub async fn run_with_advisory_lock<F, Fut>(

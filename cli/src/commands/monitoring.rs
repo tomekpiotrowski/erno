@@ -49,15 +49,6 @@ pub struct AddArgs {
     pub slug: Option<String>,
     #[command(flatten)]
     pub connect: ConnectArgs,
-    /// host:port Prometheus should scrape for this application's /metrics
-    #[arg(long)]
-    pub scrape_target: Option<String>,
-    /// http or https (default https)
-    #[arg(long)]
-    pub scrape_scheme: Option<String>,
-    /// Bearer token Prometheus presents when scraping
-    #[arg(long)]
-    pub metrics_token: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -313,9 +304,6 @@ async fn add(args: AddArgs) -> ui::Cmd {
         "slug": slug,
         "name": slug,
         "cors_origins": origins,
-        "scrape_target": args.scrape_target.clone().unwrap_or_default(),
-        "scrape_scheme": args.scrape_scheme.clone().unwrap_or_else(|| "https".into()),
-        "scrape_metrics_token": args.metrics_token.clone().unwrap_or_default(),
     });
     let base = base_url(&args.connect.url);
     let created = request(
@@ -331,14 +319,13 @@ async fn add(args: AddArgs) -> ui::Cmd {
     ui::ok(format!("project {slug} created"));
 
     write_tokens(&root, &base, server_token, browser_token);
-    report_scrape(args.scrape_target.as_deref());
     print_add_next_steps(&origins, server_token, has_capacitor);
     Ok(())
 }
 
 /// Put the two tokens where the application reads them.
 fn write_tokens(root: &Path, base: &str, server_token: &str, browser_token: &str) {
-    let endpoint = format!("{base}/api/errors");
+    let endpoint = format!("{base}/api/otlp/v1/logs");
     for path in environment_files(root) {
         let Ok(source) = std::fs::read_to_string(&path) else {
             continue;
@@ -374,17 +361,6 @@ fn write_tokens(root: &Path, base: &str, server_token: &str, browser_token: &str
         }
         None => ui::info("deploy/secrets.example.yaml already has an ingest_token — left as is"),
     }
-}
-
-fn report_scrape(target: Option<&str>) {
-    if target.is_some_and(|t| !t.trim().is_empty()) {
-        return;
-    }
-    ui::warn("no scrape target — Prometheus will not scrape this application");
-    ui::detail(
-        "Pass --scrape-target host:port, or set it on the project in the console.\n\
-         Errors, uptime and alerts work without it; metrics do not.",
-    );
 }
 
 fn print_add_next_steps(origins: &[String], server_token: &str, has_capacitor: bool) {
@@ -511,10 +487,10 @@ www = "example.com"
     #[test]
     fn an_environment_without_a_block_gains_one() {
         let source = "export const environment = {\n  production: false,\n  apiUrl: 'http://localhost:3000',\n};\n";
-        let out = fill_error_reporting(source, "https://m.test/api/errors", "ernb_x")
+        let out = fill_error_reporting(source, "https://m.test/api/otlp/v1/logs", "ernb_x")
             .expect("should fill");
         assert!(out.contains("errorReporting: {"));
-        assert!(out.contains("endpoint: 'https://m.test/api/errors'"));
+        assert!(out.contains("endpoint: 'https://m.test/api/otlp/v1/logs'"));
         assert!(out.contains("key: 'ernb_x'"));
         // The object must still parse: the previous member keeps its comma.
         assert!(out.contains("apiUrl: 'http://localhost:3000',"));
@@ -524,7 +500,7 @@ www = "example.com"
     #[test]
     fn an_empty_block_is_filled_in_place() {
         let source = "export const environment = {\n  production: false,\n  errorReporting: {\n    endpoint: '',\n    key: '',\n  },\n};\n";
-        let out = fill_error_reporting(source, "https://m.test/api/errors", "ernb_x")
+        let out = fill_error_reporting(source, "https://m.test/api/otlp/v1/logs", "ernb_x")
             .expect("should fill");
         assert!(out.contains("key: 'ernb_x'"));
         assert_eq!(
@@ -538,8 +514,10 @@ www = "example.com"
     /// reports arriving, and nothing would say so.
     #[test]
     fn a_key_already_in_use_is_never_overwritten() {
-        let source = "export const environment = {\n  errorReporting: {\n    endpoint: 'https://old/api/errors',\n    key: 'ernb_live',\n  },\n};\n";
-        assert!(fill_error_reporting(source, "https://m.test/api/errors", "ernb_new").is_none());
+        let source = "export const environment = {\n  errorReporting: {\n    endpoint: 'https://old/api/otlp/v1/logs',\n    key: 'ernb_live',\n  },\n};\n";
+        assert!(
+            fill_error_reporting(source, "https://m.test/api/otlp/v1/logs", "ernb_new").is_none()
+        );
     }
 
     #[test]

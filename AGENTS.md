@@ -17,7 +17,7 @@ Rust/Axum SaaS infrastructure: auth, jobs, billing, sync, storage.
 
 `api/`, `cli/` and `error-reporting-types/` share one cargo workspace. `app/`, `admin/` and `docs/` are npm projects.
 
-The monitoring collector lives in its own repository (`erno-monitoring`). It depends on this one; nothing here may depend on it. The only thing both sides share is `error-reporting-types/` — what crosses the wire between an application and the collector watching it. Generated apps do not contain a collector: one deployment watches every Erno app in an organisation.
+The monitoring application lives in its own repository (`erno-monitoring`). It depends on this one; nothing here may depend on it. The only thing both sides share is `error-reporting-types/` — what crosses the wire between an application and the collector watching it. Generated apps do not contain a collector: one deployment watches every Erno app in an organisation. The CLI must not encode erno-monitoring's store (image, ports, schema version); that topology lives in `erno-monitoring`.
 
 ```sh
 ./build.sh              # build everything

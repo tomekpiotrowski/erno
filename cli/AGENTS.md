@@ -17,3 +17,5 @@ Does not depend on the `api/` crate.
 To add a command: `src/commands/<name>.rs` with `handle_<name>`, declare it in `commands/mod.rs`, wire it in `main.rs`.
 
 Narrative docs: `docs/src/content/docs/cli/`.
+
+`deploy/extra/` is how a tree adds workloads the CLI does not know (interpolates `{{release}}` / `{{version}}` / `{{namespace}}` / `{{env.NAME}}`). Do not grow first-class store types in the renderer.

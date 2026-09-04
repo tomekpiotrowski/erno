@@ -1,6 +1,6 @@
 ---
 title: Deploying monitoring
-description: Shipping the collector, console and Prometheus as their own release, in their own cluster.
+description: Shipping the monitoring API and operator console as their own release, in their own cluster.
 ---
 
 The collector is a **separate deployment in a separate repository**
@@ -27,7 +27,7 @@ erno deploy install v0.1.0
 | `api/Dockerfile` | The collector image (`context: ./api`) |
 | `app/Dockerfile` | The console image (`context: ./app`) |
 | `app/docker/{nginx.conf,entrypoint.sh}` | Console nginx, proxying `/api/` to the collector |
-| `deploy/config.toml` | Context, host, scrape target, Prometheus |
+| `deploy/config.toml` | Context, host |
 | `deploy/secrets.example.yaml` | Collector secrets, registry pull creds |
 | `.github/workflows/monitoring.yaml` | Its own build and release workflow, tagged `v*` |
 
@@ -55,17 +55,18 @@ deliberate: `monitoring_url` in the application's `deploy/config.toml`, the
 browser SDK's URL and the console's own origin become one string, with one
 certificate and one CORS origin to keep straight.
 
-Prometheus, Tempo and Loki are never exposed. They are reached in-cluster, or
-through the console's `/prometheus/`, `/tempo/` and `/loki/` locations, which
-gate them behind the collector's operator credentials — those stores have no
-authentication of their own.
+The telemetry store is extra YAML in the erno-monitoring repository
+(`deploy/extra/`), not something this CLI renders. It is reached in-cluster
+by the monitoring API alone; the console reads everything through that API's
+authenticated query facade, so the store needs no route through the ingress.
 
-Applications **push** traces and logs to `/otlp/v1/traces` and `/otlp/v1/logs`
-on the same host, authenticated with the trusted **server** ingest token
-(`Authorization: Bearer`). The public browser token is rejected. nginx
-`auth_request`s `/api/otlp/auth` on the collector, then proxies to Tempo :4318
-or Loki :3100. That GET is not rate-limited: every replica shares the console
-pod's IP, so a per-IP quota would be a global ingest ceiling.
+Applications **push** every signal to `/api/otlp/v1/{traces,logs,metrics}` on
+the same host, authenticated with the trusted **server** ingest token
+(`Authorization: Bearer`) — straight through the `/api/` proxy to the
+collector, which authenticates the bearer itself. There is no `auth_request`
+in the ingest path: telemetry keeps flowing while the console is down. The
+public browser token is accepted only on the logs path, where browsers report
+their own errors.
 
 ## Values that must match across the two deployments
 

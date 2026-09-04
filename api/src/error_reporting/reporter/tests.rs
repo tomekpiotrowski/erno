@@ -14,7 +14,9 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use axum::{extract::State, routing::post, Json, Router};
+use axum::{body::Bytes, extract::State, routing::post, Json, Router};
+use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
+use prost::Message as _;
 use serde_json::Value;
 
 use crate::{
@@ -28,7 +30,7 @@ use crate::{
 /// A stand-in collector that records what it was sent.
 #[derive(Clone, Default)]
 struct MockCollector {
-    received: Arc<Mutex<Vec<Value>>>,
+    received: Arc<Mutex<Vec<ExportLogsServiceRequest>>>,
     requests: Arc<AtomicUsize>,
     status: Arc<AtomicUsize>,
 }
@@ -46,29 +48,43 @@ impl MockCollector {
         self.requests.load(Ordering::SeqCst)
     }
 
-    fn envelopes(&self) -> Vec<Value> {
+    fn requests_received(&self) -> Vec<ExportLogsServiceRequest> {
         self.received.lock().expect("not poisoned").clone()
+    }
+
+    /// Every log-record body across every request, in arrival order.
+    fn bodies(&self) -> Vec<String> {
+        use opentelemetry_proto::tonic::common::v1::any_value;
+        self.requests_received()
+            .iter()
+            .flat_map(|r| &r.resource_logs)
+            .flat_map(|r| &r.scope_logs)
+            .flat_map(|s| &s.log_records)
+            .filter_map(|record| match record.body.as_ref()?.value.as_ref()? {
+                any_value::Value::StringValue(s) => Some(s.clone()),
+                _ => None,
+            })
+            .collect()
     }
 }
 
 async fn collect(
     State(state): State<MockCollector>,
-    Json(body): Json<Value>,
+    body: Bytes,
 ) -> (axum::http::StatusCode, Json<Value>) {
     state.requests.fetch_add(1, Ordering::SeqCst);
-    state.received.lock().expect("not poisoned").push(body);
+    if let Ok(request) = ExportLogsServiceRequest::decode(body.as_ref()) {
+        state.received.lock().expect("not poisoned").push(request);
+    }
     let status = axum::http::StatusCode::from_u16(state.status.load(Ordering::SeqCst) as u16)
         .unwrap_or(axum::http::StatusCode::ACCEPTED);
-    (
-        status,
-        Json(serde_json::json!({ "accepted": 1, "dropped": 0 })),
-    )
+    (status, Json(serde_json::json!({ "partialSuccess": null })))
 }
 
 /// Start the mock on an ephemeral port and return its base URL.
 async fn start_mock(collector: MockCollector) -> String {
     let router = Router::new()
-        .route("/api/errors", post(collect))
+        .route("/api/otlp/v1/logs", post(collect))
         .with_state(collector);
 
     let listener = tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
@@ -139,12 +155,25 @@ async fn reports_reach_the_collector_with_the_configured_credentials() {
         "the report never arrived"
     );
 
-    let envelopes = mock.envelopes();
-    assert_eq!(envelopes[0]["events"][0]["message"], "something broke");
+    assert_eq!(mock.bodies(), vec!["something broke"]);
     // The release is the *application's* version, not erno's — that is what an
-    // operator needs to correlate an issue with a deploy.
-    assert_eq!(envelopes[0]["release"], "9.9.9");
-    assert_eq!(envelopes[0]["environment"], "test");
+    // operator needs to correlate an issue with a deploy. It rides the OTLP
+    // resource, once per batch.
+    use opentelemetry_proto::tonic::common::v1::any_value;
+    let requests = mock.requests_received();
+    let resource = requests[0].resource_logs[0].resource.as_ref().unwrap();
+    let get = |key: &str| {
+        resource
+            .attributes
+            .iter()
+            .find(|kv| kv.key == key)
+            .and_then(|kv| match kv.value.as_ref()?.value.as_ref()? {
+                any_value::Value::StringValue(s) => Some(s.clone()),
+                _ => None,
+            })
+    };
+    assert_eq!(get("service.version").as_deref(), Some("9.9.9"));
+    assert_eq!(get("deployment.environment.name").as_deref(), Some("test"));
 }
 
 #[tokio::test]
@@ -158,14 +187,7 @@ async fn reports_are_batched_rather_than_sent_one_by_one() {
     }
 
     assert!(
-        wait_for(Duration::from_secs(5), || {
-            mock.envelopes()
-                .iter()
-                .map(|e| e["events"].as_array().map_or(0, Vec::len))
-                .sum::<usize>()
-                >= 10
-        })
-        .await,
+        wait_for(Duration::from_secs(5), || mock.bodies().len() >= 10).await,
         "not all reports arrived"
     );
 

@@ -13,7 +13,7 @@ mod render;
 
 pub use addons::{handle_setup, IngressProvider};
 pub use config::Layout;
-pub use project::{is_collector_tree, read_github_repo, read_project_name, validate_project_root};
+pub use project::{read_github_repo, read_project_name, validate_project_root};
 
 use apply::{
     apply_and_prune, deployment_names, diff_argv, get_deployments_argv, rollback_failed_apply, run,
@@ -128,27 +128,31 @@ fn prepare(version: &str, env_name: &str, target: Target) -> Result<Prepared, St
         ));
     }
     let secrets_yaml = load_secrets_yaml(&secrets_path)?;
-    let mut manifests = match target {
+    let (mut manifests, extra_env) = match target {
         Target::App => {
             let secrets = parse_app_secrets(&secrets_yaml)?;
-            render_app(&AppPlan {
+            let extra_env = secrets.env.clone();
+            let manifests = render_app(&AppPlan {
                 release: &release,
                 github_repo: &file.github_repo,
                 version: &tag,
                 env: &env,
                 secrets: &secrets,
                 include_www: env.workloads.www && project::www_present(),
-            })
+            });
+            (manifests, extra_env)
         }
         Target::Monitoring => {
             let secrets = parse_monitoring_secrets(&secrets_yaml)?;
-            render_monitoring(&MonitoringPlan {
+            let extra_env = secrets.env.clone();
+            let manifests = render_monitoring(&MonitoringPlan {
                 release: &release,
                 github_repo: &file.github_repo,
                 version: &tag,
                 env: &env,
                 secrets: &secrets,
-            })
+            });
+            (manifests, extra_env)
         }
     };
     manifests.extend(load_extra(
@@ -156,6 +160,7 @@ fn prepare(version: &str, env_name: &str, target: Target) -> Result<Prepared, St
         &release,
         &tag,
         &env.namespace,
+        &extra_env,
     )?);
     let yaml = encode_yaml(&manifests)?;
     Ok(Prepared {

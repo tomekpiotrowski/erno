@@ -198,31 +198,12 @@ pub fn convert_config(
             let issuer = yaml_str(secrets_example, &["ingress", "issuer"])
                 .unwrap_or_else(|| "letsencrypt".into());
             let email = yaml_str(secrets_example, &["ingress", "email"]).unwrap_or_default();
-            let target_host = yaml_str(secrets_example, &["api", "target"])
-                .or_else(|| yaml_str(values, &["api", "target"]))
-                .unwrap_or_else(|| "api.example.com:443".into());
-            let scheme = yaml_str(secrets_example, &["api", "scheme"])
-                .or_else(|| yaml_str(values, &["api", "scheme"]))
-                .unwrap_or_else(|| "https".into());
             out.push_str(&format!("\n[production.hosts]\nmonitoring = \"{host}\"\n"));
             out.push_str(&format!(
                 "\n[production.tls]\nenabled = {tls}\nissuer = \"{issuer}\"\nemail = \"{email}\"\n"
             ));
-            out.push_str(&format!(
-                "\n[production.scrape]\ntarget = \"{target_host}\"\nscheme = \"{scheme}\"\n"
-            ));
             let rps = yaml_i32(values, &["ingress", "rateLimitRps"]).unwrap_or(20);
             out.push_str(&format!("\n[production.ingress]\nrate_limit_rps = {rps}\n"));
-            let enabled = yaml_bool(values, &["prometheus", "enabled"]).unwrap_or(true);
-            let image = yaml_str(values, &["prometheus", "image"])
-                .unwrap_or_else(|| super::config::DEFAULT_PROMETHEUS_IMAGE.into());
-            let retention =
-                yaml_str(values, &["prometheus", "retention"]).unwrap_or_else(|| "90d".into());
-            let storage =
-                yaml_str(values, &["prometheus", "storage"]).unwrap_or_else(|| "10Gi".into());
-            out.push_str(&format!(
-                "\n[production.prometheus]\nenabled = {enabled}\nimage = \"{image}\"\nretention = \"{retention}\"\nstorage = \"{storage}\"\n"
-            ));
         }
     }
     Ok(out)

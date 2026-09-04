@@ -43,6 +43,7 @@ async fn create_app_for_routes<ExtraConfig>(config: Config<ExtraConfig>) -> App<
         .expect("Failed to connect to database for route inspection");
 
     App {
+        shutdown: crate::shutdown::Shutdown::never(),
         rate_limit_state: RateLimitState::new(config.rate_limiting.clone()),
         storage: crate::storage::FileStorage::from_config(&config.storage),
         prometheus_handle: metrics::setup_metrics(),

@@ -1,5 +1,7 @@
+use std::path::Path;
 use std::process::Command;
 
+use crate::commands::packages::{load_packages, Package};
 use crate::global_config::GlobalConfig;
 use crate::ui::{self, Row};
 
@@ -89,15 +91,11 @@ async fn run_checks() -> Vec<CheckResult> {
         check_postgres_admin().await,
         check_sea_orm_cli(),
     ];
-    // Prometheus, Tempo and Loki are the collector's backends, declared as its
-    // dev services. A product application needs none of them, so asking about
-    // them there would fail a doctor run over binaries nothing wants.
-    if crate::deploy::is_collector_tree() {
-        results.push(check_prometheus());
-        results.push(check_tempo());
-        results.push(check_loki());
-    }
-    if deploy_dir_present() || std::path::Path::new("chart").is_dir() {
+    // Extra binaries come from this tree's `[[package.dev]] requires`.
+    // A product app with no extra packages is not asked about binaries it
+    // does not want.
+    results.extend(check_declared_binaries());
+    if deploy_dir_present() || Path::new("chart").is_dir() {
         results.push(check_kubectl());
         results.push(check_sops());
         results.push(check_age());
@@ -218,7 +216,7 @@ fn check_psql() -> CheckResult {
 }
 
 fn check_pg_isready() -> CheckResult {
-    let output = Command::new("pg_isready").output();
+    let output = crate::postgres::pg_isready().output();
     match output {
         Err(_) => CheckResult::fail(
             "PostgreSQL server",
@@ -232,7 +230,7 @@ fn check_pg_isready() -> CheckResult {
                 CheckResult::fail(
                     "PostgreSQL server",
                     "not running",
-                    "Start it — e.g.: sudo service postgresql start",
+                    crate::postgres::start_hint(),
                 )
             }
         }
@@ -418,112 +416,53 @@ fn check_deploy_layout() -> Option<CheckResult> {
 }
 
 fn deploy_dir_present() -> bool {
-    std::path::Path::new("deploy/config.toml").exists()
+    Path::new("deploy/config.toml").exists()
 }
 
-fn check_prometheus() -> CheckResult {
-    match run_cmd("prometheus", &["--version"]) {
-        None => CheckResult::fail(
-            "prometheus",
-            "not found",
-            "The collector's Prometheus. Install it:\n\
-             https://prometheus.io/docs/prometheus/latest/installation/",
-        ),
-        Some(v) => CheckResult::pass(
-            "prometheus",
-            v.lines().next().unwrap_or(v.trim()).to_string(),
-        ),
-    }
-}
-
-fn check_tempo() -> CheckResult {
-    match run_cmd("tempo", &["-version"]).or_else(|| run_cmd("tempo", &["--version"])) {
-        None => CheckResult::fail(
-            "tempo",
-            "not found",
-            "The collector's Tempo. Install it:\n\
-             https://grafana.com/docs/tempo/latest/setup/",
-        ),
-        Some(v) => CheckResult::pass("tempo", v.lines().next().unwrap_or(v.trim()).to_string()),
-    }
-}
-
-/// What `loki` on PATH actually is.
+/// Binaries default `erno dev` will refuse to start without.
 ///
-/// Debian/Ubuntu ship an MCMC linkage-analysis binary also named `loki`. Its
-/// `-version` exits 0, so a plain success check calls it Grafana Loki and the
-/// collector's dev stack then restart-loops it with `-config.file`.
-#[derive(Debug, PartialEq, Eq)]
-enum LokiBinary {
-    Grafana { version: String },
-    Missing,
-    Other { summary: String },
-}
-
-fn probe_loki() -> LokiBinary {
-    classify_loki(loki_version_output().as_deref())
-}
-
-fn loki_version_output() -> Option<String> {
-    for arg in ["-version", "--version"] {
-        match std::process::Command::new("loki").arg(arg).output() {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
-            Err(_) => continue,
-            Ok(out) => {
-                let text = format!(
-                    "{}{}",
-                    String::from_utf8_lossy(&out.stdout),
-                    String::from_utf8_lossy(&out.stderr)
-                );
-                if !text.trim().is_empty() {
-                    return Some(text);
+/// Opt-in packages (`default = false`) are skipped: doctor answers whether
+/// the usual loop can run, not whether every optional extra is installed.
+fn required_binaries(packages: &[Package]) -> Vec<String> {
+    let mut out = Vec::new();
+    for pkg in packages {
+        if !pkg.default {
+            continue;
+        }
+        for dev in &pkg.dev {
+            if !dev.default {
+                continue;
+            }
+            if let Some(binary) = &dev.requires {
+                if !out.iter().any(|existing| existing == binary) {
+                    out.push(binary.clone());
                 }
             }
         }
     }
-    None
+    out
 }
 
-fn classify_loki(output: Option<&str>) -> LokiBinary {
-    match output {
-        None => LokiBinary::Missing,
-        Some(text) if is_grafana_loki(text) => LokiBinary::Grafana {
-            version: summarize_loki(text),
-        },
-        Some(text) => LokiBinary::Other {
-            summary: summarize_loki(text),
-        },
+fn check_declared_binaries() -> Vec<CheckResult> {
+    match load_packages(Path::new(".")) {
+        Err(e) => vec![CheckResult::fail("erno.toml", "could not load", e)],
+        Ok(packages) => required_binaries(&packages)
+            .into_iter()
+            .map(|binary| check_required_binary(&binary))
+            .collect(),
     }
 }
 
-fn is_grafana_loki(text: &str) -> bool {
-    // Grafana dskit banner: "loki, version 3.4.2 (branch: HEAD, …)"
-    text.to_ascii_lowercase().contains("loki, version")
-}
-
-fn summarize_loki(text: &str) -> String {
-    text.lines()
-        .map(str::trim)
-        .find(|l| !l.is_empty() && !l.contains("invalid option"))
-        .unwrap_or("unknown")
-        .to_string()
-}
-
-fn check_loki() -> CheckResult {
-    match probe_loki() {
-        LokiBinary::Grafana { version } => CheckResult::pass("loki", version),
-        LokiBinary::Missing => CheckResult::fail(
-            "loki",
+fn check_required_binary(binary: &str) -> CheckResult {
+    match run_cmd(binary, &["--version"]).or_else(|| run_cmd(binary, &["-version"])) {
+        None => CheckResult::fail(
+            binary,
             "not found",
-            "The collector's Loki. Install it:\n\
-             https://grafana.com/docs/loki/latest/setup/install/",
+            format!("Install it, or drop `requires = \"{binary}\"` from erno.toml."),
         ),
-        LokiBinary::Other { summary } => CheckResult::fail(
-            "loki",
-            format!("not Grafana Loki ({summary})"),
-            "Debian/Ubuntu's `loki` package is MCMC linkage analysis, not Grafana Loki.\n\
-             Install Grafana Loki:\n\
-             https://grafana.com/docs/loki/latest/setup/install/",
+        Some(v) => CheckResult::pass(
+            binary,
+            v.lines().next().unwrap_or(v.trim()).trim().to_string(),
         ),
     }
 }
@@ -544,4 +483,84 @@ fn parse_version_after<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
             .next()
             .unwrap_or("")
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::packages::DevService;
+
+    fn pkg(name: &str, default: bool, requires: Option<&str>, dev_default: bool) -> Package {
+        Package {
+            name: name.into(),
+            dir: name.into(),
+            default,
+            database: false,
+            kind: None,
+            build: Vec::new(),
+            lint: Vec::new(),
+            test: Vec::new(),
+            dev: vec![DevService {
+                command: name.into(),
+                args: Vec::new(),
+                url: "http://localhost:1".into(),
+                requires: requires.map(str::to_string),
+                ports: Vec::new(),
+                default: dev_default,
+            }],
+        }
+    }
+
+    #[test]
+    fn default_requires_are_what_doctor_asks_about() {
+        let packages = vec![
+            pkg("codegen", true, Some("protoc"), true),
+            pkg("vision", false, Some("ffmpeg"), true),
+            pkg("sidecar", true, Some("sidecar"), false),
+            pkg("api", true, None, true),
+        ];
+        assert_eq!(required_binaries(&packages), ["protoc"]);
+    }
+
+    #[test]
+    fn duplicate_requires_are_checked_once() {
+        let packages = vec![
+            pkg("a", true, Some("protoc"), true),
+            pkg("b", true, Some("protoc"), true),
+        ];
+        assert_eq!(required_binaries(&packages), ["protoc"]);
+    }
+
+    #[test]
+    fn a_tree_with_no_extra_packages_asks_for_nothing() {
+        assert!(required_binaries(&[]).is_empty());
+        assert!(required_binaries(&[pkg("api", true, None, true)]).is_empty());
+    }
+
+    #[test]
+    fn parse_version_after_takes_the_token_after_the_prefix() {
+        assert_eq!(
+            parse_version_after("rustc 1.88.0 (xxxxxxx YYYY-MM-DD)", "rustc "),
+            Some("1.88.0")
+        );
+        assert_eq!(
+            parse_version_after("foo local version 1.2.3 (official build).", "version "),
+            Some("1.2.3")
+        );
+        assert_eq!(parse_version_after("foo is running", "version "), None);
+    }
+
+    #[test]
+    fn a_missing_required_binary_uses_the_generic_hint() {
+        let result = check_required_binary("definitely-not-a-real-binary");
+        assert_eq!(result.row.level, ui::Level::Fail);
+        assert_eq!(result.row.label, "definitely-not-a-real-binary");
+        assert!(result
+            .row
+            .hint
+            .as_deref()
+            .unwrap_or("")
+            .contains("requires = \"definitely-not-a-real-binary\""));
+        assert!(result.is_blocking());
+    }
 }

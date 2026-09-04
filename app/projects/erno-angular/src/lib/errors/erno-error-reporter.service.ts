@@ -24,6 +24,7 @@ import {
   ErnoErrorLevel,
   ErnoErrorReport,
   normalizeError,
+  otlpLogsFromEnvelope,
 } from './erno-error-report';
 import { scrubContext, scrubText, scrubUrl } from './scrub';
 
@@ -93,7 +94,7 @@ export class ErnoErrorReporterService implements OnDestroy {
     };
     // An absolute URL, not `baseUrl + path`: the collector is a different
     // deployment on a different host.
-    this.endpoint = this.options.endpoint ?? `${config.baseUrl}/api/errors`;
+    this.endpoint = this.options.endpoint ?? `${config.baseUrl}/api/otlp/v1/logs`;
     this.buffer = new MemoryErrorBuffer(this.settings.maxQueueSize);
   }
 
@@ -345,8 +346,8 @@ export class ErnoErrorReporterService implements OnDestroy {
       // Raw HttpClient, deliberately not ErnoHttpService: that funnels failures
       // into a user-facing toast and swallows them into EMPTY.
       this.http
-        .post(this.endpoint, envelope, {
-          headers: { 'X-Erno-Ingest-Key': this.options.key ?? '' },
+        .post(this.endpoint, otlpLogsFromEnvelope(envelope), {
+          headers: { Authorization: `Bearer ${this.options.key ?? ''}` },
         })
         .subscribe({
           next: () => resolve(),

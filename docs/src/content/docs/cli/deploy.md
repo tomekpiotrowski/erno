@@ -5,7 +5,7 @@ sidebar:
   order: 1
 ---
 
-`erno deploy` scaffolds production packaging for a full-stack Erno project (Dockerfiles, GitHub Actions build, SOPS-encrypted secrets) and installs a version onto a Kubernetes cluster. The CLI owns the topology — it renders api / app / www / admin (or the monitoring stack) and server-side-applies them. Cluster add-ons (cert-manager, ingress-nginx) are installed the same way: `erno deploy setup` applies their upstream static YAML. Helm is not used.
+`erno deploy` scaffolds production packaging for a full-stack Erno project (Dockerfiles, GitHub Actions build, SOPS-encrypted secrets) and installs a version onto a Kubernetes cluster. The CLI owns the topology — it renders api / app / www / admin (or the monitoring API and operator console) and server-side-applies them. A tree that needs more than that (a store, a sidecar) puts raw YAML in `deploy/extra/`. Cluster add-ons (cert-manager, ingress-nginx) are installed the same way: `erno deploy setup` applies their upstream static YAML. Helm is not used.
 
 Run all commands from the **project root** (the directory that contains `api/`, `app/`, and `www/`).
 
@@ -46,7 +46,7 @@ Interactive setup that:
 | `www/docker/entrypoint.sh` | Injects runtime `APP_URL` into landing links |
 | `deploy/config.toml` | Context, hosts, replica counts, TLS |
 | `deploy/secrets.example.yaml` | Secret placeholders (admin hash, DB, registry, …) |
-| `deploy/extra/` | Optional extra YAML, same release labels |
+| `deploy/extra/` | Optional extra YAML (`{{release}}` / `{{version}}` / `{{namespace}}` / `{{env.NAME}}`), same release labels |
 | `.github/workflows/build.yaml` | Build and publish images |
 | `api/config/production.toml` | Created if missing (or warned if still full of `CHANGE_ME`) |
 | `deploy/.sops.yaml` | Age public key rules (when `age-keygen` is available) |

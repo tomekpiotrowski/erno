@@ -19,7 +19,7 @@ the collector. Push rather than scrape, for two reasons: it works when the
 application is not reachable from outside, and a heartbeat that *stops* is
 itself the clearest signal that something is badly wrong.
 
-The same numbers are also published as Prometheus gauges, so a deployment can
+The same numbers are also published as metric gauges, so a deployment can
 use either or both.
 
 ```toml
@@ -30,7 +30,7 @@ health_interval_seconds = 30
 
 Instances are identified by `HOSTNAME`, which is what a container orchestrator
 sets. Only the latest reading per instance is kept — this is a liveness view,
-not a time series. Prometheus is the right place for history.
+not a time series. The metrics store is the right place for history.
 
 ## What is judged
 

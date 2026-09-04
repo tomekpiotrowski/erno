@@ -9,7 +9,6 @@ use serde_json::{json, Value};
 
 use super::config::{
     origin, AppSecrets, EnvConfig, MonitoringSecrets, API_PORT, COLLECTOR_PORT, HTTP_PORT,
-    LOKI_PORT, PROMETHEUS_PORT, TEMPO_OTLP_PORT, TEMPO_PORT,
 };
 
 #[derive(Debug, Clone)]
@@ -191,15 +190,6 @@ pub fn render_monitoring(plan: &MonitoringPlan<'_>) -> Vec<Manifest> {
         console_deployment(plan, &ctx, ns),
         service(&ctx, ns, "console", HTTP_PORT, HTTP_PORT),
     ];
-    if plan.env.prometheus.enabled {
-        out.extend(prometheus(plan, &ctx, ns));
-    }
-    if plan.env.tempo.enabled {
-        out.extend(tempo(plan, &ctx, ns));
-    }
-    if plan.env.loki.enabled {
-        out.extend(loki(plan, &ctx, ns));
-    }
     out.push(monitoring_ingress(plan, &ctx, ns));
     if plan.env.tls.enabled {
         out.push(cluster_issuer(&plan.env.tls.email));
@@ -270,7 +260,10 @@ fn api_deployment(plan: &AppPlan<'_>, ctx: &LabelCtx, ns: &str) -> Manifest {
             "APP__ERROR_REPORTING__INGEST_TOKEN",
             &plan.secrets.api.ingest_token,
         ));
-        let otlp = format!("{}/otlp", plan.env.monitoring_url.trim_end_matches('/'));
+        // Straight to the collector's OTLP receiver: it authenticates the
+        // bearer itself, so there is no nginx auth_request in the path and
+        // traces and logs keep flowing while the console is down.
+        let otlp = format!("{}/api/otlp", plan.env.monitoring_url.trim_end_matches('/'));
         env_vars.push(env("APP__TRACING__OTEL__ENDPOINT", &otlp));
         env_vars.push(env("APP__TRACING__OTEL__LOGS_ENDPOINT", &otlp));
         env_vars.push(env(
@@ -288,6 +281,9 @@ fn api_deployment(plan: &AppPlan<'_>, ctx: &LabelCtx, ns: &str) -> Manifest {
         env("APP__EMAIL__PASSWORD", &plan.secrets.api.smtp_password),
         env("APP__EMAIL__FROM", &plan.secrets.api.smtp_from),
     ]);
+    for (k, v) in &plan.secrets.env {
+        env_vars.push(env(k, v));
+    }
     Manifest::namespaced(
         "Deployment",
         name.clone(),
@@ -430,38 +426,18 @@ fn collector_deployment(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> 
     env_vars.push(env("APP__COLLECTOR__STATUS__ENABLED", "true"));
     env_vars.push(env("APP__COLLECTOR__STATUS__NAME", &c.status_name));
     env_vars.push(env("APP__COLLECTOR__STATUS__OUTPUT_PATH", "/app/status"));
-    if plan.env.prometheus.enabled {
-        env_vars.push(env(
-            "APP__COLLECTOR__PROMETHEUS__URL",
-            format!("http://{}-prometheus:{PROMETHEUS_PORT}", plan.release),
-        ));
-        // Which ConfigMap to write the per-project scrape jobs into. Set only
-        // when Prometheus is part of this release: there is nothing to
-        // reconfigure otherwise.
-        env_vars.push(env(
-            "APP__COLLECTOR__PROMETHEUS__JOBS_CONFIGMAP",
-            format!("{}-prometheus-jobs", plan.release),
-        ));
-    }
-    if plan.env.tempo.enabled {
+    if !plan.secrets.error_reporting.ingest_token.is_empty() {
+        // Self-telemetry through the collector's own OTLP receiver, in-pod:
+        // one path to debug, and the seed project's token authenticates it.
         env_vars.push(env(
             "APP__TRACING__OTEL__ENDPOINT",
-            format!("http://{}-tempo:{TEMPO_OTLP_PORT}", plan.release),
+            format!("http://127.0.0.1:{COLLECTOR_PORT}/api/otlp"),
+        ));
+        env_vars.push(env(
+            "APP__TRACING__OTEL__TOKEN",
+            &plan.secrets.error_reporting.ingest_token,
         ));
         env_vars.push(env("APP__TRACING__OTEL__SAMPLE_RATIO", "0.1"));
-    }
-    if plan.env.tempo.enabled || plan.env.loki.enabled {
-        // The collector pushes straight to Tempo and Loki rather than through
-        // its own ingress, so nothing sets a tenant for it. Without this its
-        // self-telemetry is rejected the moment multi-tenancy is on. The slug
-        // is the one the boot seed inserts.
-        env_vars.push(env("APP__TRACING__OTEL__TENANT", SEED_PROJECT_SLUG));
-    }
-    if plan.env.loki.enabled {
-        env_vars.push(env(
-            "APP__TRACING__OTEL__LOGS_ENDPOINT",
-            format!("http://{}-loki:{LOKI_PORT}/otlp", plan.release),
-        ));
         env_vars.push(env("APP__TRACING__OTEL__LOG_LEVEL", "warn"));
     }
     env_vars.extend([
@@ -472,6 +448,9 @@ fn collector_deployment(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> 
         env("APP__EMAIL__PASSWORD", &c.smtp_password),
         env("APP__EMAIL__FROM", &c.smtp_from),
     ]);
+    for (k, v) in &plan.secrets.env {
+        env_vars.push(env(k, v));
+    }
     Manifest::namespaced(
         "Deployment",
         name.clone(),
@@ -526,9 +505,6 @@ fn console_deployment(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> Ma
             &[
                 env("COLLECTOR_HOST", format!("{}-collector", plan.release)),
                 env("COLLECTOR_PORT", COLLECTOR_PORT),
-                env("PROM_HOST", format!("{}-prometheus", plan.release)),
-                env("TEMPO_HOST", format!("{}-tempo", plan.release)),
-                env("LOKI_HOST", format!("{}-loki", plan.release)),
             ],
             WorkloadOpts {
                 grace: false,
@@ -540,470 +516,6 @@ fn console_deployment(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> Ma
             },
         ),
     )
-}
-
-/// Reloads Prometheus when the generated jobs file actually changes on disk.
-///
-/// In the Prometheus pod, not the collector: kubelet can take a minute to
-/// project a ConfigMap write, and a `/-/reload` fired by the writer would
-/// return 200 against the *previous* file and look like success. Watching the
-/// mount is the only signal that the new jobs are really there.
-const CONFIG_RELOADER_IMAGE: &str =
-    "quay.io/prometheus-operator/prometheus-config-reloader:v0.78.1";
-
-fn prometheus(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> Vec<Manifest> {
-    let cm_name = format!("{}-prometheus", plan.release);
-    let jobs_name = format!("{}-prometheus-jobs", plan.release);
-    let yml = prometheus_yml(plan);
-    let cm = Manifest::namespaced(
-        "ConfigMap",
-        cm_name.clone(),
-        ns,
-        "prometheus",
-        ctx,
-        json!({
-            "apiVersion": "v1",
-            "kind": "ConfigMap",
-            "metadata": { "name": cm_name },
-            "data": { "prometheus.yml": yml },
-        }),
-    );
-    let pvc_name = format!("{}-prometheus", plan.release);
-    let pvc = Manifest::namespaced(
-        "PersistentVolumeClaim",
-        pvc_name.clone(),
-        ns,
-        "prometheus",
-        ctx,
-        json!({
-            "apiVersion": "v1",
-            "kind": "PersistentVolumeClaim",
-            "metadata": { "name": pvc_name },
-            "spec": {
-                "accessModes": ["ReadWriteOnce"],
-                "resources": { "requests": { "storage": plan.env.prometheus.storage } },
-            },
-        }),
-    );
-    let dep_name = format!("{}-prometheus", plan.release);
-    let mut dep = workload(
-        &dep_name,
-        "prometheus",
-        plan.release,
-        plan.version,
-        1,
-        &plan.env.prometheus.image,
-        PROMETHEUS_PORT,
-        &[],
-        WorkloadOpts {
-            grace: false,
-            pre_stop: false,
-            readiness: None,
-            liveness: None,
-            volumes: vec![
-                Volume {
-                    name: "config",
-                    empty_dir: false,
-                    config_map: Some(cm_name.as_str()),
-                    pvc: None,
-                    mount: "/etc/prometheus/prometheus.yml",
-                    // As a file, so the generated/ mount below survives a
-                    // kubelet remount of this ConfigMap.
-                    sub_path: Some("prometheus.yml"),
-                },
-                Volume {
-                    name: "generated",
-                    empty_dir: false,
-                    config_map: Some(jobs_name.as_str()),
-                    pvc: None,
-                    mount: "/etc/prometheus/generated",
-                    sub_path: None,
-                },
-                Volume {
-                    name: "data",
-                    empty_dir: false,
-                    config_map: None,
-                    pvc: Some(pvc_name.as_str()),
-                    mount: "/prometheus",
-                    sub_path: None,
-                },
-            ],
-            args: Some(vec![
-                "--config.file=/etc/prometheus/prometheus.yml".into(),
-                "--storage.tsdb.path=/prometheus".into(),
-                // The collector patches the jobs ConfigMap; the sidecar below
-                // asks Prometheus to re-read it, which needs lifecycle on.
-                "--web.enable-lifecycle".into(),
-                format!(
-                    "--storage.tsdb.retention.time={}",
-                    plan.env.prometheus.retention
-                ),
-                "--web.listen-address=:9090".into(),
-            ]),
-        },
-    );
-    dep["spec"]["strategy"] = json!({ "type": "Recreate" });
-    // Prometheus is a third-party image; it does not pull from GHCR and does
-    // not need the registry secret. Drop imagePullSecrets.
-    dep["spec"]["template"]["spec"]
-        .as_object_mut()
-        .unwrap()
-        .remove("imagePullSecrets");
-    // A second container in the same pod, so it shares the generated volume.
-    dep["spec"]["template"]["spec"]["containers"]
-        .as_array_mut()
-        .unwrap()
-        .push(json!({
-            "name": "config-reloader",
-            "image": CONFIG_RELOADER_IMAGE,
-            "args": [
-                "--listen-address=:8080",
-                "--reload-url=http://127.0.0.1:9090/-/reload",
-                "--watched-dir=/etc/prometheus/generated",
-            ],
-            "volumeMounts": [
-                { "name": "generated", "mountPath": "/etc/prometheus/generated" }
-            ],
-        }));
-
-    let deployment =
-        Manifest::namespaced("Deployment", dep_name.clone(), ns, "prometheus", ctx, dep);
-
-    // Ships empty so Prometheus can start before any project exists; the
-    // collector owns the contents from then on.
-    let jobs = Manifest::namespaced(
-        "ConfigMap",
-        jobs_name.clone(),
-        ns,
-        "prometheus",
-        ctx,
-        json!({
-            "apiVersion": "v1",
-            "kind": "ConfigMap",
-            "metadata": { "name": jobs_name },
-            "data": { "jobs.yml": "scrape_configs: []\n" },
-        }),
-    );
-    let svc = service(ctx, ns, "prometheus", PROMETHEUS_PORT, PROMETHEUS_PORT);
-    let mut out = vec![cm, jobs, pvc, deployment, svc];
-    out.extend(prometheus_jobs_rbac(plan, ctx, ns, &jobs_name));
-    out
-}
-
-/// Lets the collector write the jobs ConfigMap, and nothing else.
-///
-/// Named on that one resource rather than granted over ConfigMaps in the
-/// namespace: the collector holds every application's ingest tokens already,
-/// and does not also need to be able to read the deployment's secrets-adjacent
-/// config.
-fn prometheus_jobs_rbac(
-    plan: &MonitoringPlan<'_>,
-    ctx: &LabelCtx,
-    ns: &str,
-    jobs_name: &str,
-) -> Vec<Manifest> {
-    let name = format!("{}-prometheus-jobs", plan.release);
-    let role = Manifest::namespaced(
-        "Role",
-        name.clone(),
-        ns,
-        "collector",
-        ctx,
-        json!({
-            "apiVersion": "rbac.authorization.k8s.io/v1",
-            "kind": "Role",
-            "metadata": { "name": name },
-            "rules": [{
-                "apiGroups": [""],
-                "resources": ["configmaps"],
-                "resourceNames": [jobs_name],
-                "verbs": ["get", "update", "patch"],
-            }],
-        }),
-    );
-    let binding = Manifest::namespaced(
-        "RoleBinding",
-        name.clone(),
-        ns,
-        "collector",
-        ctx,
-        json!({
-            "apiVersion": "rbac.authorization.k8s.io/v1",
-            "kind": "RoleBinding",
-            "metadata": { "name": name },
-            "roleRef": {
-                "apiGroup": "rbac.authorization.k8s.io",
-                "kind": "Role",
-                "name": name,
-            },
-            "subjects": [{
-                "kind": "ServiceAccount",
-                "name": "default",
-                "namespace": ns,
-            }],
-        }),
-    );
-    vec![role, binding]
-}
-
-fn tempo(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> Vec<Manifest> {
-    let cm_name = format!("{}-tempo", plan.release);
-    let yml = tempo_yml(plan);
-    let cm = Manifest::namespaced(
-        "ConfigMap",
-        cm_name.clone(),
-        ns,
-        "tempo",
-        ctx,
-        json!({
-            "apiVersion": "v1",
-            "kind": "ConfigMap",
-            "metadata": { "name": cm_name },
-            "data": { "tempo.yaml": yml },
-        }),
-    );
-    let pvc_name = format!("{}-tempo", plan.release);
-    let pvc = Manifest::namespaced(
-        "PersistentVolumeClaim",
-        pvc_name.clone(),
-        ns,
-        "tempo",
-        ctx,
-        json!({
-            "apiVersion": "v1",
-            "kind": "PersistentVolumeClaim",
-            "metadata": { "name": pvc_name },
-            "spec": {
-                "accessModes": ["ReadWriteOnce"],
-                "resources": { "requests": { "storage": plan.env.tempo.storage } },
-            },
-        }),
-    );
-    let dep_name = format!("{}-tempo", plan.release);
-    let mut dep = workload(
-        &dep_name,
-        "tempo",
-        plan.release,
-        plan.version,
-        1,
-        &plan.env.tempo.image,
-        TEMPO_PORT,
-        &[],
-        WorkloadOpts {
-            grace: false,
-            pre_stop: false,
-            readiness: None,
-            liveness: None,
-            volumes: vec![
-                Volume {
-                    name: "config",
-                    empty_dir: false,
-                    config_map: Some(cm_name.as_str()),
-                    pvc: None,
-                    mount: "/etc/tempo",
-                    sub_path: None,
-                },
-                Volume {
-                    name: "data",
-                    empty_dir: false,
-                    config_map: None,
-                    pvc: Some(pvc_name.as_str()),
-                    mount: "/var/tempo",
-                    sub_path: None,
-                },
-            ],
-            args: Some(vec!["-config.file=/etc/tempo/tempo.yaml".into()]),
-        },
-    );
-    dep["spec"]["strategy"] = json!({ "type": "Recreate" });
-    dep["spec"]["template"]["spec"]["containers"][0]["ports"] = json!([
-        { "containerPort": TEMPO_PORT, "name": "http" },
-        { "containerPort": TEMPO_OTLP_PORT, "name": "otlp-http" },
-    ]);
-    dep["spec"]["template"]["spec"]
-        .as_object_mut()
-        .unwrap()
-        .remove("imagePullSecrets");
-    let deployment = Manifest::namespaced("Deployment", dep_name.clone(), ns, "tempo", ctx, dep);
-    let svc_name = format!("{}-tempo", ctx.release);
-    let svc = Manifest::namespaced(
-        "Service",
-        svc_name.clone(),
-        ns,
-        "tempo",
-        ctx,
-        json!({
-            "apiVersion": "v1",
-            "kind": "Service",
-            "metadata": { "name": svc_name },
-            "spec": {
-                "selector": selector(ctx.release, "tempo"),
-                "ports": [
-                    { "name": "http", "port": TEMPO_PORT, "targetPort": TEMPO_PORT },
-                    { "name": "otlp-http", "port": TEMPO_OTLP_PORT, "targetPort": TEMPO_OTLP_PORT },
-                ],
-            },
-        }),
-    );
-    vec![cm, pvc, deployment, svc]
-}
-
-/// Tempo's config, multi-tenant.
-///
-/// One collector holds every application's traces, and `X-Scope-OrgID` is what
-/// keeps them apart — nginx sets it from the ingest token. Turning this on
-/// makes existing single-tenant blocks unreadable; pre-1.0, the volume is
-/// wiped rather than migrated.
-/// The project the collector seeds itself as, and so the tenant its own traces
-/// and logs are written under.
-const SEED_PROJECT_SLUG: &str = "monitoring";
-
-fn tempo_yml(plan: &MonitoringPlan<'_>) -> String {
-    format!(
-        "multitenancy_enabled: true\n\
-server:\n  http_listen_port: {TEMPO_PORT}\n  log_level: error\n\
-distributor:\n  receivers:\n    otlp:\n      protocols:\n        http:\n          endpoint: 0.0.0.0:{TEMPO_OTLP_PORT}\n\
-live_store:\n  max_block_duration: 5m\n  wal:\n    path: /var/tempo/live-store/traces\n  shutdown_marker_dir: /var/tempo/live-store/shutdown-marker\n\
-backend_scheduler:\n  local_work_path: /var/tempo/work\n  provider:\n    compaction:\n      compaction:\n        block_retention: {}\n\
-storage:\n  trace:\n    backend: local\n    wal:\n      path: /var/tempo/wal\n    local:\n      path: /var/tempo/blocks\n",
-        plan.env.tempo.retention
-    )
-}
-
-fn loki(plan: &MonitoringPlan<'_>, ctx: &LabelCtx, ns: &str) -> Vec<Manifest> {
-    let cm_name = format!("{}-loki", plan.release);
-    let yml = loki_yml(plan);
-    let cm = Manifest::namespaced(
-        "ConfigMap",
-        cm_name.clone(),
-        ns,
-        "loki",
-        ctx,
-        json!({
-            "apiVersion": "v1",
-            "kind": "ConfigMap",
-            "metadata": { "name": cm_name },
-            "data": { "loki.yaml": yml },
-        }),
-    );
-    let pvc_name = format!("{}-loki", plan.release);
-    let pvc = Manifest::namespaced(
-        "PersistentVolumeClaim",
-        pvc_name.clone(),
-        ns,
-        "loki",
-        ctx,
-        json!({
-            "apiVersion": "v1",
-            "kind": "PersistentVolumeClaim",
-            "metadata": { "name": pvc_name },
-            "spec": {
-                "accessModes": ["ReadWriteOnce"],
-                "resources": { "requests": { "storage": plan.env.loki.storage } },
-            },
-        }),
-    );
-    let dep_name = format!("{}-loki", plan.release);
-    let mut dep = workload(
-        &dep_name,
-        "loki",
-        plan.release,
-        plan.version,
-        1,
-        &plan.env.loki.image,
-        LOKI_PORT,
-        &[],
-        WorkloadOpts {
-            grace: false,
-            pre_stop: false,
-            readiness: None,
-            liveness: None,
-            volumes: vec![
-                Volume {
-                    name: "config",
-                    empty_dir: false,
-                    config_map: Some(cm_name.as_str()),
-                    pvc: None,
-                    mount: "/etc/loki",
-                    sub_path: None,
-                },
-                Volume {
-                    name: "data",
-                    empty_dir: false,
-                    config_map: None,
-                    pvc: Some(pvc_name.as_str()),
-                    mount: "/var/loki",
-                    sub_path: None,
-                },
-            ],
-            args: Some(vec!["-config.file=/etc/loki/loki.yaml".into()]),
-        },
-    );
-    dep["spec"]["strategy"] = json!({ "type": "Recreate" });
-    dep["spec"]["template"]["spec"]
-        .as_object_mut()
-        .unwrap()
-        .remove("imagePullSecrets");
-    let deployment = Manifest::namespaced("Deployment", dep_name.clone(), ns, "loki", ctx, dep);
-    let svc = service(ctx, ns, "loki", LOKI_PORT, LOKI_PORT);
-    vec![cm, pvc, deployment, svc]
-}
-
-/// Loki's config, multi-tenant.
-///
-/// `auth_enabled` is Loki's name for tenancy, not for authentication: on, it
-/// requires `X-Scope-OrgID` and keeps each project's logs to itself. The
-/// credentials are still nginx's job.
-fn loki_yml(plan: &MonitoringPlan<'_>) -> String {
-    format!(
-        "auth_enabled: true\n\
-server:\n  http_listen_port: {LOKI_PORT}\n  log_level: error\n\
-common:\n  path_prefix: /var/loki\n  storage:\n    filesystem:\n      chunks_directory: /var/loki/chunks\n      rules_directory: /var/loki/rules\n  replication_factor: 1\n  ring:\n    kvstore:\n      store: inmemory\n\
-schema_config:\n  configs:\n    - from: 2020-10-24\n      store: tsdb\n      object_store: filesystem\n      schema: v13\n      index:\n        prefix: index_\n        period: 24h\n\
-limits_config:\n  allow_structured_metadata: true\n  retention_period: {}\n\
-compactor:\n  working_directory: /var/loki/compactor\n  retention_enabled: true\n  delete_request_store: filesystem\n",
-        plan.env.loki.retention
-    )
-}
-
-fn prometheus_yml(plan: &MonitoringPlan<'_>) -> String {
-    // The static jobs below are the two this chart owns. Everything else is a
-    // project, and projects come and go while Prometheus is running, so the
-    // collector writes those into `generated/` instead.
-    let mut s = String::from(
-        "global:\n  scrape_interval: 15s\n\
-scrape_config_files:\n  - /etc/prometheus/generated/*.yml\nscrape_configs:\n",
-    );
-    // Optional now, and not how applications are scraped: each project gets a
-    // generated job. This is for a fixed target that is not a project.
-    if !plan.env.scrape.target.trim().is_empty() {
-        s.push_str("  - job_name: erno-api\n    metrics_path: /metrics\n");
-        if !plan.env.scrape.scheme.is_empty() {
-            s.push_str(&format!("    scheme: {}\n", plan.env.scrape.scheme));
-        }
-        if !plan.secrets.api.metrics_auth_token.is_empty() {
-            s.push_str(&format!(
-                "    bearer_token: \"{}\"\n",
-                plan.secrets.api.metrics_auth_token
-            ));
-        }
-        s.push_str(&format!(
-            "    static_configs:\n      - targets: [\"{}\"]\n",
-            plan.env.scrape.target
-        ));
-    }
-    s.push_str("  - job_name: erno-monitoring\n    metrics_path: /metrics\n");
-    if !plan.secrets.collector.metrics_auth_token.is_empty() {
-        s.push_str(&format!(
-            "    bearer_token: \"{}\"\n",
-            plan.secrets.collector.metrics_auth_token
-        ));
-    }
-    s.push_str(&format!(
-        "    static_configs:\n      - targets: [\"{}-collector:{COLLECTOR_PORT}\"]\n",
-        plan.release
-    ));
-    s
 }
 
 fn service(ctx: &LabelCtx, ns: &str, component: &str, port: i32, target: i32) -> Manifest {
@@ -1336,13 +848,16 @@ fn image(github_repo: &str, name: &str, version: &str) -> String {
     format!("ghcr.io/{github_repo}/{name}:{version}")
 }
 
-/// `deploy/extra/*.yaml`: interpolate `{{release}}` / `{{version}}` / `{{namespace}}`
-/// and stamp instance labels so prune owns them. ClusterIssuer is left unlabeled.
+/// `deploy/extra/*.yaml`: interpolate `{{release}}` / `{{version}}` /
+/// `{{namespace}}` / `{{env.NAME}}` and stamp instance labels so prune owns
+/// them. ClusterIssuer is left unlabeled. Unknown `{{env.NAME}}` keys become
+/// empty, so a tree can reference a secret the operator has not set yet.
 pub fn load_extra(
     dir: &std::path::Path,
     release: &str,
     version: &str,
     namespace: &str,
+    extra_env: &std::collections::BTreeMap<String, String>,
 ) -> Result<Vec<Manifest>, String> {
     if !dir.exists() {
         return Ok(Vec::new());
@@ -1362,10 +877,7 @@ pub fn load_extra(
     for path in files {
         let raw = std::fs::read_to_string(&path)
             .map_err(|e| format!("could not read {}: {e}", path.display()))?;
-        let raw = raw
-            .replace("{{release}}", release)
-            .replace("{{version}}", version)
-            .replace("{{namespace}}", namespace);
+        let raw = interpolate_extra(&raw, release, version, namespace, extra_env);
         for doc in serde_yaml::Deserializer::from_str(&raw) {
             let value: serde_yaml::Value = serde_yaml::Value::deserialize(doc)
                 .map_err(|e| format!("{}: {e}", path.display()))?;
@@ -1378,6 +890,42 @@ pub fn load_extra(
         }
     }
     Ok(out)
+}
+
+fn interpolate_extra(
+    raw: &str,
+    release: &str,
+    version: &str,
+    namespace: &str,
+    extra_env: &std::collections::BTreeMap<String, String>,
+) -> String {
+    let mut raw = raw
+        .replace("{{release}}", release)
+        .replace("{{version}}", version)
+        .replace("{{namespace}}", namespace);
+    for (k, v) in extra_env {
+        raw = raw.replace(&format!("{{{{env.{k}}}}}"), v);
+    }
+    replace_unknown_env_placeholders(&raw)
+}
+
+fn replace_unknown_env_placeholders(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(start) = rest.find("{{env.") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 6..];
+        match after.find("}}") {
+            Some(end) => rest = &after[end + 2..],
+            None => {
+                out.push_str("{{env.");
+                rest = after;
+                break;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 fn manifest_from_extra(
@@ -1465,9 +1013,6 @@ github_repo = "acme/acme"
 kubernetes_context = "mon"
 [production.hosts]
 monitoring = "monitoring.example.com"
-[production.scrape]
-target = "api.example.com:443"
-scheme = "https"
 "#,
         )
         .unwrap();
@@ -1542,7 +1087,7 @@ api:
         assert!(yaml.contains("https://monitoring.example.com"));
         assert!(yaml.contains("APP__ERROR_REPORTING__INGEST_TOKEN"));
         assert!(yaml.contains("APP__TRACING__OTEL__ENDPOINT"));
-        assert!(yaml.contains("https://monitoring.example.com/otlp"));
+        assert!(yaml.contains("https://monitoring.example.com/api/otlp"));
         assert!(yaml.contains("APP__TRACING__OTEL__TOKEN"));
         assert!(yaml.contains("app.kubernetes.io/managed-by: erno"));
         // Selectors stay on the Helm label so a migrate does not recreate pods.
@@ -1617,76 +1162,8 @@ api:
         assert!(!yaml.contains("TRACING__OTEL"));
     }
 
-    /// Projects are created while Prometheus is running, so its scrape list
-    /// cannot live in the chart. The collector writes it into a ConfigMap this
-    /// pod mounts, and a sidecar asks Prometheus to re-read it.
     #[test]
-    fn prometheus_loads_the_jobs_the_collector_writes() {
-        let (repo, env, secrets) = mon_env();
-        let plan = MonitoringPlan {
-            release: "acme-monitoring",
-            github_repo: &repo,
-            version: "v0.1.0",
-            env: &env,
-            secrets: &secrets,
-        };
-        let yaml = encode_yaml(&render_monitoring(&plan)).unwrap();
-
-        assert!(yaml.contains("scrape_config_files"));
-        assert!(yaml.contains("/etc/prometheus/generated/*.yml"));
-        // Valid on a collector with no projects, or Prometheus will not start.
-        assert!(yaml.contains("scrape_configs: []"));
-
-        // The base config mounts as a file. As a directory it would take the
-        // generated mount with it every time kubelet remounted the ConfigMap.
-        assert!(yaml.contains("subPath: prometheus.yml"));
-        // Prometheus refuses /-/reload without this.
-        assert!(yaml.contains("--web.enable-lifecycle"));
-        // The reloader watches the mount rather than trusting the writer: a
-        // reload fired at write time would hit the file kubelet has not
-        // projected yet and report success.
-        assert!(yaml.contains("config-reloader"));
-        assert!(yaml.contains("--watched-dir=/etc/prometheus/generated"));
-
-        // The collector may write that one ConfigMap and nothing else.
-        // The collector is told which ConfigMap is its to write.
-        assert!(yaml.contains("APP__COLLECTOR__PROMETHEUS__JOBS_CONFIGMAP"));
-        assert!(yaml.contains("resourceNames"));
-        assert!(yaml.contains("acme-monitoring-prometheus-jobs"));
-        assert!(
-            !yaml.contains("ClusterRole"),
-            "namespace Role only; nothing here needs cluster-wide reach"
-        );
-    }
-
-    /// One collector holds every application's telemetry, and the tenant header
-    /// is the only thing keeping them apart. If either store came up
-    /// single-tenant, every project would read every other project's traces.
-    #[test]
-    fn tempo_and_loki_are_multi_tenant_and_the_collector_names_its_tenant() {
-        let (repo, env, secrets) = mon_env();
-        let plan = MonitoringPlan {
-            release: "acme-monitoring",
-            github_repo: &repo,
-            version: "v0.1.0",
-            env: &env,
-            secrets: &secrets,
-        };
-        let yaml = encode_yaml(&render_monitoring(&plan)).unwrap();
-        assert!(yaml.contains("multitenancy_enabled: true"));
-        assert!(yaml.contains("auth_enabled: true"));
-        assert!(
-            !yaml.contains("auth_enabled: false"),
-            "a single-tenant Loki accepts pushes with no tenant and mixes them"
-        );
-        // The collector pushes straight to both, not through its own ingress,
-        // so nothing else can set a tenant on its behalf.
-        assert!(yaml.contains("APP__TRACING__OTEL__TENANT"));
-        assert!(yaml.contains("monitoring"));
-    }
-
-    #[test]
-    fn monitoring_topology_includes_prometheus_recreate_and_status_volume() {
+    fn monitoring_topology_is_monitoring_api_and_console() {
         let (repo, env, secrets) = mon_env();
         let plan = MonitoringPlan {
             release: "acme-monitoring",
@@ -1704,21 +1181,6 @@ api:
                 ("Service", "acme-monitoring-collector"),
                 ("Deployment", "acme-monitoring-console"),
                 ("Service", "acme-monitoring-console"),
-                ("ConfigMap", "acme-monitoring-prometheus"),
-                ("ConfigMap", "acme-monitoring-prometheus-jobs"),
-                ("PersistentVolumeClaim", "acme-monitoring-prometheus"),
-                ("Deployment", "acme-monitoring-prometheus"),
-                ("Service", "acme-monitoring-prometheus"),
-                ("Role", "acme-monitoring-prometheus-jobs"),
-                ("RoleBinding", "acme-monitoring-prometheus-jobs"),
-                ("ConfigMap", "acme-monitoring-tempo"),
-                ("PersistentVolumeClaim", "acme-monitoring-tempo"),
-                ("Deployment", "acme-monitoring-tempo"),
-                ("Service", "acme-monitoring-tempo"),
-                ("ConfigMap", "acme-monitoring-loki"),
-                ("PersistentVolumeClaim", "acme-monitoring-loki"),
-                ("Deployment", "acme-monitoring-loki"),
-                ("Service", "acme-monitoring-loki"),
                 ("Ingress", "acme-monitoring"),
                 ("ClusterIssuer", "letsencrypt"),
             ]
@@ -1726,8 +1188,6 @@ api:
         let yaml = encode_yaml(&ms).unwrap();
         assert!(yaml.contains("ghcr.io/acme/acme/monitoring:v0.1.0"));
         assert!(yaml.contains("ghcr.io/acme/acme/monitoring-ui:v0.1.0"));
-        assert!(yaml.contains("type: Recreate"));
-        assert!(yaml.contains("ReadWriteOnce"));
         assert!(yaml.contains("/readiness"));
         assert!(yaml.contains("/liveness"));
         assert!(yaml.contains("emptyDir"));
@@ -1738,29 +1198,12 @@ api:
         assert!(yaml.contains("APP__COLLECTOR__STATUS__OUTPUT_PATH"));
         assert!(yaml.contains("/app/status"));
         assert!(!yaml.contains("/app/status/status.json"));
-        assert!(yaml.contains("bearer_token: \"ametrics\""));
-        assert!(yaml.contains("TEMPO_HOST"));
-        assert!(yaml.contains("LOKI_HOST"));
-        assert!(yaml.contains("grafana/tempo:3.0.3"));
-        assert!(yaml.contains("live_store:"));
-        assert!(yaml.contains("/var/tempo/live-store/traces"));
-        assert!(!yaml.contains("\ningester:"));
-        assert!(yaml.contains("grafana/loki"));
-        assert!(yaml.contains("otlp-http"));
-        assert!(yaml.contains("APP__TRACING__OTEL__ENDPOINT"));
-        assert!(yaml.contains("APP__TRACING__OTEL__LOGS_ENDPOINT"));
-        assert!(yaml.contains("acme-monitoring-collector:3001"));
+        assert!(!yaml.contains("APP__COLLECTOR__OTLP__ENABLED"));
+        // Without the self-report secret there is no self-telemetry env
+        // either: a URL without a token would push and 401.
+        assert!(!yaml.contains("APP__TRACING__OTEL__ENDPOINT"));
         assert!(yaml.contains("limit-rps"));
         assert!(yaml.contains("proxy-body-size"));
-        // Third-party Prometheus image: no GHCR pull secret.
-        let prom = ms
-            .iter()
-            .find(|m| m.kind == "Deployment" && m.name.ends_with("-prometheus"))
-            .unwrap();
-        assert!(prom
-            .doc
-            .pointer("/spec/template/spec/imagePullSecrets")
-            .is_none());
     }
 
     #[test]
@@ -1779,57 +1222,12 @@ api:
         assert!(yaml.contains("erns_secret"));
         assert!(yaml.contains("APP__ERROR_REPORTING__COLLECTOR_URL"));
         assert!(yaml.contains("http://acme-monitoring-collector:3001"));
+        // Self-telemetry rides the same secret: in-pod OTLP with that token.
+        assert!(yaml.contains("APP__TRACING__OTEL__ENDPOINT"));
+        assert!(yaml.contains("http://127.0.0.1:3001/api/otlp"));
+        assert!(yaml.contains("APP__TRACING__OTEL__TOKEN"));
         assert!(!yaml.contains("APP__COLLECTOR__SERVER_TOKEN"));
         assert!(!yaml.contains("APP__COLLECTOR__BROWSER_TOKEN"));
-    }
-
-    #[test]
-    fn prometheus_can_be_disabled() {
-        let (repo, mut env, secrets) = mon_env();
-        env.prometheus.enabled = false;
-        let plan = MonitoringPlan {
-            release: "acme-monitoring",
-            github_repo: &repo,
-            version: "v0.1.0",
-            env: &env,
-            secrets: &secrets,
-        };
-        let ms = render_monitoring(&plan);
-        assert!(ms.iter().all(|m| !m.name.contains("prometheus")));
-        let yaml = encode_yaml(&ms).unwrap();
-        assert!(!yaml.contains("APP__COLLECTOR__PROMETHEUS__URL"));
-    }
-
-    #[test]
-    fn tempo_and_loki_can_be_disabled_independently() {
-        let (repo, mut env, secrets) = mon_env();
-        env.tempo.enabled = false;
-        let plan = MonitoringPlan {
-            release: "acme-monitoring",
-            github_repo: &repo,
-            version: "v0.1.0",
-            env: &env,
-            secrets: &secrets,
-        };
-        let ms = render_monitoring(&plan);
-        assert!(ms.iter().all(|m| !m.name.ends_with("-tempo")));
-        assert!(ms.iter().any(|m| m.name.ends_with("-loki")));
-        let yaml = encode_yaml(&ms).unwrap();
-        assert!(!yaml.contains("APP__TRACING__OTEL__ENDPOINT"));
-        assert!(yaml.contains("APP__TRACING__OTEL__LOGS_ENDPOINT"));
-
-        env.tempo.enabled = true;
-        env.loki.enabled = false;
-        let plan = MonitoringPlan {
-            release: "acme-monitoring",
-            github_repo: &repo,
-            version: "v0.1.0",
-            env: &env,
-            secrets: &secrets,
-        };
-        let ms = render_monitoring(&plan);
-        assert!(ms.iter().any(|m| m.name.ends_with("-tempo")));
-        assert!(ms.iter().all(|m| !m.name.ends_with("-loki")));
     }
 
     #[test]
@@ -1842,7 +1240,7 @@ api:
             "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {{release}}-extra\ndata:\n  v: {{version}}\n",
         )
         .unwrap();
-        let extra = load_extra(&dir, "acme", "v9", "default").unwrap();
+        let extra = load_extra(&dir, "acme", "v9", "default", &Default::default()).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(extra.len(), 1);
         assert_eq!(extra[0].name, "acme-extra");
@@ -1853,5 +1251,60 @@ api:
         );
         assert_eq!(extra[0].doc.pointer("/data/v"), Some(&json!("v9")));
         assert!(extra[0].prune);
+    }
+
+    #[test]
+    fn extra_yaml_interpolates_env_and_blanks_unknown_keys() {
+        let dir = std::env::temp_dir().join(format!("erno-extra-env-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("cm.yaml"),
+            "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {{release}}-extra\ndata:\n  set: {{env.FOO}}\n  missing: '{{env.UNSET}}'\n",
+        )
+        .unwrap();
+        let mut extra_env = std::collections::BTreeMap::new();
+        extra_env.insert("FOO".into(), "bar".into());
+        let extra = load_extra(&dir, "acme", "v9", "default", &extra_env).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(extra[0].doc.pointer("/data/set"), Some(&json!("bar")));
+        assert_eq!(extra[0].doc.pointer("/data/missing"), Some(&json!("")));
+    }
+
+    #[test]
+    fn extra_env_reaches_the_api_container() {
+        let (repo, env, mut secrets) = app_env();
+        secrets
+            .env
+            .insert("APP__CUSTOM".into(), "from-secrets".into());
+        let plan = AppPlan {
+            release: "acme",
+            github_repo: &repo,
+            version: "v1",
+            env: &env,
+            secrets: &secrets,
+            include_www: false,
+        };
+        let yaml = encode_yaml(&render_app(&plan)).unwrap();
+        assert!(yaml.contains("APP__CUSTOM"));
+        assert!(yaml.contains("from-secrets"));
+    }
+
+    #[test]
+    fn extra_env_reaches_the_monitoring_api_container() {
+        let (repo, env, mut secrets) = mon_env();
+        secrets
+            .env
+            .insert("APP__CUSTOM".into(), "from-secrets".into());
+        let plan = MonitoringPlan {
+            release: "acme-monitoring",
+            github_repo: &repo,
+            version: "v0.1.0",
+            env: &env,
+            secrets: &secrets,
+        };
+        let yaml = encode_yaml(&render_monitoring(&plan)).unwrap();
+        assert!(yaml.contains("APP__CUSTOM"));
+        assert!(yaml.contains("from-secrets"));
     }
 }

@@ -1,27 +1,27 @@
 ---
 title: Logs
-description: Loki as the log store, queried from the monitoring console. Not issue grouping.
+description: Log search in the collector's store. Grep, not issue grouping.
 sidebar:
   order: 9
 ---
 
 > **Source**: `api/src/tracing_otel.rs`, `cli/src/deploy/render.rs`
 
-Loki is Prometheus for logs: a few **bounded** stream labels, the line itself
+The log store is grep-shaped: a few **bounded** columns, the line itself
 not indexed, query via LogQL over HTTP. Grafana is only a client — the
-monitoring console talks to Loki the same way it already talks to Prometheus.
+monitoring console asks the collector, which composes the query.
 
 **This is not Issues.** `{level="error"}` is grep. Fingerprinting, first-seen,
 "new error type in this release," scrubbing, and the two ingest tokens stay
-in the collector. Grafana Faro writing exceptions into Loki as `kind=error`
+in the collector. A log line marked `kind=error`
 would be the same mistake.
 
 ## Labels vs metadata
 
 Stream labels must stay a bounded set: `service_name`, `deployment.environment`,
 severity. `trace_id`, a route, a user id belong in **structured metadata**
-(Loki 3) or in the line — never as stream labels, or Loki falls over the same
-way Prometheus would.
+or in the line — never as high-cardinality indexed columns, or the store
+falls over the same way any metrics store would.
 
 ```
 {service_name="erno-api"} | severity_text="ERROR"
@@ -32,39 +32,34 @@ way Prometheus would.
 
 Log export is independent of stdout. `[tracing] log_level` still controls
 what operators see in `erno dev` and `kubectl logs`. `[tracing.otel] log_level`
-controls what is pushed to Loki. Empty means log export is off.
+controls what is exported. Empty means log export is off.
 
 ```toml
 [tracing.otel]
-logs_endpoint = "http://127.0.0.1:3100/otlp"  # exporter appends /v1/logs
-log_level = "info"                             # warn in production
+endpoint = "http://localhost:3001/api/otlp"  # the collector; appends /v1/logs
+token = "<project server token>"
+log_level = "info"                           # warn in production
 ```
 
-Empty `logs_endpoint` inherits `endpoint`. Development ships `info`;
-production injects `warn` so routine request logs stay out of Loki.
+Logs ride the same endpoint and token as traces (`logs_endpoint` exists to
+split them, and empty inherits `endpoint`). Development ships `info`;
+production injects `warn` so routine request logs stay out of the store.
 
 There is no Promtail and no DaemonSet in the application cluster. The
 process pushes OTLP, the same way it pushes traces.
 
 ## Topology
 
-**Development.** Loki is a component of the collector, declared in
-erno-monitoring's `erno.toml`, so `cd erno-monitoring && erno dev` starts it on
-`127.0.0.1:3100`. A product application's `erno dev` starts nothing of the sort.
-The binary on `PATH` must be Grafana Loki (`loki, version …`); Debian/Ubuntu's
-`loki` package is a different program (MCMC linkage analysis) and is rejected,
-by preflight there and by `erno doctor` in that tree.
+**Development.** `erno dev` in the erno-monitoring repository starts that
+application's store (declared in its `erno.toml`). Log records land there
+with a body index, so "Contains" can skip rather than scan. A product
+application's `erno dev` starts no store of its own.
 
-**Production.** Loki lives in the monitoring release with `auth_enabled` — its
-name for tenancy, not for authentication — so each project's logs sit under its
-own slug as the `X-Scope-OrgID` tenant, set the same way
-[traces](/monitoring/tracing/#one-tempo-many-applications) are. Existing
-single-tenant chunks are not readable afterwards; delete the volume rather than
-migrating it. Applications push to
-`https://<monitoring_host>/otlp/v1/logs` with the trusted server ingest
-token. The console queries through `/loki/`, gated by operator Basic.
-`auth_enabled` is false — single tenant, the app being watched. Do not turn
-on multi-tenancy / `X-Scope-OrgID`.
+**Production.** The same store, in the monitoring release, as extra YAML in
+that repository. Each row is stamped with its project's retention at ingest
+and expires on its own; there is no retention daemon and no tenancy header —
+the ingest token is the only tenant statement, and the console reads through
+the monitoring API's authenticated query facade.
 
 ## The console
 

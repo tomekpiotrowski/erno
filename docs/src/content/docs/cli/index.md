@@ -379,6 +379,7 @@ Checks everything needed to build and run Erno projects:
 | `~/.erno/config.toml` | Yes |
 | Admin user can `CREATE DATABASE` | Yes |
 | `sea-orm-cli` | Recommended |
+| Each default `[[package.dev]] requires` binary from `erno.toml` | Yes |
 
 Exit code is `0` if all required checks pass, `1` otherwise. A warning never fails the run.
 
@@ -388,13 +389,17 @@ Exit code is `0` if all required checks pass, `1` otherwise. A warning never fai
   ✅    Rust                 1.90.0
   ✅    Node.js              v22.11.0
   ❌    PostgreSQL server    not running
-        Start it — e.g.: sudo service postgresql start
+        Start it — e.g.: sudo systemctl start postgresql
   ⚠️    sea-orm-cli          not found
         Install with: cargo install sea-orm-cli
 
 ❌ error: 1 required check failed
   Fix the issues above and run `erno doctor` again.
 ```
+
+The PostgreSQL start command is the one for this machine: `systemctl` on systemd Linux, `brew services` on macOS, `net start` on Windows. The server check probes the host and port from `~/.erno/config.toml` (`localhost:5432` by default), not the unix socket in `/run/postgresql` — those are different endpoints.
+
+Extra backends are not hardcoded. A tree that declares `requires` is asked about those binaries; a product app with no extra packages is not asked about binaries it does not want.
 
 `erno doctor --quiet` prints only the rows that need attention, so a healthy environment produces no output at all.
 

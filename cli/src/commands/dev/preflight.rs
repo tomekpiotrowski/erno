@@ -5,24 +5,8 @@ use super::selection::ExtraService;
 use crate::ui;
 
 const FRIENDLY_COMMANDS: &[&str] = &[
-    "erno",
-    "cargo",
-    "node",
-    "npm",
-    "ng",
-    "astro",
-    "esbuild",
-    "vite",
-    "python",
-    "python3",
-    "prometheus",
-    "tempo",
-    "loki",
+    "erno", "cargo", "node", "npm", "ng", "astro", "esbuild", "vite", "python", "python3",
 ];
-
-// The three telemetry binaries above: `erno dev` no longer starts them, but
-// they stay auto-killable when they squat a port it wants. A stale Tempo left
-// behind by the monitoring app is exactly the case worth offering to clear.
 
 pub fn run_preflight(check_db: bool, extras: &[ExtraService], ports: &[u16]) -> Result<(), String> {
     if check_db {
@@ -34,7 +18,7 @@ pub fn run_preflight(check_db: bool, extras: &[ExtraService], ports: &[u16]) -> 
         }
     }
     for port in ports {
-        check_port(*port)?;
+        check_port(*port, extras)?;
     }
     Ok(())
 }
@@ -67,18 +51,19 @@ fn binary_on_path(binary: &str) -> bool {
 }
 
 fn check_postgres() -> Result<(), String> {
-    match Command::new("pg_isready").output() {
+    match crate::postgres::pg_isready().output() {
         Err(_) => Err("PostgreSQL client tools not found (`pg_isready`)\n\
                        Install PostgreSQL: https://www.postgresql.org/download/"
             .to_string()),
-        Ok(out) if !out.status.success() => Err("PostgreSQL is not running\n\
-                       Start it — e.g.: sudo service postgresql start"
-            .to_string()),
+        Ok(out) if !out.status.success() => Err(format!(
+            "PostgreSQL is not running\n{}",
+            crate::postgres::start_hint()
+        )),
         Ok(_) => Ok(()),
     }
 }
 
-fn check_port(port: u16) -> Result<(), String> {
+fn check_port(port: u16, extras: &[ExtraService]) -> Result<(), String> {
     if !port_in_use(port) {
         return Ok(());
     }
@@ -98,7 +83,7 @@ fn check_port(port: u16) -> Result<(), String> {
         ));
     }
 
-    if !ui::confirm("Kill it?", should_default_kill(&comm)) {
+    if !ui::confirm("Kill it?", should_default_kill(&comm, extras)) {
         return Err("aborted".to_string());
     }
 
@@ -125,11 +110,15 @@ pub fn port_in_use(port: u16) -> bool {
     std::net::TcpListener::bind(("127.0.0.1", port)).is_err()
 }
 
-pub fn should_default_kill(comm: &str) -> bool {
+pub fn should_default_kill(comm: &str, extras: &[ExtraService]) -> bool {
     let name = comm.rsplit('/').next().unwrap_or(comm);
     FRIENDLY_COMMANDS
         .iter()
         .any(|c| name == *c || name.starts_with(c))
+        || extras.iter().any(|svc| {
+            let cmd = svc.command.rsplit('/').next().unwrap_or(&svc.command);
+            name == cmd || name.starts_with(cmd)
+        })
 }
 
 fn pid_listening_on(port: u16) -> Option<u32> {
@@ -231,12 +220,12 @@ mod tests {
     fn a_declared_service_names_the_binary_it_is_missing() {
         let err = run_preflight(
             false,
-            &[service("tempo", Some("definitely-not-a-real-binary"))],
+            &[service("store", Some("definitely-not-a-real-binary"))],
             &[],
         )
         .expect_err("should refuse");
         assert!(err.contains("definitely-not-a-real-binary"), "{err}");
-        assert!(err.contains("tempo"), "names the service too: {err}");
+        assert!(err.contains("store"), "names the service too: {err}");
     }
 
     #[test]
@@ -246,16 +235,23 @@ mod tests {
 
     #[test]
     fn default_kill_for_dev_tools_only() {
-        assert!(should_default_kill("cargo"));
-        assert!(should_default_kill("node"));
-        assert!(should_default_kill("/usr/bin/npm"));
-        assert!(should_default_kill("ng"));
-        assert!(should_default_kill("python3"));
-        assert!(should_default_kill("/usr/bin/python"));
-        assert!(should_default_kill("tempo"));
-        assert!(should_default_kill("loki"));
-        assert!(!should_default_kill("firefox"));
-        assert!(!should_default_kill("postgres"));
+        let none: &[ExtraService] = &[];
+        assert!(should_default_kill("cargo", none));
+        assert!(should_default_kill("node", none));
+        assert!(should_default_kill("/usr/bin/npm", none));
+        assert!(should_default_kill("ng", none));
+        assert!(should_default_kill("python3", none));
+        assert!(should_default_kill("/usr/bin/python", none));
+        assert!(!should_default_kill("firefox", none));
+        assert!(!should_default_kill("postgres", none));
+    }
+
+    #[test]
+    fn extra_service_commands_are_default_killed() {
+        let extras = [service("redis", None)];
+        assert!(should_default_kill("redis", &extras));
+        assert!(should_default_kill("/usr/bin/redis", &extras));
+        assert!(!should_default_kill("firefox", &extras));
     }
 
     /// Retried, because the freed port is an ephemeral one the OS is free to

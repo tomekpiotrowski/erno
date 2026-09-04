@@ -16,34 +16,8 @@ enabled = true
 issuer = "letsencrypt"
 email = ""
 
-# Optional, and not how applications are scraped: each project registered with
-# the collector gets a generated job carrying its own target and bearer. This is
-# for a fixed target that is not a project — something outside Erno worth
-# watching from the same Prometheus.
-[production.scrape]
-target = ""
-scheme = "https"
-
 [production.ingress]
 rate_limit_rps = 20
-
-[production.prometheus]
-enabled = true
-image = "prom/prometheus:v2.55.1"
-retention = "90d"
-storage = "10Gi"
-
-[production.tempo]
-enabled = true
-image = "grafana/tempo:3.0.3"
-retention = "72h"
-storage = "10Gi"
-
-[production.loki]
-enabled = true
-image = "grafana/loki:3.4.2"
-retention = "7d"
-storage = "10Gi"
 
 [production.workloads]
 collector_replicas = 1

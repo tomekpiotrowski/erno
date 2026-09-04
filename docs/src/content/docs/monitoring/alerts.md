@@ -1,6 +1,6 @@
 ---
 title: Alerts
-description: A rule engine over errors, uptime and application health — built rather than bundled.
+description: A rule engine over errors, uptime, health and metrics — built rather than bundled.
 sidebar:
   order: 5
 ---
@@ -13,7 +13,9 @@ Alertmanager only sees Prometheus metrics, so it structurally cannot express
 *"a new error type appeared"* or *"this issue is spiking"* — which are the
 alerts most worth having here. Bundling it would mean running two alerting
 systems, with two config languages and two notification setups, and still
-writing the error half by hand.
+writing the error half by hand — and with the telemetry store living inside
+erno-monitoring, there is no Prometheus for Alertmanager to sit behind
+anyway.
 
 Erno already has the parts: cron-scheduled work, advisory-lock singletons, and
 a mailer.
@@ -29,60 +31,42 @@ the result for a while before believing it.
 | `errors` | `all`, `api`, `app`, `admin` | Error events in the window |
 | `uptime` | `all`, or a check name | Checks currently down |
 | `subsystem` | `down` (default), `degraded` | Application instances not healthy |
-| `promql` | Any instant PromQL query | The first sample the query returns |
+| `metric` | `{ "metric", "agg"?, "where"? }` as JSON | An aggregate over the window |
 
-## The PromQL source
+## The metric source
 
-`promql` makes everything Prometheus scrapes alertable without teaching the
-collector each individual signal:
+`metric` makes everything an application pushes alertable without teaching the
+collector each individual signal. The selector is a typed description, not a
+query language:
 
 ```json
 {
   "name": "5xx rate",
-  "source": "promql",
-  "selector": "sum(rate(http_requests_total{status=~\"5..\"}[5m]))",
+  "source": "metric",
+  "selector": "{ \"metric\": \"http_requests_total\", \"agg\": \"sum\", \"where\": { \"status\": \"500\" } }",
   "comparator": "gt",
-  "threshold": 0.05
+  "threshold": 100,
+  "window_seconds": 300
 }
 ```
 
-It reads `[collector.prometheus] url`, which the chart sets to the in-cluster
-Service. Empty means the source is unavailable.
+Aggregates: `sum`, `avg`, `max`, `min`, `last` (default), `p50`, `p95`, `p99`
+— the quantiles read the histogram rollup. Selectors are validated on create,
+so a rule that would never evaluate is refused at the door rather than
+discovered silent.
 
-Two behaviours worth knowing:
+Three behaviours worth knowing:
 
-- **An empty result is not zero.** A query returning no samples reads as "no
-  value", not as `0` — otherwise a `less than` rule would fire every time a
-  series went quiet. `NaN`, `+Inf` and `-Inf` are rejected the same way, since
-  `NaN` compares false against every threshold and would make a rule
-  undecidable.
-- **A Prometheus outage un-fires every PromQL rule.** A failed query reads as
-  not breaching, consistent with an unrecognised source. That is the honest
-  trade — the alternative is firing every PromQL rule whenever Prometheus
-  restarts — but it is a real blind spot. The collector increments
-  `erno_alert_source_unavailable_total{source="promql"}` when it happens, and
-  Prometheus scrapes the collector, so one rule closes the gap:
-
-  ```
-  increase(erno_alert_source_unavailable_total[10m]) > 0
-  ```
-
-- **A PromQL selector must name its own project.** Prometheus holds every
-  project's metrics, so an unscoped query counts the whole organisation and
-  fires one application's alert on another's traffic. The selector has to
-  contain the literal matcher `erno_project="<slug>"`; the console's rule
-  editor inserts it. A selector without it reads as not breaching and
-  increments `erno_alert_source_unavailable_total{source="promql_unscoped"}`,
-  so the same catch-all rule above surfaces it.
-
-  The check is a substring test, deliberately. Injecting a matcher into
-  arbitrary PromQL — `rate(...)`, `or`, `ignoring(...)` — needs a query parser,
-  and a half-right rewrite of someone's alerting expression is worse than
-  asking them to be explicit.
-
-  ```
-  rate(http_requests_total{erno_project="teryon"}[5m]) > 10
-  ```
+- **Scoping is structural.** The rule row carries its project id and every
+  query binds it. There is no matcher to remember and no query language for
+  an unscoped selector to hide in — which is the whole advance over the
+  PromQL source this replaced.
+- **An empty result is not zero.** A metric with no samples in the window
+  reads as "no value", not as `0` — otherwise a `less than` rule would fire
+  every time a series went quiet.
+- **A store outage reads as not breaching**, consistent with an unrecognised
+  source, and counts `erno_alert_source_unavailable_total{source="metric"}`
+  — itself a pushed metric, so one catch-all rule over it closes the gap.
 
 ```sh
 curl -X POST https://monitoring.example.com/api/collector/projects/teryon/alerts \
