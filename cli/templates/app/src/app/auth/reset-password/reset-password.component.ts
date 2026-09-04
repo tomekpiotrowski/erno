@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, OnInit, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, OnInit, signal } from '@angular/core';
 import { AbstractControl, FormControl, FormGroup, ReactiveFormsModule, ValidationErrors, Validators } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import {
@@ -51,12 +51,10 @@ export class ResetPasswordComponent implements OnInit {
   loading = signal(false);
   private token = '';
 
-  constructor(
-    private auth: ErnoAuthService,
-    private alerts: ErnoAlertsService,
-    private router: Router,
-    private route: ActivatedRoute,
-  ) {}
+  private readonly auth = inject(ErnoAuthService);
+  private readonly alerts = inject(ErnoAlertsService);
+  private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
 
   ngOnInit() {
     this.token = this.route.snapshot.queryParamMap.get('token') ?? '';

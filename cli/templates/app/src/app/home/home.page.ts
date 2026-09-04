@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import {
   AlertController,
   IonButton,
@@ -17,11 +17,9 @@ import { ErnoAuthService, ErnoAlertsService } from 'erno-angular';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class HomePage {
-  constructor(
-    public auth: ErnoAuthService,
-    private alertController: AlertController,
-    private alerts: ErnoAlertsService,
-  ) {}
+  readonly auth = inject(ErnoAuthService);
+  private readonly alertController = inject(AlertController);
+  private readonly alerts = inject(ErnoAlertsService);
 
   logout() {
     // `logout()` clears the session either way; `AppComponent` follows it to

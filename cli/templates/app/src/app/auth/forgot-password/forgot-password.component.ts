@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import {
@@ -41,7 +41,7 @@ export class ForgotPasswordComponent {
   loading = signal(false);
   done = signal(false);
 
-  constructor(private auth: ErnoAuthService) {}
+  private readonly auth = inject(ErnoAuthService);
 
   submit() {
     if (this.form.invalid || this.loading()) return;

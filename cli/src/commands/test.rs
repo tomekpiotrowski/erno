@@ -89,19 +89,13 @@ fn run_e2e(root: &Path, rest: &[String]) -> bool {
     }
 
     let api_dir = root.join("api");
-    let mut api = match Command::new("cargo")
-        .arg("run")
-        .current_dir(&api_dir)
-        .env("APP_ENVIRONMENT", "test")
-        .env("APP__SERVER__PORT", api_port.to_string())
-        .env("APP__API_URL", &api_url)
-        .env("APP__APP_URL", &app_url)
-        .env("APP__DATABASE__POOL_SIZE", "10")
-        .env("ERNO_DEV_CORS_ORIGINS", &cors)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-    {
+    // Compile first so the 90s /liveness wait is boot, not a cold cargo run.
+    let mut build = e2e_api_build_cmd(&api_dir);
+    if !run_prefixed(&mut build, "e2e") {
+        return false;
+    }
+
+    let mut api = match e2e_api_run_cmd(&api_dir, api_port, &api_url, &app_url, &cors).spawn() {
         Ok(c) => c,
         Err(e) => {
             ui::prefixed(
@@ -192,6 +186,40 @@ fn run_e2e(root: &Path, rest: &[String]) -> bool {
     let _ = api.kill();
     let _ = api.wait();
     ok
+}
+
+/// `cargo build` for the API crate, before e2e waits on `/liveness`.
+///
+/// A cold `cargo run` can spend the whole 90s window compiling Erno from git.
+/// Building first keeps that wait for boot.
+fn e2e_api_build_cmd(api_dir: &Path) -> Command {
+    let mut cmd = Command::new("cargo");
+    cmd.arg("build")
+        .current_dir(api_dir)
+        .env("APP_ENVIRONMENT", "test");
+    cmd
+}
+
+/// Incremental `cargo run` after `e2e_api_build_cmd`.
+fn e2e_api_run_cmd(
+    api_dir: &Path,
+    api_port: u16,
+    api_url: &str,
+    app_url: &str,
+    cors: &str,
+) -> Command {
+    let mut cmd = Command::new("cargo");
+    cmd.arg("run")
+        .current_dir(api_dir)
+        .env("APP_ENVIRONMENT", "test")
+        .env("APP__SERVER__PORT", api_port.to_string())
+        .env("APP__API_URL", api_url)
+        .env("APP__APP_URL", app_url)
+        .env("APP__DATABASE__POOL_SIZE", "10")
+        .env("ERNO_DEV_CORS_ORIGINS", cors)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    cmd
 }
 
 /// Bind `127.0.0.1:0` and return the kernel-assigned port. The listener is
@@ -399,6 +427,37 @@ async fn grant_public_schema(admin_url: &str, db: &str, user: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn e2e_builds_the_api_before_running_it() {
+        let api = Path::new("/tmp/acme/api");
+        let build = e2e_api_build_cmd(api);
+        let run = e2e_api_run_cmd(
+            api,
+            3001,
+            "http://127.0.0.1:3001",
+            "http://127.0.0.1:4200",
+            "",
+        );
+        let build_dbg = format!("{build:?}");
+        let run_dbg = format!("{run:?}");
+        assert!(
+            build_dbg.contains("\"build\""),
+            "e2e must cargo-build first: {build_dbg}"
+        );
+        assert!(
+            !build_dbg.contains("\"run\""),
+            "the build step must not be cargo run: {build_dbg}"
+        );
+        assert!(
+            run_dbg.contains("\"run\""),
+            "e2e must cargo-run after the build: {run_dbg}"
+        );
+        assert!(
+            run_dbg.contains("APP_ENVIRONMENT") && run_dbg.contains("test"),
+            "the run step boots the test environment: {run_dbg}"
+        );
+    }
 
     #[test]
     fn free_port_is_nonzero_and_two_calls_differ() {

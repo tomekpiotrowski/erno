@@ -22,6 +22,11 @@ jobs:
           POSTGRES_DB: {{name}}_test
           POSTGRES_USER: {{name}}
           POSTGRES_PASSWORD: {{name}}
+        options: >-
+          --health-cmd "pg_isready -U {{name}}"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: ./api
@@ -33,9 +38,6 @@ jobs:
           workspaces: api
       - name: Run tests
         run: cargo test
-        env:
-          APP_ENV: test
-          DATABASE_URL: postgres://{{name}}:{{name}}@localhost:5432/{{name}}_test
 
   api_docker:
     timeout-minutes: 30

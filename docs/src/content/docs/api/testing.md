@@ -92,7 +92,9 @@ erno test --api -- health    # pass-through; one package only
 
 The test database in `api/config/test.toml` is created if missing. Which packages exist, and what each one runs, comes from [`erno.toml`](/cli/#the-package-manifest) in the project root.
 
-`erno test --e2e` binds the API and `ng serve` to unused ports (not `3000`/`4200`) and passes `API_URL` / `APP_URL` into Playwright and the app bundle. A leftover `erno dev` on the usual ports cannot satisfy `/liveness`.
+`erno test --e2e` binds the API and `ng serve` to unused ports (not `3000`/`4200`) and passes `API_URL` / `APP_URL` into Playwright and the app bundle. It compiles the API (`cargo build`) before waiting on `/liveness`, so a cold compile does not burn the boot window. A leftover `erno dev` on the usual ports cannot satisfy `/liveness`.
+
+Apps from `erno new` ship `.github/workflows/ci.yml` that mirrors `erno lint` and `erno test`.
 
 ## Account deletion
 

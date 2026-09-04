@@ -30,7 +30,7 @@ Interactive setup that:
 1. Reads the project name from `api/Cargo.toml` and the GitHub repo from `git remote origin`
 2. Prompts for a Kubernetes context (lists contexts from `kubectl` when available)
 3. Generates an admin password (shown **once**) and writes only the Argon2 hash into secrets templates
-4. Writes Docker, deploy config, and CI files
+4. Writes Docker, deploy config, and the image-publish workflow (`.github/workflows/build.yaml`). Test CI (`.github/workflows/ci.yml`) is already present from `erno new`.
 5. Optionally generates an age keypair for SOPS and sets `SOPS_AGE_KEY` on GitHub Actions
 
 ### Files generated
@@ -47,7 +47,7 @@ Interactive setup that:
 | `deploy/config.toml` | Context, hosts, replica counts, TLS |
 | `deploy/secrets.example.yaml` | Secret placeholders (admin hash, DB, registry, …) |
 | `deploy/extra/` | Optional extra YAML (`{{release}}` / `{{version}}` / `{{namespace}}` / `{{env.NAME}}`), same release labels |
-| `.github/workflows/build.yaml` | Build and publish images |
+| `.github/workflows/build.yaml` | Build and publish images (test CI is already present from `erno new` as `.github/workflows/ci.yml`) |
 | `api/config/production.toml` | Created if missing (or warned if still full of `CHANGE_ME`) |
 | `deploy/.sops.yaml` | Age public key rules (when `age-keygen` is available) |
 

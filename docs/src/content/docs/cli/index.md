@@ -416,6 +416,7 @@ Scaffolds a new full-stack project under `./<name>/`:
 ```
 <name>/
 ├── .gitignore
+├── .github/workflows/ci.yml    # test CI (mirrors `erno lint` / `erno test`; not deploy)
 ├── api/                        # Rust backend (erno-based)
 │   ├── Cargo.toml
 │   ├── config/
@@ -441,6 +442,8 @@ Scaffolds a new full-stack project under `./<name>/`:
 ```
 
 Also creates the `<name>_development` and `<name>_test` PostgreSQL databases using the admin credentials from `~/.erno/config.toml`.
+
+`.github/workflows/ci.yml` is **test CI**: format, clippy, API tests, app lint/build, www build, and Playwright e2e. Image publishing is a separate workflow written later by [`erno deploy init`](/cli/deploy/).
 
 ### Local URLs
 

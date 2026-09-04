@@ -628,6 +628,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn generated_build_workflow_healthchecks_postgres_without_app_env() {
+        let yaml = render(TEMPLATE_GITHUB_WORKFLOW, &[("{{name}}", "acme")]);
+        assert!(yaml.contains("pg_isready -U acme"), "{yaml}");
+        assert!(
+            !yaml.contains("APP_ENV"),
+            "setup_test reads config/test.toml, not APP_ENV:\n{yaml}"
+        );
+        assert!(
+            !yaml.contains("DATABASE_URL"),
+            "setup_test reads config/test.toml, not DATABASE_URL:\n{yaml}"
+        );
+    }
+
+    #[test]
     fn init_seeds_the_collector_but_leaves_the_application_token_empty() {
         let token = "a-generated-token";
         let vars: &[(&str, &str)] = &[

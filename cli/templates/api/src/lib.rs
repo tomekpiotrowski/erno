@@ -1,12 +1,7 @@
 mod migrations;
 
-use erno::{
-    app::App,
-    app_info::AppInfo,
-    boot::BootConfig,
-    jobs::job_registry::JobRegistry,
-};
 use axum::{routing::get, Router};
+use erno::{app::App, app_info::AppInfo, boot::BootConfig, jobs::job_registry::JobRegistry};
 
 pub use migrations::Migrator;
 

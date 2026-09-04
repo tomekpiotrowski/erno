@@ -1,0 +1,158 @@
+# Mirrors `erno lint` and `erno test`. A check that only exists here is a
+# check nobody can reproduce locally.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: {{db_name}}
+          POSTGRES_PASSWORD: {{db_name}}
+          POSTGRES_DB: {{db_name}}_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U {{db_name}}"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: api
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Test
+        run: cargo test
+
+  app:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      # App unit tests are omitted. Ionic 9's published ESM uses extensionless
+      # relative imports (`./navigation/back-button`) that Vitest/jsdom cannot
+      # resolve. Do not add `npm run test:ci` here until `erno test --app` is
+      # green locally.
+
+  www:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: www
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: www/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
+  e2e:
+    needs: api
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: {{db_name}}
+          POSTGRES_PASSWORD: {{db_name}}
+          POSTGRES_DB: {{db_name}}_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U {{db_name}}"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: api
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            app/package-lock.json
+            e2e/package-lock.json
+      - name: Install app
+        working-directory: app
+        run: npm ci
+      - name: Install e2e
+        working-directory: e2e
+        run: npm ci
+      - name: Install Playwright
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+      - name: Build API
+        working-directory: api
+        run: cargo build
+      - name: Start API
+        working-directory: api
+        run: |
+          set -euo pipefail
+          APP_ENVIRONMENT=test ./target/debug/{{name}} >"$RUNNER_TEMP/api.log" 2>&1 &
+          echo $! >"$RUNNER_TEMP/api.pid"
+          for i in $(seq 1 60); do
+            if ! kill -0 "$(cat "$RUNNER_TEMP/api.pid")" 2>/dev/null; then
+              echo "API process exited before /liveness answered"
+              cat "$RUNNER_TEMP/api.log"
+              exit 1
+            fi
+            if curl -sf "http://127.0.0.1:3001/liveness" >/dev/null; then
+              echo "API is ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "API did not become ready"
+          cat "$RUNNER_TEMP/api.log"
+          exit 1
+      - name: Playwright
+        working-directory: e2e
+        env:
+          CI: true
+          API_URL: http://127.0.0.1:3001
+          APP_URL: http://127.0.0.1:4200
+        run: npm exec playwright test

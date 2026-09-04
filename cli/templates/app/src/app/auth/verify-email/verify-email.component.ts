@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, OnInit, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, OnInit, signal } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { IonCard, IonCardContent, IonCardHeader, IonCardTitle, IonContent, IonText } from '@ionic/angular';
 import { ErnoAuthService, ErnoAlertsService } from 'erno-angular';
@@ -13,12 +13,10 @@ export class VerifyEmailComponent implements OnInit {
   state = signal<'loading' | 'error'>('loading');
   error = signal('');
 
-  constructor(
-    private auth: ErnoAuthService,
-    private alerts: ErnoAlertsService,
-    private route: ActivatedRoute,
-    private router: Router,
-  ) {}
+  private readonly auth = inject(ErnoAuthService);
+  private readonly alerts = inject(ErnoAlertsService);
+  private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
 
   ngOnInit() {
     const token = this.route.snapshot.queryParamMap.get('token') ?? '';
