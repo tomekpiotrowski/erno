@@ -15,7 +15,7 @@ Add Erno to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-erno = { git = "https://github.com/tomekpiotrowski/erno", tag = "v0.2.0" }
+erno = { git = "https://github.com/tomekpiotrowski/erno", tag = "v0.2.1" }
 sea-orm-migration = { version = "1.1", features = ["sqlx-postgres"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 async-trait = "0.1"

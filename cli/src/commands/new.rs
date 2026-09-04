@@ -11,7 +11,9 @@ use crate::ui;
 // ── Embedded templates ────────────────────────────────────────────────────────
 
 const GITIGNORE: &str = include_str!("../../templates/.gitignore");
-const API_CARGO_TOML: &str = include_str!("../../templates/api/Cargo.toml");
+// `.template`, not `Cargo.toml`: cargo's git installer walks every
+// Cargo.toml in the repo, and the `{{erno_dep}}` placeholders are not valid TOML.
+const API_CARGO_TOML: &str = include_str!("../../templates/api/Cargo.toml.template");
 const API_LIB_RS: &str = include_str!("../../templates/api/src/lib.rs");
 const API_MAIN_RS: &str = include_str!("../../templates/api/src/main.rs");
 const API_MIGRATIONS_MOD_RS: &str = include_str!("../../templates/api/src/migrations/mod.rs");
