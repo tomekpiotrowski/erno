@@ -44,7 +44,8 @@ pub struct App<ExtraConfig = ()> {
     /// Sends this application's own errors to a monitoring collector.
     /// [`ErrorReporter::Disabled`] when no collector is configured.
     pub error_reporter: ErrorReporter,
-    /// Fires when the process should stop. [`Shutdown::never`] outside serve.
+    /// Fires when the process should stop. [`crate::shutdown::Shutdown::never`]
+    /// outside serve.
     pub shutdown: crate::shutdown::Shutdown,
     /// When true, [`crate::router::router`] does not attach its static CORS
     /// layer. Copied from [`crate::boot::BootConfig`].
