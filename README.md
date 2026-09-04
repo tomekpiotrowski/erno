@@ -11,7 +11,7 @@ This repository is the framework. `erno new` creates a *separate* product repo t
 You need Rust 1.88+, Node 22+, PostgreSQL, and the Angular and Ionic CLIs. `erno doctor` reports anything missing.
 
 ```sh
-cargo install --git https://github.com/tomekpiotrowski/erno --tag v0.1.0 --path cli --locked
+cargo install --git https://github.com/tomekpiotrowski/erno --tag v0.2.0 --path cli --locked
 # or, from a clone:
 # cargo install --path cli
 
@@ -89,7 +89,7 @@ pub fn boot_config() -> BootConfig {
 }
 ```
 
-Product routes go on that `router`. Syncable entities are `.with_sync::<E>()` on the `BootConfig`. The crate can also be added by hand (`erno = { git = "https://github.com/tomekpiotrowski/erno", tag = "v0.1.0" }`); see [manual API setup](docs/src/content/docs/api/getting-started.md). A new full-stack project should use `erno new`.
+Product routes go on that `router`. Syncable entities are `.with_sync::<E>()` on the `BootConfig`. The crate can also be added by hand (`erno = { git = "https://github.com/tomekpiotrowski/erno", tag = "v0.2.0" }`); see [manual API setup](docs/src/content/docs/api/getting-started.md). A new full-stack project should use `erno new`.
 
 ## CLI
 
@@ -133,7 +133,7 @@ Contributor notes for each part live in [AGENTS.md](AGENTS.md).
 
 ## Releases
 
-Cut a version from GitHub: **Actions → Release → Run workflow**, pick `patch` / `minor` / `major`, run it on `main`. The workflow runs CI, bumps the version, tags, and attaches the `erno-angular` tarball to a GitHub Release. First cut is `minor` (no tags yet → `v0.1.0`).
+Cut a version from GitHub: **Actions → Release → Run workflow**, pick `patch` / `minor` / `major`, run it on `main`. The workflow runs CI, bumps the version, tags, and attaches the `erno-angular` tarball to a GitHub Release. From `v0.1.0`, `minor` is `v0.2.0`.
 
 ## License
 

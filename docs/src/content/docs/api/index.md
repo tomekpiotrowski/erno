@@ -57,7 +57,7 @@ Add Erno to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-erno = { git = "https://github.com/tomekpiotrowski/erno", tag = "v0.1.0" }
+erno = { git = "https://github.com/tomekpiotrowski/erno", tag = "v0.2.0" }
 ```
 
 New full-stack projects should use [`erno new`](/getting-started/) instead of wiring the crate by hand.
