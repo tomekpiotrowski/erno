@@ -57,7 +57,9 @@ Add Erno to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-erno = { git = "https://github.com/tomekpiotrowski/erno", tag = "v0.2.1" }
+erno = { git = "https://github.com/tomekpiotrowski/erno" }
 ```
+
+That follows the default branch. `erno new` pins a release tag instead.
 
 New full-stack projects should use [`erno new`](/getting-started/) instead of wiring the crate by hand.

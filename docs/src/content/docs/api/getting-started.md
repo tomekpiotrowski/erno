@@ -15,12 +15,14 @@ Add Erno to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-erno = { git = "https://github.com/tomekpiotrowski/erno", tag = "v0.2.1" }
+erno = { git = "https://github.com/tomekpiotrowski/erno" }
 sea-orm-migration = { version = "1.1", features = ["sqlx-postgres"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 async-trait = "0.1"
 axum = "0.8"
 ```
+
+That follows the default branch. `erno new` pins a release tag instead.
 
 Erno requires Rust **1.88.0** or later.
 

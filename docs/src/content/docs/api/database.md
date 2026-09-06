@@ -105,7 +105,7 @@ Request-spec helpers (`setup_test`, factories, `TestUtils`) live behind the `tes
 
 ```toml
 [dev-dependencies]
-erno = { git = "https://github.com/tomekpiotrowski/erno", tag = "v0.2.1", features = ["test-utils"] }
+erno = { git = "https://github.com/tomekpiotrowski/erno", features = ["test-utils"] }
 ```
 
 ```rust

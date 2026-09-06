@@ -4,10 +4,11 @@ Angular library for building Ionic web and mobile apps on top of an [erno](https
 
 ## Installation
 
-Pin the same GitHub Release as the `erno` crate tag. `erno new` writes this for you.
+`erno new` pins the tarball from the same GitHub Release as the `erno` crate tag.
+For the latest release:
 
 ```sh
-bun add https://github.com/tomekpiotrowski/erno/releases/download/v0.2.1/erno-angular-0.2.1.tgz
+bun add https://github.com/tomekpiotrowski/erno/releases/latest/download/erno-angular.tgz
 ```
 
 Register the module and provide your backend URL:

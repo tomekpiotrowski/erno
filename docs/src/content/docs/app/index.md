@@ -9,10 +9,11 @@ sidebar:
 
 ## Installation
 
-The `erno new` CLI command sets this up automatically. For manual installation:
+The `erno new` CLI command sets this up automatically. For manual installation from the
+[latest GitHub Release](https://github.com/tomekpiotrowski/erno/releases/latest):
 
 ```sh
-bun add erno-angular
+bun add https://github.com/tomekpiotrowski/erno/releases/latest/download/erno-angular.tgz
 ```
 
 During local development against an unpublished build, install a packed tarball instead of linking the dist folder directly:
@@ -22,8 +23,8 @@ During local development against an unpublished build, install a packed tarball 
 cd app && ng build erno-angular
 (cd dist/erno-angular && bun pm pack)
 
-# In your app
-bun add file:/path/to/erno/app/dist/erno-angular/erno-angular-0.2.1.tgz
+# In your app, use the tarball bun pm pack wrote (erno-angular-<version>.tgz)
+bun add file:/path/to/erno/app/dist/erno-angular/erno-angular-<version>.tgz
 # or use erno new --erno-path <erno-dir> to generate this reference automatically
 ```
 

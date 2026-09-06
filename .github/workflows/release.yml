@@ -76,6 +76,8 @@ jobs:
           TAG: ${{ steps.bump.outputs.tag }}
         run: |
           tgz="app/dist/erno-angular/erno-angular-${VERSION}.tgz"
-          gh release create "${TAG}" "$tgz" \
+          latest_tgz="app/dist/erno-angular/erno-angular.tgz"
+          cp "$tgz" "$latest_tgz"
+          gh release create "${TAG}" "$tgz" "$latest_tgz" \
             --title "${TAG}" \
             --generate-notes

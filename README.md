@@ -11,10 +11,14 @@ This repository is the framework. `erno new` creates a *separate* product repo t
 You need Rust 1.88+, Node 22+, PostgreSQL, and the Angular and Ionic CLIs. `erno doctor` reports anything missing.
 
 ```sh
-cargo install erno-cli --git https://github.com/tomekpiotrowski/erno --tag v0.2.1 --locked
+cargo install erno-cli --git https://github.com/tomekpiotrowski/erno --locked
 # or, from a clone:
 # cargo install --path cli
+```
 
+That tracks `main`. Pin a release with `--tag` from https://github.com/tomekpiotrowski/erno/releases/latest.
+
+```sh
 erno setup     # PostgreSQL admin URL → ~/.erno/config.toml
 erno doctor
 ```
@@ -89,7 +93,7 @@ pub fn boot_config() -> BootConfig {
 }
 ```
 
-Product routes go on that `router`. Syncable entities are `.with_sync::<E>()` on the `BootConfig`. The crate can also be added by hand (`erno = { git = "https://github.com/tomekpiotrowski/erno", tag = "v0.2.1" }`); see [manual API setup](docs/src/content/docs/api/getting-started.md). A new full-stack project should use `erno new`.
+Product routes go on that `router`. Syncable entities are `.with_sync::<E>()` on the `BootConfig`. The crate can also be added by hand (`erno = { git = "https://github.com/tomekpiotrowski/erno" }`); see [manual API setup](docs/src/content/docs/api/getting-started.md). A new full-stack project should use `erno new`.
 
 ## CLI
 
@@ -133,7 +137,7 @@ Contributor notes for each part live in [AGENTS.md](AGENTS.md).
 
 ## Releases
 
-Cut a version from GitHub: **Actions → Release → Run workflow**, pick `patch` / `minor` / `major`, run it on `main`. The workflow runs CI, bumps the version, tags, and attaches the `erno-angular` tarball to a GitHub Release. From `v0.2.0`, `patch` is `v0.2.1`.
+Cut a version from GitHub: **Actions → Release → Run workflow**, pick `patch` / `minor` / `major`, run it on `main`. The workflow runs CI, bumps the version, tags, and attaches the `erno-angular` tarball to a GitHub Release. Latest: https://github.com/tomekpiotrowski/erno/releases/latest
 
 ## License
 
