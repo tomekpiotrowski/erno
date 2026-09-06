@@ -20,8 +20,8 @@ Walk up from the current directory until `erno.toml` or `api/Cargo.toml` is foun
 |------|---------------|---------|
 | Node.js | `node --version` | none — **prerequisite**. Angular 22 needs `^22.22.3 \|\| ^24.15.0 \|\| ^26` |
 | `app` Angular | `app/package.json` `@angular/core` | `ng update` **one major at a time** |
-| `app` Ionic | `app/package.json` `@ionic/angular` | `npx --yes @ionic/migrate` |
-| `app` erno-angular | `app/package.json` | rewrite to this CLI's GitHub Release tarball URL, then `npm install` |
+| `app` Ionic | `app/package.json` `@ionic/angular` | `bun x @ionic/migrate` |
+| `app` erno-angular | `app/package.json` | rewrite to this CLI's GitHub Release tarball URL, then `bun install` |
 | `admin` Angular | `admin/package.json` | same `ng update` loop |
 | `api` erno crate | `api/Cargo.toml` | rewrite the git `tag` to this CLI's version, then `cargo update -p erno`. Path deps are reported, not rewritten |
 

@@ -145,7 +145,7 @@ fn scan_app(pkg_json: &str) -> Vec<UpgradeStep> {
                 label: "app Ionic".into(),
                 current,
                 target: format!("{TARGET_IONIC_MAJOR}.x"),
-                how: "npx --yes @ionic/migrate".into(),
+                how: "bun x @ionic/migrate".into(),
                 kind: StepKind::Ionic {
                     dir: "app".into(),
                     from_major: major,
@@ -163,7 +163,7 @@ fn scan_app(pkg_json: &str) -> Vec<UpgradeStep> {
                 label: "app erno-angular".into(),
                 current: from.clone(),
                 target: target.clone(),
-                how: format!("npm install {target}"),
+                how: format!("rewrite erno-angular to {target}, then bun install"),
                 kind: StepKind::ErnoAngular { from },
             });
         }

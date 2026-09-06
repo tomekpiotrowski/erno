@@ -1746,7 +1746,7 @@ dependencies = [
 
 [[package]]
 name = "erno"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "argon2",
  "async-stripe",
@@ -1804,7 +1804,7 @@ dependencies = [
 
 [[package]]
 name = "erno-cli"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "anstyle",
  "anstyle-query",
@@ -1814,6 +1814,7 @@ dependencies = [
  "config",
  "crossterm",
  "dirs",
+ "lets_expect",
  "libc",
  "notify",
  "rand 0.8.5",
@@ -1829,7 +1830,7 @@ dependencies = [
 
 [[package]]
 name = "erno-error-reporting-types"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "chrono",
  "serde",

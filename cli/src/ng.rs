@@ -12,7 +12,7 @@ pub fn find_ng_binary() -> Option<PathBuf> {
     }
 
     let extra_dirs: Vec<PathBuf> = [
-        dirs::home_dir().map(|h| h.join(".npm-global/bin")),
+        dirs::home_dir().map(|h| h.join(".bun/bin")),
         Some(PathBuf::from("/usr/local/bin")),
         Some(PathBuf::from("/usr/bin")),
     ]
@@ -52,7 +52,6 @@ pub fn find_ionic_binary() -> Option<PathBuf> {
     }
 
     let extra_dirs: Vec<PathBuf> = [
-        dirs::home_dir().map(|h| h.join(".npm-global/bin")),
         dirs::home_dir().map(|h| h.join(".bun/bin")),
         Some(PathBuf::from("/usr/local/bin")),
         Some(PathBuf::from("/usr/bin")),

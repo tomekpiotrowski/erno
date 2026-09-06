@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use crate::commands::dev::resolve_project_root;
 use crate::commands::packages::{
-    ensure_npm_modules, load_packages, prefix_pipe, run_phase, run_prefixed, select, Phase,
+    ensure_bun_modules, load_packages, prefix_pipe, run_phase, run_prefixed, select, Phase,
     SelectionArgs,
 };
 use crate::global_config::GlobalConfig;
@@ -84,7 +84,7 @@ fn run_e2e(root: &Path, rest: &[String]) -> bool {
     let cors = format!("http://127.0.0.1:{app_port},http://localhost:{app_port}");
 
     let app_dir = root.join("app");
-    if app_dir.join("package.json").is_file() && !ensure_npm_modules(&app_dir, "app") {
+    if app_dir.join("package.json").is_file() && !ensure_bun_modules(&app_dir, "app") {
         return false;
     }
 
@@ -150,7 +150,7 @@ fn run_e2e(root: &Path, rest: &[String]) -> bool {
     } else {
         root.to_path_buf()
     };
-    if e2e.join("package.json").is_file() && !ensure_npm_modules(&e2e, "e2e") {
+    if e2e.join("package.json").is_file() && !ensure_bun_modules(&e2e, "e2e") {
         let _ = api.kill();
         let _ = api.wait();
         return false;
@@ -164,7 +164,7 @@ fn run_e2e(root: &Path, rest: &[String]) -> bool {
         );
         ui::detail(
             "Add @playwright/test to e2e/package.json, then run:\n\
-             cd e2e && npm install && npx playwright install chromium",
+             cd e2e && bun install && bun x playwright install chromium",
         );
         let _ = api.kill();
         let _ = api.wait();

@@ -9,6 +9,7 @@ The fastest path to a working Erno app is the CLI: it scaffolds a Rust API, an I
 
 - Rust **1.88.0** or later
 - Node.js **22.22.3** or later (or 24.15+, or 26+)
+- Bun **1.4.0** for dependency installation and package scripts
 - Angular CLI (`ng`) and Ionic CLI (`ionic`)
 - PostgreSQL (server + `psql` client)
 - Optional: `sea-orm-cli` for generating migrations
@@ -25,7 +26,7 @@ cargo install --path cli
 
 ```sh
 erno setup    # writes ~/.erno/config.toml (PostgreSQL admin URL)
-erno doctor   # verifies Rust, Node, Postgres, and config
+erno doctor   # verifies Rust, Node, Bun, Postgres, and config
 ```
 
 The PostgreSQL admin user must be able to create databases:
@@ -116,10 +117,10 @@ Or start pieces separately:
 
 ```sh
 # Product app
-cd app && npm install && npm start
+cd app && bun install && bun run start
 
 # Marketing site
-cd www && npm install && npm run dev
+cd www && bun install && bun run dev
 ```
 
 The app scaffold wires `ErnoModule.forRoot()` with login, register, password reset, and email verification screens. See [App overview](/app/) for service setup.

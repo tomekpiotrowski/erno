@@ -5,7 +5,7 @@ use super::selection::ExtraService;
 use crate::ui;
 
 const FRIENDLY_COMMANDS: &[&str] = &[
-    "erno", "cargo", "node", "npm", "ng", "astro", "esbuild", "vite", "python", "python3",
+    "erno", "cargo", "node", "bun", "npm", "ng", "astro", "esbuild", "vite", "python", "python3",
 ];
 
 pub fn run_preflight(check_db: bool, extras: &[ExtraService], ports: &[u16]) -> Result<(), String> {
@@ -238,6 +238,7 @@ mod tests {
         let none: &[ExtraService] = &[];
         assert!(should_default_kill("cargo", none));
         assert!(should_default_kill("node", none));
+        assert!(should_default_kill("/usr/bin/bun", none));
         assert!(should_default_kill("/usr/bin/npm", none));
         assert!(should_default_kill("ng", none));
         assert!(should_default_kill("python3", none));

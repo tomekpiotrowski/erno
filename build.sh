@@ -8,10 +8,13 @@
 #   ./build.sh help           list every target
 #
 # api/, cli/ and error-reporting-types/ are members of one cargo workspace (see
-# the root Cargo.toml); app/, admin/ and docs/ are npm projects. This
+# the root Cargo.toml); app/, admin/ and docs/ are Bun projects. This
 # script is the one entry point across all of them.
 
 set -euo pipefail
+
+# Bun 1.4 streaming extraction can miss optional native dependencies.
+export BUN_FEATURE_FLAG_DISABLE_STREAMING_INSTALL=1
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
@@ -21,7 +24,7 @@ step() { printf '\n\033[1;34m==>\033[0m \033[1m%s\033[0m\n' "$1"; }
 ensure_node_modules() {
     if [ ! -d "$1/node_modules" ]; then
         step "Installing $1 dependencies"
-        (cd "$1" && npm install)
+        (cd "$1" && bun install --frozen-lockfile)
     fi
 }
 
@@ -40,19 +43,19 @@ build_app() {
     step "Building app (erno-angular library)"
     # Explicit project name: angular.json has no application project or
     # defaultProject, so a bare `ng build` has nothing to select.
-    (cd app && npm run build -- erno-angular)
+    (cd app && bun run build erno-angular)
 }
 
 build_admin() {
     ensure_node_modules admin
     step "Building admin (operator console)"
-    (cd admin && npm run build)
+    (cd admin && bun run build)
 }
 
 build_docs() {
     ensure_node_modules docs
     step "Building docs (Astro site)"
-    (cd docs && npm run build)
+    (cd docs && bun run build)
 }
 
 run_test() {
@@ -67,7 +70,7 @@ run_test() {
     cargo test -p erno-cli
     ensure_node_modules app
     step "Testing app (erno-angular)"
-    (cd app && npm test)
+    (cd app && bun run test)
 }
 
 run_check() {
@@ -95,9 +98,9 @@ Usage: ./build.sh [target...]
 Build targets (all run when no target is given):
   api         Build the erno crate            (cargo build -p erno --all-features)
   cli         Build the erno binary           (cargo build -p erno-cli)
-  app         Build the erno-angular library  (cd app  && npm run build -- erno-angular)
-  admin       Build the operator console      (cd admin && npm run build)
-  docs        Build the Astro docs site       (cd docs && npm run build)
+  app         Build the erno-angular library  (cd app  && bun run build erno-angular)
+  admin       Build the operator console      (cd admin && bun run build)
+  docs        Build the Astro docs site       (cd docs && bun run build)
 
 Other targets:
   test     Run the test suites (Rust suites require PostgreSQL)

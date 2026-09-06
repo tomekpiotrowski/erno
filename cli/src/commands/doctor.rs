@@ -82,7 +82,7 @@ async fn run_checks() -> Vec<CheckResult> {
     let mut results = vec![
         check_rust(),
         check_node(),
-        check_npm(),
+        check_bun(),
         check_angular_cli(),
         check_ionic_cli(),
         check_psql(),
@@ -141,14 +141,10 @@ fn check_node() -> CheckResult {
     }
 }
 
-fn check_npm() -> CheckResult {
-    match run_cmd("npm", &["--version"]) {
-        None => CheckResult::fail(
-            "npm",
-            "not found",
-            "Install Node.js (includes npm): https://nodejs.org",
-        ),
-        Some(v) => CheckResult::pass("npm", v.trim().to_string()),
+fn check_bun() -> CheckResult {
+    match run_cmd("bun", &["--version"]) {
+        None => CheckResult::fail("Bun", "not found", "Install Bun 1.4.0: https://bun.sh"),
+        Some(v) => CheckResult::pass("Bun", v.trim().to_string()),
     }
 }
 
@@ -162,7 +158,7 @@ fn check_angular_cli() -> CheckResult {
         None => CheckResult::fail(
             "Angular CLI",
             "not found",
-            "Install with: npm install -g @angular/cli",
+            "Install with: bun add --global @angular/cli",
         ),
         Some(out) => {
             let text = String::from_utf8_lossy(&out.stdout);
@@ -184,7 +180,7 @@ fn check_ionic_cli() -> CheckResult {
         None => CheckResult::fail(
             "Ionic CLI",
             "not found",
-            "Install with: npm install -g @ionic/cli",
+            "Install with: bun add --global @ionic/cli",
         ),
         Some(out) => {
             let ver = String::from_utf8_lossy(&out.stdout).trim().to_string();

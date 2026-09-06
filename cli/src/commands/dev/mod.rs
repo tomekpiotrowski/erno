@@ -136,11 +136,11 @@ pub async fn handle_dev(root: Option<PathBuf>, args: DevArgs) -> ui::Cmd {
         // which edits a file in app/ and only restores it on drop.
         device::ensure_platform_added(&app_dir, platform)?;
         let cli = device::resolve_ionic(&app_dir);
-        if cli.is_npx() {
+        if cli.uses_bun() {
             ui::warn("Ionic CLI not found in app/node_modules or on PATH");
             ui::detail(
-                "Fetching it with npx for this run.\n\
-                 Install it once with `npm install --save-dev @ionic/cli` in app/.",
+                "Fetching it with Bun for this run.\n\
+                 Install it once with `bun add --dev @ionic/cli` in app/.",
             );
         }
         let target = match args.target.clone() {
@@ -183,13 +183,13 @@ pub async fn handle_dev(root: Option<PathBuf>, args: DevArgs) -> ui::Cmd {
     preflight::run_preflight(sel.api, &extras, &ports::ports_to_check(&urls, &extras))?;
 
     if sel.app {
-        ensure_npm_deps(&app_dir, "app")?;
+        ensure_bun_deps(&app_dir, "app")?;
     }
     if sel.www {
-        ensure_npm_deps(&www_dir, "www")?;
+        ensure_bun_deps(&www_dir, "www")?;
     }
     if let Some(admin_dir) = &admin_dir {
-        ensure_npm_deps(admin_dir, "admin")?;
+        ensure_bun_deps(admin_dir, "admin")?;
     }
 
     let sink = Arc::new(LogSink::new(&root));
@@ -290,8 +290,8 @@ pub async fn handle_dev(root: Option<PathBuf>, args: DevArgs) -> ui::Cmd {
                     cmd
                 }
                 _ => {
-                    let mut cmd = Command::new("npm");
-                    cmd.arg("start");
+                    let mut cmd = Command::new("bun");
+                    cmd.args(["run", "start"]);
                     cmd
                 }
             };
@@ -303,8 +303,8 @@ pub async fn handle_dev(root: Option<PathBuf>, args: DevArgs) -> ui::Cmd {
         Some(admin_dir) => {
             let admin_sink = sink.clone();
             Some(Supervisor::start("admin", shutdown_rx.clone(), move || {
-                let mut cmd = Command::new("npm");
-                cmd.arg("start");
+                let mut cmd = Command::new("bun");
+                cmd.args(["run", "start"]);
                 spawn_labeled(cmd, &admin_dir, "admin", admin_sink.clone())
             }))
         }
@@ -318,7 +318,7 @@ pub async fn handle_dev(root: Option<PathBuf>, args: DevArgs) -> ui::Cmd {
         let www_dir_spawn = www_dir.clone();
         let www_sink = sink.clone();
         Supervisor::start("www", shutdown_rx.clone(), move || {
-            let mut cmd = Command::new("npm");
+            let mut cmd = Command::new("bun");
             cmd.args(["run", "dev"]);
             spawn_labeled(cmd, &www_dir_spawn, "www", www_sink.clone())
         })
@@ -403,21 +403,15 @@ fn find_admin_dir(root: &Path) -> Option<PathBuf> {
     None
 }
 
-fn ensure_npm_deps(dir: &Path, label: &str) -> Result<(), String> {
+fn ensure_bun_deps(dir: &Path, label: &str) -> Result<(), String> {
     if dir.join("node_modules").exists() {
         return Ok(());
     }
-    ui::info(format!("Installing {label} npm dependencies..."));
-    // bun 1.4's streaming extract fails on optional native packages such as
-    // lightningcss-linux-x64-gnu. Harmless when `npm` is actually npm.
-    let status = std::process::Command::new("npm")
-        .arg("install")
-        .env("BUN_FEATURE_FLAG_DISABLE_STREAMING_INSTALL", "1")
-        .current_dir(dir)
-        .status();
+    ui::info(format!("Installing {label} dependencies..."));
+    let status = crate::bun::install(dir).status();
     match status {
-        Err(e) => Err(format!("could not run npm install in {label}/: {e}")),
-        Ok(s) if !s.success() => Err(format!("npm install failed in {label}/")),
+        Err(e) => Err(format!("could not run bun install in {label}/: {e}")),
+        Ok(s) if !s.success() => Err(format!("bun install failed in {label}/")),
         _ => Ok(()),
     }
 }

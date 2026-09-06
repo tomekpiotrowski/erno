@@ -50,7 +50,7 @@ erno new my_app --erno-path /path/to/erno
 
 `erno dev` then also serves the operator console at http://localhost:4300 (password `admin`). Telemetry backends are the collector's, and live in the erno-monitoring repository.
 
-Docs: [getting started](docs/src/content/docs/getting-started.md) and the [CLI overview](docs/src/content/docs/cli/index.md). To read them locally, `cd docs && npm install && npm run dev`.
+Docs: [getting started](docs/src/content/docs/getting-started.md) and the [CLI overview](docs/src/content/docs/cli/index.md). To read them locally, `cd docs && bun install && bun run dev`.
 
 ## What you get
 
@@ -117,7 +117,7 @@ Product routes go on that `router`. Syncable entities are `.with_sync::<E>()` on
 | `error-reporting-types/` | The error-reporting contract this repo shares with the collector |
 | `docs/` | Astro documentation site |
 
-`api/`, `cli/`, and `error-reporting-types/` are one Cargo workspace. `app/`, `admin/`, and `docs/` are npm projects. From the repo root:
+`api/`, `cli/`, and `error-reporting-types/` are one Cargo workspace. `app/`, `admin/`, and `docs/` are Bun projects. From the repo root:
 
 ```sh
 ./build.sh              # api, cli, app, admin, docs

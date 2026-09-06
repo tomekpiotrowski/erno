@@ -1,3 +1,4 @@
+mod bun;
 mod commands;
 mod deploy;
 mod global_config;

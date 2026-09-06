@@ -14,7 +14,7 @@ Erno is a **full-stack SaaS framework**: a Rust library for Axum APIs, an Angula
 | **CLI** | `cli/` | `erno` binary — setup, doctor, new, upgrade, deploy |
 | **Docs** | `docs/` | This Starlight site |
 
-Consuming apps are **not** this monorepo: `erno new` generates a separate project that depends on `erno` (git/path) and `erno-angular` (npm/tarball).
+Consuming apps are **not** this monorepo: `erno new` generates a separate project that depends on `erno` (git/path) and `erno-angular` (package tarball).
 
 ```
   erno CLI  ──scaffolds / deploys──►  your project

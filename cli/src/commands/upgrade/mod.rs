@@ -174,8 +174,7 @@ fn execute_step(root: &Path, step: &plan::UpgradeStep) -> bool {
                 return false;
             }
             let dir = root.join("app");
-            let mut cmd = Command::new("npm");
-            cmd.arg("install").current_dir(&dir);
+            let mut cmd = crate::bun::install(&dir);
             apply_ci(&mut cmd);
             run_prefixed(&mut cmd, "app")
         }
@@ -204,10 +203,14 @@ fn execute_step(root: &Path, step: &plan::UpgradeStep) -> bool {
 }
 
 fn ng_update(dir: &Path, major: u32) -> bool {
-    let ng = local_ng(dir).unwrap_or_else(|| PathBuf::from("npx"));
+    if let Err(error) = crate::bun::configure_angular(dir) {
+        ui::warn(format!("could not configure Angular for Bun: {error}"));
+        return false;
+    }
+    let ng = local_ng(dir).unwrap_or_else(|| PathBuf::from("bun"));
     let mut cmd = Command::new(&ng);
-    if ng.file_name().and_then(|s| s.to_str()) == Some("npx") {
-        cmd.args(["--yes", "ng"]);
+    if ng.file_name().and_then(|s| s.to_str()) == Some("bun") {
+        cmd.args(["x", "--package", "@angular/cli", "ng"]);
     }
     // The CLI already refused a dirty tree (or the user passed --force). Later
     // majors in this same run dirtied the tree; --allow-dirty is how we continue.
@@ -217,15 +220,17 @@ fn ng_update(dir: &Path, major: u32) -> bool {
         &format!("@angular/cli@{major}"),
         "--allow-dirty",
     ]);
-    cmd.current_dir(dir);
+    cmd.current_dir(dir)
+        .env("BUN_FEATURE_FLAG_DISABLE_STREAMING_INSTALL", "1");
     apply_ci(&mut cmd);
     run_prefixed(&mut cmd, "ng")
 }
 
 fn ionic_migrate(dir: &Path) -> bool {
-    let mut cmd = Command::new("npx");
+    let mut cmd = Command::new("bun");
     // Same reason as ng update --allow-dirty: prior steps in this run write files.
-    cmd.args(["--yes", "@ionic/migrate", "--force"]);
+    cmd.args(["x", "@ionic/migrate", "--force"])
+        .env("BUN_FEATURE_FLAG_DISABLE_STREAMING_INSTALL", "1");
     cmd.current_dir(dir);
     apply_ci(&mut cmd);
     run_prefixed(&mut cmd, "ionic")

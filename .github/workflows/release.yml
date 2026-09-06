@@ -18,6 +18,9 @@ concurrency:
   group: release
   cancel-in-progress: false
 
+env:
+  BUN_FEATURE_FLAG_DISABLE_STREAMING_INSTALL: "1"
+
 jobs:
   ci:
     uses: ./.github/workflows/ci.yml
@@ -42,15 +45,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: npm
-          cache-dependency-path: app/package-lock.json
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.0'
 
       - name: Build and pack erno-angular
         working-directory: app
         run: |
-          npm ci
-          npm run build -- erno-angular
-          (cd dist/erno-angular && npm pack)
+          bun install --frozen-lockfile
+          bun run build erno-angular
+          (cd dist/erno-angular && bun pm pack)
 
       - name: Commit, tag, and push
         env:

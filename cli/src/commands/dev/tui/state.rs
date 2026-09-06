@@ -236,9 +236,9 @@ impl TuiState {
 pub fn service_meta(name: &str) -> (&'static str, &'static str) {
     match name {
         "api" => ("cargo run", "api/"),
-        "app" => ("npm start", "app/"),
-        "www" => ("npm run dev", "www/"),
-        "admin" => ("npm start", "admin/"),
+        "app" => ("bun run start", "app/"),
+        "www" => ("bun run dev", "www/"),
+        "admin" => ("bun run start", "admin/"),
         _ => ("", ""),
     }
 }

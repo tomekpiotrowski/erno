@@ -22,15 +22,14 @@ impl DevicePlatform {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IonicCli {
     pub program: PathBuf,
-    /// Arguments that precede `cap run …` — empty unless we fall back to npx.
+    /// Arguments that precede `cap run …` — empty unless Bun fetches the CLI.
     pub prefix: Vec<String>,
 }
 
-/// The app's own `node_modules/.bin/ionic` first, then a CLI on PATH, then npx.
+/// The app's own `node_modules/.bin/ionic` first, then a CLI on PATH, then Bun.
 ///
-/// The npx form must name `@ionic/cli` and pass `--yes`: bare `ionic` resolves
-/// to the deprecated 2019 package, and without `--yes` npx blocks forever on
-/// "Ok to proceed?" with the prompt buried in the child's piped stdout.
+/// Name `@ionic/cli` explicitly: bare `ionic` resolves to the deprecated package.
+/// Bun fetches it without an installation prompt in the child's piped output.
 pub fn resolve_ionic(app_dir: &Path) -> IonicCli {
     let local = app_dir.join("node_modules/.bin/ionic");
     if local.is_file() {
@@ -46,14 +45,14 @@ pub fn resolve_ionic(app_dir: &Path) -> IonicCli {
         };
     }
     IonicCli {
-        program: PathBuf::from("npx"),
-        prefix: vec!["--yes".to_string(), "@ionic/cli".to_string()],
+        program: PathBuf::from("bun"),
+        prefix: vec!["x".to_string(), "@ionic/cli".to_string()],
     }
 }
 
 impl IonicCli {
-    pub fn is_npx(&self) -> bool {
-        self.program == Path::new("npx")
+    pub fn uses_bun(&self) -> bool {
+        self.program == Path::new("bun")
     }
 
     /// The full argument vector for a live-reload run on `platform`.
@@ -114,8 +113,8 @@ pub fn list_targets(app_dir: &Path, platform: DevicePlatform) -> Result<Vec<Targ
     let mut cmd = if local.is_file() {
         std::process::Command::new(local)
     } else {
-        let mut cmd = std::process::Command::new("npx");
-        cmd.args(["--yes", "@capacitor/cli"]);
+        let mut cmd = std::process::Command::new("bun");
+        cmd.args(["x", "@capacitor/cli"]);
         cmd
     };
     let output = cmd
@@ -168,7 +167,7 @@ pub fn ensure_platform_added(app_dir: &Path, platform: DevicePlatform) -> Result
     }
     Err(format!(
         "app/{platform} does not exist\n\
-         Add the native project first: cd app && npx cap add {platform}",
+         Add the native project first: cd app && bun x cap add {platform}",
         platform = platform.as_str()
     ))
 }
@@ -274,17 +273,17 @@ mod tests {
     }
 
     #[test]
-    fn npx_fallback_names_the_current_package_and_skips_the_prompt() {
+    fn bun_fallback_names_the_current_package_and_skips_the_prompt() {
         let cli = IonicCli {
-            program: PathBuf::from("npx"),
-            prefix: vec!["--yes".to_string(), "@ionic/cli".to_string()],
+            program: PathBuf::from("bun"),
+            prefix: vec!["x".to_string(), "@ionic/cli".to_string()],
         };
-        assert!(cli.is_npx());
+        assert!(cli.uses_bun());
         let args = cli.cap_run_args(DevicePlatform::Android, 4200, "emulator-5554");
         assert_eq!(
             args,
             [
-                "--yes",
+                "x",
                 "@ionic/cli",
                 "cap",
                 "run",
@@ -306,7 +305,7 @@ mod tests {
             program: PathBuf::from("/usr/local/bin/ionic"),
             prefix: Vec::new(),
         };
-        assert!(!cli.is_npx());
+        assert!(!cli.uses_bun());
         assert_eq!(
             cli.cap_run_args(DevicePlatform::Ios, 4300, "ABC-123"),
             [

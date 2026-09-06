@@ -1,9 +1,12 @@
-FROM node:22-alpine AS build
+FROM oven/bun:1.4.0 AS bun
+FROM node:22 AS build
+COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
+ENV BUN_FEATURE_FLAG_DISABLE_STREAMING_INSTALL=1
 WORKDIR /src
-COPY package.json package-lock.json* ./
-RUN npm install
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
 COPY . .
-RUN npm run build
+RUN bun run build
 
 FROM nginx:1.27-alpine
 COPY docker/nginx.conf /etc/nginx/templates/default.conf.template

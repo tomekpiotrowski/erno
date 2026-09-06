@@ -17,6 +17,21 @@ cargo install --path cli
 
 ## Commands
 
+Erno uses Bun 1.4.0 for JavaScript dependencies and scripts. Node.js is still
+required by Angular and Ionic. Package tests run through `bun run test`, which
+keeps the project's existing test runner.
+
+For an existing app, run `BUN_FEATURE_FLAG_DISABLE_STREAMING_INSTALL=1 bun install`
+in each JavaScript package directory (`app`, `www`, `admin`, and `e2e` when present).
+This imports an existing npm lockfile. Verify builds, commit the resulting
+`bun.lock`, and remove `package-lock.json`. Set `packageManager` in each
+`package.json` to `bun@1.4.0` and `cli.packageManager` in Angular configuration
+to `bun`. Update existing automation and deployment files to install Bun 1.4.0
+and run `bun install --frozen-lockfile`; updating Erno does not rewrite them.
+Erno-managed installs set the environment flag above to work around Bun 1.4's
+optional native dependency extraction issue. Explicit commands in `erno.toml`
+remain under the project's control.
+
 | Command | Description |
 |---------|-------------|
 | [`erno setup`](#setup) | Configure `~/.erno/config.toml` (PostgreSQL admin credentials) |
@@ -64,7 +79,7 @@ Both put row text in the same column, because an icon is padded to the width of 
 
 Emoji follow the colour decision: they are on in an interactive colour terminal and off everywhere else — pipes, redirects, CI, `NO_COLOR`, `--no-color`. `--no-emoji` (or `ERNO_EMOJI=0`) turns them off on their own, for a colour terminal whose font cannot draw them.
 
-**stdout carries the output of the tools the CLI runs; stderr carries everything the CLI says about itself.** Headers, rows, banners, prompts, warnings, and errors all go to stderr. So `erno doctor > report.txt` writes an empty file (the report is on stderr), while `erno build 2>/dev/null` shows only what cargo and npm printed to stdout. The pinned `erno dev` banner is a stderr-only affair too, so redirecting either stream behaves exactly as it always has.
+**stdout carries the output of the tools the CLI runs; stderr carries everything the CLI says about itself.** Headers, rows, banners, prompts, warnings, and errors all go to stderr. So `erno doctor > report.txt` writes an empty file (the report is on stderr), while `erno build 2>/dev/null` shows only what cargo and Bun printed to stdout. The pinned `erno dev` banner is a stderr-only affair too, so redirecting either stream behaves exactly as it always has.
 
 ### Global flags
 
@@ -134,7 +149,7 @@ password = "password"
 
 `--ios` / `--android` start the API plus `ionic cap run` with live reload on the machine’s LAN IP. The app is rewritten for the session to call `http://<lan>:api-port`, extra CORS origins are passed to the API as `ERNO_DEV_CORS_ORIGINS`, and the original environment file is restored on exit.
 
-The native project must already exist (`cd app && npx cap add android`), and the Ionic CLI is taken from `app/node_modules/.bin/ionic`, then `PATH`, and only then fetched with `npx --yes @ionic/cli`. Projects scaffolded by `erno new` carry `@ionic/cli` as a devDependency.
+The native project must already exist (`cd app && bun x cap add android`), and the Ionic CLI is taken from `app/node_modules/.bin/ionic`, then `PATH`, and only then fetched with `bun x @ionic/cli`. Projects scaffolded by `erno new` carry `@ionic/cli` as a devDependency.
 
 The device is resolved before anything starts — `ionic` itself runs non-interactively, because a child of `erno dev` cannot answer a prompt. A single attached device or emulator is used automatically; when several are attached, `erno dev` lists them and asks for `--target <id>`:
 
@@ -209,7 +224,7 @@ name = "app"
 dir  = "app"
 
   [[package.build]]
-  command = "npm"
+  command = "bun"
   args    = ["run", "build"]
 ```
 
@@ -331,7 +346,7 @@ Each command prints a per-package `ok` / `fail` summary and exits non-zero if an
 
 🔨 app
 [app] > app@0.0.1 build
-  ✅    npm run build          12.4s
+  ✅    bun run build          12.4s
 
   ✅    api  48.3s
   ✅    app  12.4s
@@ -371,7 +386,7 @@ Checks everything needed to build and run Erno projects:
 |-------|---------|
 | Rust ≥ 1.88 | Yes |
 | Node.js | Yes |
-| npm | Yes |
+| Bun 1.4.0 | Yes |
 | Angular CLI (`ng`) | Yes |
 | Ionic CLI (`ionic`) | Yes |
 | PostgreSQL client (`psql`) | Yes |

@@ -63,7 +63,7 @@ aws-config = "1"
 bytes = "1"
 reqwest = { workspace = true }
 axum-test = { workspace = true, optional = true }
-lets_expect = { version = "0.5.1", optional = true }
+lets_expect = { workspace = true, optional = true }
 metrics = "0.24"
 metrics-exporter-prometheus = "0.16"
 opentelemetry-proto = { version = "0.31", default-features = false, features = ["gen-tonic-messages", "metrics", "with-serde"] }

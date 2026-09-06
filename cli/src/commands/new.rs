@@ -113,8 +113,7 @@ pub async fn handle_new(
         &erno_angular_dep,
         angular_version.as_deref(),
     );
-    // ionic start installs base deps before we patch package.json, so
-    // erno-angular and other additions are not yet in node_modules.
+    // Install once, after adding Erno and Capacitor to the Ionic scaffold.
     install_app_deps(&dest);
     create_www(&dest, name);
     install_www_deps(&dest);
@@ -195,7 +194,7 @@ fn pack_local_erno_angular(repo_root: &Path) -> PathBuf {
     if !pkg_path.is_file() {
         ui::abort(&format!(
             "could not find a built erno-angular package at {}\n\
-             Run `cd {}/app && npm install && npm run build -- erno-angular` first.",
+             Run `cd {}/app && bun install && bun run build erno-angular` first.",
             dist.display(),
             repo_root.display()
         ));
@@ -210,17 +209,17 @@ fn pack_local_erno_angular(repo_root: &Path) -> PathBuf {
                 pkg_path.display()
             ))
         });
-    let status = Command::new("npm")
-        .arg("pack")
+    let status = Command::new("bun")
+        .args(["pm", "pack"])
         .current_dir(&dist)
         .status()
-        .unwrap_or_else(|e| ui::abort(&format!("failed to run npm pack: {e}")));
+        .unwrap_or_else(|e| ui::abort(&format!("failed to run bun pm pack: {e}")));
     if !status.success() {
-        ui::abort("npm pack of erno-angular failed");
+        ui::abort("bun pm pack of erno-angular failed");
     }
     let tarball = dist.join(format!("erno-angular-{version}.tgz"));
     if !tarball.is_file() {
-        ui::abort(&format!("npm pack did not write {}", tarball.display()));
+        ui::abort(&format!("bun pm pack did not write {}", tarball.display()));
     }
     ui::ok(format!(
         "packed {}",
@@ -232,7 +231,7 @@ fn pack_local_erno_angular(repo_root: &Path) -> PathBuf {
 fn resolve_local_erno_paths(path: &str) -> (PathBuf, PathBuf) {
     // Both dependency strings are written into files under the generated
     // project, so a relative --erno-path would be resolved against the wrong
-    // directory by cargo and npm. Make it absolute before anything else.
+    // directory by cargo and Bun. Make it absolute before anything else.
     let input = fs::canonicalize(path).unwrap_or_else(|e| {
         ui::abort(&format!("invalid --erno-path '{path}': {e}"));
     });
@@ -386,6 +385,10 @@ fn create_api(
         ),
     );
     write(&dest.join(".gitignore"), GITIGNORE);
+    write(
+        &dest.join("AGENTS.md"),
+        "# Package tooling\n\nUse Bun 1.4.0 for JavaScript dependencies and scripts.\nUse `bun run test` for package test scripts and `bun x` for tools.\nCommit bun.lock and use `bun install --frozen-lockfile` in automated builds.\nNode.js remains required by Angular and Ionic.\n",
+    );
     rustfmt_api(&api);
 }
 
@@ -406,17 +409,16 @@ fn rustfmt_api(api: &Path) {
     }
 }
 
-// ── Install app npm dependencies ─────────────────────────────────────────────
+// ── Install app dependencies ─────────────────────────────────────────────
 
 fn install_app_deps(dest: &Path) {
     let app = dest.join("app");
-    let mut cmd = std::process::Command::new("npm");
-    cmd.arg("install");
+    let mut cmd = crate::bun::install(&app);
     let status = cmd.current_dir(&app).status().unwrap_or_else(|e| {
-        ui::abort(&format!("failed to run npm install: {e}"));
+        ui::abort(&format!("failed to run bun install: {e}"));
     });
     if !status.success() {
-        ui::abort("npm install failed");
+        ui::abort("bun install failed");
     }
     ui::ok("app dependencies");
 }
@@ -433,15 +435,11 @@ fn create_e2e(dest: &Path) {
 
 fn install_e2e_deps(dest: &Path) {
     let e2e = dest.join("e2e");
-    let status = Command::new("npm")
-        .arg("install")
-        .current_dir(&e2e)
-        .status()
-        .unwrap_or_else(|e| {
-            ui::abort(&format!("failed to run npm install in e2e/: {e}"));
-        });
+    let status = crate::bun::install(&e2e).status().unwrap_or_else(|e| {
+        ui::abort(&format!("failed to run bun install in e2e/: {e}"));
+    });
     if !status.success() {
-        ui::abort("npm install failed in e2e/");
+        ui::abort("bun install failed in e2e/");
     }
     ui::ok("e2e dependencies");
 }
@@ -522,15 +520,11 @@ fn copy_dir_filtered(src: &Path, dst: &Path) {
 
 fn install_www_deps(dest: &Path) {
     let www = dest.join("www");
-    let status = std::process::Command::new("npm")
-        .arg("install")
-        .current_dir(&www)
-        .status()
-        .unwrap_or_else(|e| {
-            ui::abort(&format!("failed to run npm install in www/: {e}"));
-        });
+    let status = crate::bun::install(&www).status().unwrap_or_else(|e| {
+        ui::abort(&format!("failed to run bun install in www/: {e}"));
+    });
     if !status.success() {
-        ui::abort("npm install failed in www/");
+        ui::abort("bun install failed in www/");
     }
     ui::ok("www dependencies");
 }
@@ -541,19 +535,12 @@ fn ionic_new_app(_name: &str, _bundle_id: &str, dest: &Path) {
     let ionic = match crate::ng::find_ionic_binary() {
         Some(p) => p,
         None => {
-            ui::abort("Ionic CLI not found\nInstall it with: npm install -g @ionic/cli");
+            ui::abort("Ionic CLI not found\nInstall it with: bun add --global @ionic/cli");
         }
     };
 
     let status = Command::new(ionic)
-        .args([
-            "start",
-            "app",
-            "blank",
-            "--type=angular-standalone",
-            "--no-deps",
-            "--no-git",
-        ])
+        .args(ionic_start_args())
         .env("CI", "true")
         .env("NG_CLI_ANALYTICS", "false")
         .current_dir(dest)
@@ -566,6 +553,23 @@ fn ionic_new_app(_name: &str, _bundle_id: &str, dest: &Path) {
         ui::abort("ionic start failed");
     }
     ui::ok("Ionic app");
+}
+
+fn ionic_start_args() -> [&'static str; 10] {
+    [
+        "start",
+        "app",
+        "blank",
+        "--type=angular-standalone",
+        "--no-deps",
+        "--no-git",
+        // Ionic defaults Angular starters to Capacitor and installs its packages
+        // with its configured npm client. Erno adds Capacitor before its Bun install.
+        "--no-capacitor",
+        "--no-cordova",
+        "--no-interactive",
+        "--confirm=false",
+    ]
 }
 
 // ── Read Angular version required by local erno-angular dist ─────────────────
@@ -610,8 +614,7 @@ fn patch_app(
         scripts.remove("test:ci");
     }
 
-    // Capacitor — added here rather than via `ionic start --capacitor` to avoid
-    // that step running bun install, which conflicts with our npm-only workflow.
+    // Add Capacitor before our single dependency install.
     pkg["dependencies"]["@capacitor/core"] = serde_json::Value::String("^7.0.0".to_string());
     pkg["dependencies"]["@capacitor/app"] = serde_json::Value::String("^7.0.0".to_string());
     pkg["dependencies"]["@capacitor/haptics"] = serde_json::Value::String("^7.0.0".to_string());
@@ -619,7 +622,7 @@ fn patch_app(
     pkg["dependencies"]["@capacitor/status-bar"] = serde_json::Value::String("^7.0.0".to_string());
     pkg["devDependencies"]["@capacitor/cli"] = serde_json::Value::String("^7.0.0".to_string());
     // `erno dev --ios/--android` shells out to `ionic cap run`; vendoring the CLI
-    // keeps that working without a global install or an npx fetch.
+    // keeps that working without a global install or a package download.
     pkg["devDependencies"]["@ionic/cli"] = serde_json::Value::String("^7.2.0".to_string());
 
     // Pin @angular/* versions to match what erno-angular was compiled against,
@@ -636,6 +639,9 @@ fn patch_app(
         }
     }
 
+    pkg["packageManager"] = serde_json::Value::String(crate::bun::PACKAGE_MANAGER.into());
+    crate::bun::configure_angular(&app)
+        .unwrap_or_else(|e| ui::abort(&format!("failed to configure Angular for Bun: {e}")));
     write(
         &pkg_path,
         &(serde_json::to_string_pretty(&pkg).unwrap() + "\n"),
@@ -842,8 +848,24 @@ fn print_next_steps(name: &str, starting_dev: bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::{decide_start_dev, resolve_erno_deps};
+    use super::{decide_start_dev, ionic_start_args, resolve_erno_deps};
+    use lets_expect::lets_expect;
     use std::process::Command;
+
+    lets_expect! {
+        expect(ionic_start_args()) to equal([
+            "start",
+            "app",
+            "blank",
+            "--type=angular-standalone",
+            "--no-deps",
+            "--no-git",
+            "--no-capacitor",
+            "--no-cordova",
+            "--no-interactive",
+            "--confirm=false",
+        ])
+    }
 
     fn scratch_dir(prefix: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -889,7 +911,7 @@ mod tests {
         let yaml = super::render_ci_workflow("acme");
         assert!(yaml.contains("POSTGRES_USER: acme"), "{yaml}");
         assert!(yaml.contains("acme_test"), "{yaml}");
-        assert!(yaml.contains("npm ci"), "{yaml}");
+        assert!(yaml.contains("bun install --frozen-lockfile"), "{yaml}");
         assert!(yaml.contains("cargo fmt --all --check"), "{yaml}");
         assert!(yaml.contains("cargo clippy"), "{yaml}");
         assert!(yaml.contains("needs: api"), "{yaml}");
@@ -903,10 +925,11 @@ mod tests {
             "e2e must start the compiled binary: {yaml}"
         );
         assert!(
-            !yaml.contains("bun ci")
-                && !yaml.contains("bun install")
-                && !yaml.contains("setup-bun"),
-            "generated CI must use npm, not bun:\n{yaml}"
+            !yaml.contains("npm ")
+                && !yaml.contains("npx ")
+                && yaml.contains("setup-bun")
+                && yaml.contains("bun-version: '1.4.0'"),
+            "generated CI must use pinned Bun:\n{yaml}"
         );
         assert!(
             !yaml

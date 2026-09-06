@@ -268,7 +268,7 @@ fn conventional(root: &Path) -> Vec<Package> {
     }
 
     for (name, dir) in [("app", "app"), ("www", "www"), ("admin", "admin")] {
-        if let Some(package) = npm_package(root, name, dir) {
+        if let Some(package) = javascript_package(root, name, dir) {
             packages.push(package);
         }
     }
@@ -312,29 +312,29 @@ fn rust_package(name: &str, dir: &str) -> Package {
     }
 }
 
-/// An npm project, with each phase gated on the script actually existing — a
+/// A JavaScript project, with each phase gated on the script actually existing — a
 /// project without a `lint` script must not grow a step that always fails.
 ///
 /// `None` when there is no package.json, so a layout missing `www/` or
 /// `admin/` simply has no such package.
-fn npm_package(root: &Path, name: &str, dir: &str) -> Option<Package> {
+fn javascript_package(root: &Path, name: &str, dir: &str) -> Option<Package> {
     let path = root.join(dir);
     if !path.join("package.json").is_file() {
         return None;
     }
     let mut build = Vec::new();
-    if has_npm_script(&path, "build") {
-        build.push(step("npm", &["run", "build"]));
+    if has_script(&path, "build") {
+        build.push(step("bun", &["run", "build"]));
     }
     let mut lint = Vec::new();
-    if has_npm_script(&path, "lint") {
-        lint.push(step("npm", &["run", "lint"]));
+    if has_script(&path, "lint") {
+        lint.push(step("bun", &["run", "lint"]));
     }
     let mut test = Vec::new();
-    if has_npm_script(&path, "test:ci") {
-        test.push(step("npm", &["run", "test:ci"]));
-    } else if has_npm_script(&path, "test") {
-        test.push(step("npm", &["test", "--", "--watch=false"]));
+    if has_script(&path, "test:ci") {
+        test.push(step("bun", &["run", "test:ci"]));
+    } else if has_script(&path, "test") {
+        test.push(step("bun", &["run", "test", "--watch=false"]));
     }
     Some(Package {
         name: name.into(),
@@ -365,7 +365,7 @@ fn lint_step(command: &str, args: &[&str], fix: &[&str]) -> Step {
     }
 }
 
-fn has_npm_script(dir: &Path, name: &str) -> bool {
+fn has_script(dir: &Path, name: &str) -> bool {
     std::fs::read_to_string(dir.join("package.json"))
         .map(|raw| raw.contains(&format!("\"{name}\"")))
         .unwrap_or(false)
@@ -511,7 +511,7 @@ pub fn run_phase(
 
 fn run_steps(root: &Path, package: &Package, steps: &[&Step], fix: bool, rest: &[String]) -> bool {
     let dir = root.join(&package.dir);
-    if dir.join("package.json").is_file() && !ensure_npm_modules(&dir, &package.name) {
+    if dir.join("package.json").is_file() && !ensure_bun_modules(&dir, &package.name) {
         return false;
     }
     // Sized up front so every step's time sits in the same column, however
@@ -558,7 +558,7 @@ fn step_label(step: &Step, fix: bool, rest: &[String]) -> String {
 }
 
 /// `node_modules` is gitignored, so install on first use rather than failing.
-pub fn ensure_npm_modules(dir: &Path, label: &str) -> bool {
+pub fn ensure_bun_modules(dir: &Path, label: &str) -> bool {
     if dir.join("node_modules").is_dir() {
         return true;
     }
@@ -573,16 +573,15 @@ pub fn ensure_npm_modules(dir: &Path, label: &str) -> bool {
     ui::prefixed(
         ui::Stream::Err,
         label,
-        &format!("npm install in {}", dir.display()),
+        &format!("bun install in {}", dir.display()),
     );
-    let mut cmd = Command::new("npm");
-    cmd.arg("install").current_dir(dir);
+    let mut cmd = crate::bun::install(dir);
     let ok = run_prefixed(&mut cmd, label);
     if !ok {
         ui::prefixed(
             ui::Stream::Err,
             label,
-            &format!("npm install failed in {}", dir.display()),
+            &format!("bun install failed in {}", dir.display()),
         );
     }
     ok
@@ -629,8 +628,39 @@ pub fn prefix_pipe<R: std::io::Read + Send + 'static>(pipe: R, label: &str, stre
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lets_expect::lets_expect;
     use std::fs;
     use std::path::PathBuf;
+
+    lets_expect! {
+        expect({
+            // Every combination of optional scripts, including test:ci precedence.
+            for mask in 0..16 {
+                let root = temp("bun-scripts");
+                let app = root.join("app");
+                fs::create_dir_all(&app).unwrap();
+                let mut scripts = serde_json::Map::new();
+                for (index, name) in ["build", "lint", "test", "test:ci"].iter().enumerate() {
+                    if mask & (1 << index) != 0 {
+                        scripts.insert((*name).into(), serde_json::Value::String("tool".into()));
+                    }
+                }
+                fs::write(app.join("package.json"), serde_json::json!({"scripts": scripts}).to_string()).unwrap();
+                let package = javascript_package(&root, "app", "app").unwrap();
+                assert_eq!(package.build.len(), usize::from(mask & 1 != 0));
+                assert_eq!(package.lint.len(), usize::from(mask & 2 != 0));
+                let expected_test = if mask & 8 != 0 { vec!["run", "test:ci"] }
+                    else if mask & 4 != 0 { vec!["run", "test", "--watch=false"] }
+                    else { vec![] };
+                assert_eq!(package.test.first().map(|s| s.args.iter().map(String::as_str).collect::<Vec<_>>()).unwrap_or_default(), expected_test);
+                for step in package.build.iter().chain(&package.lint).chain(&package.test) {
+                    assert_eq!(step.command, "bun");
+                }
+                fs::remove_dir_all(root).unwrap();
+            }
+            true
+        }) to be_true
+    }
 
     fn temp(suffix: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -829,7 +859,7 @@ default = false
         assert_eq!(with_fix.resolved_args(false), ["fmt", "--check"]);
         assert_eq!(with_fix.resolved_args(true), ["fmt"]);
 
-        let without_fix = step("npm", &["run", "lint"]);
+        let without_fix = step("bun", &["run", "lint"]);
         assert_eq!(without_fix.resolved_args(true), ["run", "lint"]);
     }
 

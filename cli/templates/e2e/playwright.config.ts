@@ -14,7 +14,7 @@ export default defineConfig({
   webServer: process.env.SKIP_APP_SERVER
     ? undefined
     : {
-        command: `npm start --prefix ../app -- --port ${appPort} --host 127.0.0.1`,
+        command: `bun run --cwd ../app start --port ${appPort} --host 127.0.0.1`,
         url: appUrl,
         reuseExistingServer: !process.env.ERNO_E2E && !process.env.CI,
         timeout: 180_000,

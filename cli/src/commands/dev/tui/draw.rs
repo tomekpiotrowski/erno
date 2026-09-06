@@ -490,7 +490,7 @@ mod tests {
         assert!(text.contains("LENS"), "{text}");
         assert!(text.contains("SERVICES"), "{text}");
         assert!(
-            text.contains("npm run dev") || text.contains("cargo run"),
+            text.contains("bun run dev") || text.contains("cargo run"),
             "{text}"
         );
         assert!(text.contains("WIRE"), "{text}");
